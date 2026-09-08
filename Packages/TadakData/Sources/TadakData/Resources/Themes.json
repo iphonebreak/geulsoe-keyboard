@@ -1,0 +1,78 @@
+[
+  {
+    "id": "system",
+    "displayName": "시스템",
+    "light": {
+      "keyboardBackground": "#D1D3D9",
+      "characterKey": "#FFFFFF",
+      "functionKey": "#ADB2BC",
+      "keyText": "#000000",
+      "accent": "#007AFF"
+    },
+    "dark": {
+      "keyboardBackground": "#2A2A2C",
+      "characterKey": "#6B6B6D",
+      "functionKey": "#454547",
+      "keyText": "#FFFFFF",
+      "accent": "#0A84FF"
+    },
+    "keyCornerRadius": 8
+  },
+  {
+    "id": "pure-light",
+    "displayName": "퓨어 라이트",
+    "light": {
+      "keyboardBackground": "#E8EAF0",
+      "characterKey": "#FFFFFF",
+      "functionKey": "#C6CAD4",
+      "keyText": "#1C1C1E",
+      "accent": "#007AFF"
+    },
+    "dark": {
+      "keyboardBackground": "#DDDFE6",
+      "characterKey": "#F7F8FA",
+      "functionKey": "#BFC3CE",
+      "keyText": "#1C1C1E",
+      "accent": "#007AFF"
+    },
+    "keyCornerRadius": 8
+  },
+  {
+    "id": "pure-dark",
+    "displayName": "퓨어 다크",
+    "light": {
+      "keyboardBackground": "#101012",
+      "characterKey": "#4C4C50",
+      "functionKey": "#2A2A2E",
+      "keyText": "#F2F2F7",
+      "accent": "#0A84FF"
+    },
+    "dark": {
+      "keyboardBackground": "#000000",
+      "characterKey": "#444448",
+      "functionKey": "#222226",
+      "keyText": "#F2F2F7",
+      "accent": "#0A84FF"
+    },
+    "keyCornerRadius": 8
+  },
+  {
+    "id": "midnight",
+    "displayName": "미드나이트",
+    "light": {
+      "keyboardBackground": "#1E2040",
+      "characterKey": "#3D4180",
+      "functionKey": "#2B2E5A",
+      "keyText": "#E8E9F5",
+      "accent": "#7B8CFF"
+    },
+    "dark": {
+      "keyboardBackground": "#0F1020",
+      "characterKey": "#303462",
+      "functionKey": "#1D2040",
+      "keyText": "#E8E9F5",
+      "accent": "#7B8CFF"
+    },
+    "keyCornerRadius": 10
+  }
+]

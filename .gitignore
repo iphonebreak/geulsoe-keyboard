@@ -1,0 +1,28 @@
+# XcodeGen 생성물 — project.yml이 SSOT다
+Tadak.xcodeproj/
+
+# 빌드 산출물
+.build/
+DerivedData/
+build/
+*.xcresult/
+*.xcworkspace/xcuserdata/
+xcuserdata/
+
+# SPM
+.swiftpm/
+Package.resolved
+
+# 하네스 로컬 상태
+.claude/settings.local.json
+.claude/.session-edits
+
+# 서명 자산 — 절대 커밋하지 않는다
+*.p12
+*.cer
+*.mobileprovision
+*.xcconfig
+ExportOptions.plist
+
+# macOS
+.DS_Store
