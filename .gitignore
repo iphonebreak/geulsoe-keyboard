@@ -13,9 +13,12 @@ xcuserdata/
 .swiftpm/
 Package.resolved
 
-# 하네스 로컬 상태
-.claude/settings.local.json
-.claude/.session-edits
+# 로컬 전용 — 원격에 올리지 않는다
+.claude/
+CLAUDE.md
+.mcp.json
+/docs/
+/tools/
 
 # 서명 자산 — 절대 커밋하지 않는다
 *.p12
