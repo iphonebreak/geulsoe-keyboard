@@ -19,6 +19,49 @@ struct LayoutDefinitionTests {
         }
     }
 
+    // MARK: - 기준 열 수 (UX-8 — 높이·폭 상한이 여기서 나온다)
+
+    /// 검증자 실측 2026-09-09: 높이 공식이 10열을 하드코딩해 천지인 키가 203.5 x 69.0 = **2.95 : 1**까지
+    /// 벌어졌다. `referenceUnits`가 자판마다 옳은 값을 내야 그 공식이 닫힌다. 값을 여기서 고정한다.
+    @Test("자판별 기준 열 수 — 행마다 폭 합이 달라도 문자 행의 열 수가 나온다")
+    func referenceUnitsPerLayout() {
+        #expect(LayoutDefinition.dubeolsik.referenceUnits == 10)   // 행 폭 합 10 / 9 / 9.8 / 9.6
+        #expect(LayoutDefinition.qwerty.referenceUnits == 10)
+        #expect(LayoutDefinition.danmoeum.referenceUnits == 8)     // 8 / 8 / 8 / 9.6 — 하단 행에 끌려가면 안 된다
+        #expect(LayoutDefinition.cheonjiin.referenceUnits == 4)
+        #expect(LayoutDefinition.symbols.referenceUnits == 10)
+        #expect(LayoutDefinition.symbolsAlternate.referenceUnits == 10)
+        for kind in [NumberPadKind.plain, .decimal, .phone] {
+            #expect(LayoutDefinition.numberPad(kind).referenceUnits == 3, "숫자 패드는 3열이다")
+        }
+    }
+
+    /// 숫자 줄은 **한 행**이고 문자 행은 두세 행이다 — 최빈값이라 숫자 줄에 끌려가지 않는다.
+    /// (첫 행을 기준으로 삼았다면 숫자 줄을 켠 단모음이 10열로 잘못 잡힌다.)
+    @Test("숫자 줄을 켜도 기준 열 수는 문자 행을 따른다")
+    func referenceUnitsIgnoresNumberRow() {
+        let danmoeum = LayoutDefinition.layout(for: .hangul, hangulLayout: .danmoeum, numberRow: true)
+        #expect(danmoeum.rows[0].count == 10, "숫자 줄이 실제로 붙어 있어야 이 테스트가 의미가 있다")
+        #expect(danmoeum.referenceUnits == 8)
+
+        let dubeolsik = LayoutDefinition.layout(for: .hangul, hangulLayout: .dubeolsik, numberRow: true)
+        #expect(dubeolsik.referenceUnits == 10)
+    }
+
+    /// 지구본이 빠지면 하단 행 폭이 다시 짜인다 — 문자 행은 그대로이므로 기준도 그대로여야 한다.
+    @Test("지구본 제거·길게 누르기 기호 부착은 기준 열 수를 바꾸지 않는다")
+    func referenceUnitsStableAcrossVariants() {
+        for hangul in [HangulLayout.dubeolsik, .danmoeum, .cheonjiin] {
+            let base = LayoutDefinition.layout(for: .hangul, hangulLayout: hangul)
+            let noGlobe = LayoutDefinition.layout(for: .hangul, hangulLayout: hangul,
+                                                 inputModeSwitchKey: false)
+            let withSymbols = LayoutDefinition.layout(for: .hangul, hangulLayout: hangul,
+                                                     longPressSymbols: true)
+            #expect(noGlobe.referenceUnits == base.referenceUnits)
+            #expect(withSymbols.referenceUnits == base.referenceUnits)
+        }
+    }
+
     @Test("천지인과 기호 자판에는 숫자 줄이 붙지 않는다")
     func numberRowExclusions() {
         let cheonjiin = LayoutDefinition.layout(for: .hangul, hangulLayout: .cheonjiin, numberRow: true)

@@ -21,6 +21,13 @@ struct ClipboardPanelView: View {
     }
 
     var body: some View {
+        // 항목 행 최소 높이도 폭에서 나온다 (UX-10) — 아이폰은 천장 아래라 36pt 그대로다
+        GeometryReader { geometry in
+            body(rowMinHeight: KeyboardMetrics.listRowMinHeight(panelWidth: geometry.size.width))
+        }
+    }
+
+    private func body(rowMinHeight: CGFloat) -> some View {
         VStack(spacing: 4) {
             if entries.isEmpty {
                 Spacer()
@@ -33,7 +40,7 @@ struct ClipboardPanelView: View {
                 ScrollView {
                     LazyVStack(spacing: 4) {
                         ForEach(entries, id: \.self) { entry in
-                            row(entry)
+                            row(entry, minHeight: rowMinHeight)
                         }
                     }
                     .padding(.top, 4)
@@ -56,7 +63,7 @@ struct ClipboardPanelView: View {
         .padding(.horizontal, 4)
     }
 
-    private func row(_ entry: String) -> some View {
+    private func row(_ entry: String, minHeight: CGFloat) -> some View {
         HStack(spacing: 6) {
             Button {
                 onEntryTap(entry)
@@ -69,6 +76,7 @@ struct ClipboardPanelView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 9)
+                    .frame(minHeight: minHeight)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)

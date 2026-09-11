@@ -18,6 +18,7 @@ struct InfoTab: View {
                     Text("설정 > 일반 > 키보드 > 키보드 추가에서 글쇠를 추가하고, 입력할 때 지구본을 눌러 전환하세요.")
                 }
             }
+            .settingsFormWidth()
             .navigationTitle("정보")
         }
     }

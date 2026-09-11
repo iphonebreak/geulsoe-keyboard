@@ -1,4 +1,5 @@
 import Testing
+import CoreGraphics
 @testable import KeyboardUI
 
 @Suite("EmojiCatalog")
@@ -56,5 +57,37 @@ struct EmojiCatalogTests {
         for emoji in frequent {
             #expect(emoji.unicodeScalars.contains { $0.properties.isEmoji }, "\(emoji)")
         }
+    }
+}
+
+
+/// 카테고리 탭 치수 (REQ-6) — 아이폰 회귀 금지선을 단정문으로 박는다.
+@Suite("이모지 카테고리 탭 치수")
+struct EmojiCategoryMetricsTests {
+
+    /// 아이폰은 항상 8열이고 가장 넓은 기기(440pt)에서도 셀이 52.5pt다 — 전부 하한에 걸려야 한다.
+    @Test("아이폰 셀 폭에서는 카테고리 탭이 38 x 28 · 아이콘 14pt 그대로다")
+    func phoneUnchanged() {
+        for panelWidth in [320.0, 375.0, 393.0, 402.0, 440.0] as [CGFloat] {
+            let gridWidth = panelWidth - 6      // KeyboardRootView의 .padding(.horizontal, 3)
+            let columns = EmojiGridView.columnCount(forWidth: gridWidth)
+            #expect(columns == 8, "아이폰은 항상 8열이어야 한다 (폭 \(panelWidth))")
+            let cell = EmojiGridView.cellWidth(forWidth: gridWidth, columns: columns)
+            let m = EmojiGridView.categoryMetrics(cellWidth: cell)
+            #expect(m.width == 38 && m.height == 28 && m.icon == 14,
+                    "폭 \(panelWidth) · 셀 \(cell)pt → \(m)")
+        }
+    }
+
+    /// 아이패드에서는 실제로 커져야 한다 — 그게 REQ-6의 목적이다.
+    @Test("아이패드 셀 폭에서는 카테고리 탭이 커지고 터치 높이가 HIG 44pt를 넘는다")
+    func padScalesUp() {
+        let gridWidth: CGFloat = 894 - 6        // 자판 폭 상한 안의 이모지 패널
+        let columns = EmojiGridView.columnCount(forWidth: gridWidth)
+        let cell = EmojiGridView.cellWidth(forWidth: gridWidth, columns: columns)
+        #expect(cell > 56, "아이패드 셀 \(cell)pt는 아이폰 천장(56)을 넘어야 한다")
+        let m = EmojiGridView.categoryMetrics(cellWidth: cell)
+        #expect(m.width > 38 && m.icon > 14)
+        #expect(m.height >= 44, "터치 높이 \(m.height)pt — HIG 44pt 이상")
     }
 }

@@ -26,6 +26,7 @@ struct AppearanceTab: View {
                     ThemeRows(selectedThemeID: $settings.selectedThemeID)
                 }
             }
+            .settingsFormWidth()
             .navigationTitle("화면")
         }
     }

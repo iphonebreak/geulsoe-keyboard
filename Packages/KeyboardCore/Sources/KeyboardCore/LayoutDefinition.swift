@@ -66,6 +66,29 @@ public struct LayoutDefinition: Equatable, Sendable {
 
     public let rows: [[Key]]
 
+    /// 이 자판의 **기준 열 수** — 폭 상한과 행 높이를 여기서 되짚는다.
+    ///
+    /// 행마다 폭 합이 다르다: 두벌식 `10 / 9 / 9.8 / 9.6`, 단모음 `8 / 8 / 8 / 9.6`,
+    /// 천지인 `4 / 4 / 4 / 4`, 숫자 패드 `3 / 3 / 3 / 3`.
+    /// 그래서 **가장 많은 행이 공유하는 폭 합**을 기준으로 삼는다(동률이면 큰 쪽).
+    ///
+    /// - 최댓값을 쓰면 단모음이 하단 행(9.6)에 끌려가 8열이 아니게 된다.
+    /// - 최솟값을 쓰면 두벌식이 3행(9.0)에 끌려가 10열보다 좁아진다.
+    /// - 첫 행을 쓰면 **숫자 줄(10열)을 켠 단모음**이 10열로 잘못 잡힌다.
+    ///
+    /// 최빈값은 이 셋을 모두 피한다: 문자 행은 자판마다 2~3개인데 숫자 줄·하단 행은 하나씩이다.
+    /// 두벌식처럼 모든 행이 다른 경우(10/9/9.8/9.6)만 동률이 되고, 그때는 큰 쪽인 10이 문자 행이다.
+    /// 값은 `LayoutDefinitionTests`가 자판마다 고정한다.
+    public var referenceUnits: Double {
+        let sums = rows.map { row in ((row.reduce(0) { $0 + $1.width }) * 100).rounded() / 100 }
+        guard !sums.isEmpty else { return 10 }
+        var counts: [Double: Int] = [:]
+        for sum in sums { counts[sum, default: 0] += 1 }
+        return counts.max { lhs, rhs in
+            lhs.value != rhs.value ? lhs.value < rhs.value : lhs.key < rhs.key
+        }.map(\.key) ?? 10
+    }
+
     // MARK: - 두벌식 (4행)
 
     public static let dubeolsik: LayoutDefinition = {

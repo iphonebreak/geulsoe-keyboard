@@ -5,6 +5,7 @@ Tadak.xcodeproj/
 .build/
 DerivedData/
 build/
+build-device/
 *.xcresult/
 *.xcworkspace/xcuserdata/
 xcuserdata/

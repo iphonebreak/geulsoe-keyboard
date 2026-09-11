@@ -70,6 +70,7 @@ struct SnippetSettingsView: View {
             }
             .disabled(!settings.snippetsEnabled)
         }
+        .settingsFormWidth()
         .navigationTitle("채움글")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -152,6 +153,7 @@ private struct SnippetEditorView: View {
                         .lineLimit(4...10)
                 }
             }
+            .settingsFormWidth()
             .navigationTitle("문구 추가")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -259,6 +261,7 @@ struct SnippetPackDetailView: View {
                 Text("트리거를 커서 끝까지 치면 툴바에 칩이 떠요. 칩을 누르면 트리거가 전문으로 바뀌어요.")
             }
         }
+        .settingsFormWidth()
         .navigationTitle(pack.name)
         .navigationBarTitleDisplayMode(.inline)
     }

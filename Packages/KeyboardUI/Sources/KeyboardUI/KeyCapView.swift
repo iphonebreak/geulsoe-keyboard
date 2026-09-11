@@ -22,6 +22,8 @@ struct KeyCapView: View {
     var onCursorDrag: ((Int) -> Void)? = nil
 
     @State private var isPressed = false
+    /// 키의 실측 크기 — 확대 미리보기 크기를 여기서 낸다 (REQ-5).
+    @State private var keySize: CGSize = .zero
     @State private var repeatTask: Task<Void, Never>?
 
     // 길게 누르기 대체 입력 (문장부호 키 — . 길게 → ,). 무장되면 릴리스에 `key.alternate`가 나간다
@@ -54,6 +56,15 @@ struct KeyCapView: View {
         face
             .foregroundStyle(theme.keyText)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 키 실측 크기 — 확대 미리보기가 키에 비례하려면 필요하다 (REQ-5).
+            // **항상 있는 배경**이라 누르는 도중 구조가 바뀌지 않는다.
+            .background(
+                GeometryReader { geometry in
+                    Color.clear
+                        .onAppear { keySize = geometry.size }
+                        .onChange(of: geometry.size) { _, size in keySize = size }
+                }
+            )
             .overlay(alignment: .topTrailing) {
                 // 길게 누르기 힌트 (문장부호 키의 ","·".com") — 무장되면 라벨 자체가 바뀌므로 숨긴다.
                 // 뷰를 넣고 빼지 않고 투명도만 바꾼다 (누르는 도중 구조 변경 금지 — face 주석 참조)
@@ -128,20 +139,49 @@ struct KeyCapView: View {
         return isPressed ? base.opacity(0.6) : base
     }
 
+    /// **아이폰 문자 키 폭의 천장.** 아이폰은 가장 넓은 기기(440pt)에서도 문자 키가 38.9pt다
+    /// (`(440 − 6 − 45) / 10`). 46pt를 넘는 문자 키는 아이패드뿐이므로, 이 값을 넘을 때만
+    /// 미리보기를 키에 비례시킨다 — **아이폰은 어떤 기기·어떤 배율에서도 46 × 52 그대로다.**
+    static let phoneKeyWidthCeiling: CGFloat = 46
+    /// 아이폰에서의 미리보기 : 키 비율 (46 / 35.1 = 1.31, 52 / 48.75 = 1.07).
+    /// 아이패드에서도 같은 비율을 재현해야 '확대'로 읽힌다.
+    static let previewWidthRatio: CGFloat = 1.31
+    static let previewHeightRatio: CGFloat = 1.07
+
     /// 눌린 키 위에 뜨는 확대 미리보기
+    ///
+    /// 크기가 상수(46 × 52)일 때 아이패드에서는 키(78 × 69)보다 **작아서**
+    /// '확대 미리보기'가 아니라 작은 꼬리표로 보였다 (검증자 실측 REQ-5 — 폭 47% · 높이 28% 작다).
+    /// 그래서 키 실측 크기에 아이폰과 같은 비율을 곱한다.
+    /// 미리보기 상자 크기 — 키 실측 크기에서 낸다. 값을 테스트로 고정하려고 분리했다.
+    static func previewSize(keySize: CGSize) -> CGSize {
+        // 아이폰에서는 상수가 그대로 이긴다 (위 phoneKeyWidthCeiling 주석)
+        guard keySize.width > phoneKeyWidthCeiling else { return CGSize(width: 46, height: 52) }
+        return CGSize(
+            // 천지인처럼 아주 넓은 키(140pt)에서 미리보기가 과하게 커지지 않게 증가폭도 묶는다
+            width: min(keySize.width * previewWidthRatio, keySize.width + 30),
+            height: keySize.height * previewHeightRatio
+        )
+    }
+
     private var preview: some View {
+        let box = Self.previewSize(keySize: keySize)
+        let width = box.width
+        let height = box.height
+        // 글자도 상자와 같은 비율로 (아이폰 34pt 기준)
+        let glyph = (displayLabel.count > 1 ? 24.0 : 34.0) * (height / 52)
         // 오버레이는 부모(키) 폭을 제안하므로 ".com" 같은 다문자 라벨이 ".c…"로 잘렸다 (실기 피드백
         // 2026-09-04) — fixedSize로 고유 폭을 쓰고, 다문자는 글자를 낮춘다
-        Text(displayLabel)
-            .font(.system(size: displayLabel.count > 1 ? 24 : 34))
+        return Text(displayLabel)
+            .font(.system(size: glyph))
             .lineLimit(1)
             .fixedSize()
             .foregroundStyle(theme.keyText)
             .padding(.horizontal, 8)
-            .frame(minWidth: 46, minHeight: 52)
+            .frame(minWidth: width, minHeight: height)
             .background(theme.characterKey, in: .rect(cornerRadius: 8))
             .shadow(radius: 2)
-            .offset(y: -56)
+            .offset(y: -(height + 4))
             .allowsHitTesting(false)
     }
 

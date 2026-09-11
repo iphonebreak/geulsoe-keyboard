@@ -225,6 +225,35 @@ struct InputControllerWordTests {
         #expect(committed == ["애국가"], "본문 끝 단어(백두산이)는 학습되지 않는다")
     }
 
+    /// QA N-2 회귀. `suppressesNextWordCommit`은 **다음 문자 입력에서 바로 풀린다** — 본문 뒤에
+    /// 한 글자만 이어 치면 방어가 사라져 "백두산이요"처럼 본문 조각이 붙은 run이 학습 사전으로
+    /// 갔다. 붙여넣기와 같은 규칙(`blocksLearningUntilSeparator`)으로 **다음 구분자까지** 막는다.
+    @Test("채움글 본문에 한 글자 이어 쳐도 그 run은 학습하지 않는다 (구분자 뒤부터 재개)")
+    func snippetBodyIsNotLearnedAfterTypingOneMoreCharacter() throws {
+        let output = RecordingOutput()
+        let controller = InputController(output: output)
+        var committed: [String] = []
+        controller.onWordCommitted = { committed.append($0) }
+        let anthem = SnippetEntry(trigger: "애국가 1절", title: "애국가 1절",
+                                  body: "동해물과 백두산이")
+        let matcher = SnippetMatcher(bible: nil, entries: [anthem])
+
+        for key in ["d", "o", "r", "n", "r", "r", "k"] { controller.handle(.character(key)) }
+        controller.handle(.space)
+        controller.handle(.character("1"))
+        for key in ["w", "j", "f"] { controller.handle(.character(key)) }  // 절
+        #expect(controller.insertSnippet(try #require(matcher.suggestion(forTail: controller.textTail))))
+
+        for key in ["d", "y"] { controller.handle(.character(key)) }  // 요 — 본문에 이어 친 한 글자
+        controller.handle(.space)
+        #expect(committed == ["애국가"], "본문 조각이 섞인 '백두산이요'는 학습되지 않는다")
+
+        // 구분자를 지났으므로 그 뒤에 친 단어는 정상 학습된다
+        for key in ["d", "k", "s", "s", "u", "d"] { controller.handle(.character(key)) }  // 안녕
+        controller.handle(.space)
+        #expect(committed == ["애국가", "안녕"], "구분자 뒤 단어부터 다시 학습한다")
+    }
+
     @Test("공백·리턴에서 확정 단어를 알린다 (2자 이상만)")
     func notifiesOnCommit() {
         let output = RecordingOutput()

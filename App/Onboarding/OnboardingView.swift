@@ -32,6 +32,10 @@ struct OnboardingView: View {
                     .padding(.vertical, 6)
             }
             .buttonStyle(.borderedProminent)
+            // 폭만 제한한다. `readableWidth`는 세로도 꽉 채워서 버튼이 남은 공간 한가운데로
+            // 밀려난다 (2026-09-09 실측: 하단 24pt가 아니라 837pt에 떴고, 위의 TabView가
+            // 눌려 페이지 인디케이터까지 화면 중앙으로 올라왔다).
+            .readableContentWidth(AdaptiveLayout.onboardingMaxWidth)
             .padding(.horizontal, 24)
             .padding(.bottom, 24)
         }
@@ -78,7 +82,7 @@ struct OnboardingView: View {
             title: "입력 내용은 기기 밖으로 나가지 않아요",
             items: [
                 ("수집·전송 없음", "글쇠에는 네트워크 기능 자체가 없어요. 입력한 내용을 수집하거나 어디로도 보내지 않아요."),
-                ("전체 접근은 선택", "켜지 않아도 핵심 기능이 전부 동작해요. 켜면 학습한 단어가 유지되고, 복사한 인증번호 제안과 키 입력 진동을 쓸 수 있어요."),
+                ("전체 접근은 선택", "켜지 않아도 핵심 기능이 전부 동작해요. 켜면 학습한 단어 유지, 복사한 인증번호 제안, 클립보드 도구와 기록, 키 입력 진동을 쓸 수 있어요."),
                 ("내가 지울 수 있어요", "학습 단어와 내 문구는 설정에서 언제든 삭제할 수 있어요.")
             ]
         )
@@ -119,9 +123,14 @@ private struct OnboardingPage: View {
                 footer
             }
             Spacer()
-            Spacer()
+            // 아이폰은 내용이 위쪽 1/3에 오도록 아래를 두 배로 비운다. 아이패드는 화면이 훨씬 길어
+            // 같은 비율이면 아래가 통째로 비어 보이므로 위아래를 같게 둔다 (PDR ipad-support).
+            if !AdaptiveLayout.isPad { Spacer() }
         }
+        // 아이패드에서 폭을 제한하지 않으면 문구가 834pt 전폭에 왼쪽 위로 몰리고 오른쪽이 통째로
+        // 빈다 (QA BLOCK-1 §4). 내용 자체는 왼쪽 정렬을 유지하고 블록만 가운데로 모은다.
         .frame(maxWidth: .infinity, alignment: .leading)
+        .readableWidth(AdaptiveLayout.onboardingMaxWidth)
         .padding(.horizontal, 32)
     }
 }

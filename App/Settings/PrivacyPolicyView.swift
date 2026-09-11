@@ -56,6 +56,7 @@ struct PrivacyPolicyView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .settingsFormWidth()
         .navigationTitle("개인정보 처리방침")
         .navigationBarTitleDisplayMode(.inline)
     }

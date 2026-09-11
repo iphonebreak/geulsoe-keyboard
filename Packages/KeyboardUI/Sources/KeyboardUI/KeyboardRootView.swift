@@ -12,6 +12,16 @@ public struct KeyboardRootView: View {
     /// 44 → 52(도구 버튼이 좁고 낮다, 2026-09-02) → 46(52는 너무 높다, 2026-09-03) — 사용자 피드백 순.
     public static let toolbarHeight: CGFloat = 46
 
+    /// 이 자판 배열에서 자판 영역(자판·이모지·클립보드·툴바)이 가질 수 있는 최대 폭.
+    /// 넘으면 가운데 정렬하고 좌우는 배경색으로 둔다. 규칙과 근거는 `KeyboardMetrics`에 있다.
+    ///
+    /// **idiom이 아니라 폭 규칙이다** — KeyboardUI는 아이패드를 모른다(의존성 규칙).
+    /// 아이폰 폭(320~440pt)은 모든 자판의 상한 아래라 아이폰에는 아무 영향이 없다.
+    /// **조립 지점의 높이 계산이 같은 값을 되짚으므로 둘이 갈라지면 종횡비가 어긋난다.**
+    private var areaMaxWidth: CGFloat {
+        KeyboardMetrics.contentMaxWidth(for: state.layout)
+    }
+
     private let state: KeyboardViewState
     private let onEvent: (KeyEvent) -> Void
     private let onSnippetTap: ((SnippetSuggestion) -> Void)?
@@ -28,6 +38,26 @@ public struct KeyboardRootView: View {
     private let onDismissSuggestions: (() -> Void)?
     private let inputModeSwitchButton: AnyView?
 
+    /// **상자를 전부 채우고 내용은 하단 정렬한다** (14차 H1, 기본 `false` = 기존 동작).
+    ///
+    /// 조립 지점이 SwiftUI 호스트를 입력 뷰 **전체**에 붙일 때 켠다. 시스템이 등장 직전 입력 뷰를
+    /// 과대한 높이(실기 852pt)로 잡는 구간에, 기존의 "하단 고정 높이" 방식은 **위쪽이 빈 채**로 남아
+    /// 그 자리에 시스템 반투명 백드롭이 비친다 — 그것이 사용자가 보는 판이라는 것이 H1이다.
+    ///
+    /// 켜면 루트가 상자 높이를 전부 차지하고 **내용(툴바+자판)은 `Spacer`로 아래에 붙는다.**
+    /// 과거 실패 기록("위아래로 늘려 붙이면 자판이 가운데 정렬돼 화면 절반을 덮었다 튀어 내려온다")은
+    /// **가운데 정렬** 때문이었다 — 여기서는 정렬을 `.bottom`으로 못박아 그 실패를 피한다.
+    /// 자판 자체의 크기는 `state.keyboardHeight` 고정이라 **키 크기·배열은 바뀌지 않는다.**
+    private let fillsContainer: Bool
+
+    /// **상자 위쪽을 칠하지 않는다** (16차, 기본 `false` = 기존 동작).
+    ///
+    /// `fillsContainer`는 상자 **전체**를 테마 색으로 칠했다. 그런데 시스템이 입력 뷰를 과대하게
+    /// 잡는 구간에는 그 칠이 곧 **화면을 덮는 단색 판**이 된다(검증자 실측: 852pt 중 555pt가 단색).
+    /// 켜면 배경을 **내용(툴바+자판) 뒤에만** 칠하고 그 위는 **투명하게** 둔다 —
+    /// 그 자리에는 시스템 키보드 백드롭이 그려진다(그것이 정상 등장의 모습이다).
+    private let transparentAbove: Bool
+
     @Environment(\.colorScheme) private var colorScheme
 
     /// - Parameters:
@@ -43,6 +73,8 @@ public struct KeyboardRootView: View {
     ///   - onCursorMove: 커서 이동 도구(◀ -1 / ▶ +1).
     ///   - onEmojiTap: 이모지 그리드에서 이모지를 골랐을 때.
     ///   - onKeyPress: 자판 키 터치다운(백스페이스 반복 포함) — 클릭음·진동 재생 시점.
+    ///   - fillsContainer: 상자를 전부 채우고 내용을 **하단 정렬**한다 (14차 H1). 기본 `false` = 기존 동작.
+    ///   - transparentAbove: 배경을 **내용 뒤에만** 칠하고 그 위는 투명하게 둔다 (16차). 기본 `false` = 기존 동작.
     public init(
         state: KeyboardViewState,
         inputModeSwitchButton: AnyView? = nil,
@@ -58,7 +90,9 @@ public struct KeyboardRootView: View {
         onClipboardEntryDelete: ((String) -> Void)? = nil,
         onClipboardClear: (() -> Void)? = nil,
         onCursorDrag: ((Int) -> Void)? = nil,
-        onDismissSuggestions: (() -> Void)? = nil
+        onDismissSuggestions: (() -> Void)? = nil,
+        fillsContainer: Bool = false,
+        transparentAbove: Bool = false
     ) {
         self.state = state
         self.inputModeSwitchButton = inputModeSwitchButton
@@ -75,6 +109,8 @@ public struct KeyboardRootView: View {
         self.onClipboardClear = onClipboardClear
         self.onCursorDrag = onCursorDrag
         self.onDismissSuggestions = onDismissSuggestions
+        self.fillsContainer = fillsContainer
+        self.transparentAbove = transparentAbove
     }
 
     private var theme: ResolvedTheme {
@@ -83,6 +119,29 @@ public struct KeyboardRootView: View {
 
     public var body: some View {
         let theme = self.theme
+        if fillsContainer {
+            // **H1 — 상자를 전부 채우고 내용은 아래로.**
+            // `Spacer`가 남는 높이를 전부 먹고, 내용은 제 높이 그대로 하단에 붙는다.
+            // `alignment: .bottom`까지 못박아 과대 상자에서도 가운데로 뜨지 않게 한다.
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                // **16차** — 칠은 여기(내용 뒤)까지다. 위쪽은 아래 `.background`가 정한다.
+                content(theme: theme)
+                    .background(theme.keyboardBackground)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            // `transparentAbove`면 상자 위쪽은 **투명** — 그 자리에 시스템 백드롭이 그려진다.
+            // 아니면 14차처럼 상자 전체를 테마 색으로 칠한다.
+            .background(transparentAbove ? Color.clear : theme.keyboardBackground)
+        } else {
+            content(theme: theme)
+                .background(theme.keyboardBackground)
+        }
+    }
+
+    /// 툴바 + 자판/패널. 자기 높이는 내용이 정한다(`toolbarHeight` + `state.keyboardHeight` + 여백).
+    @ViewBuilder
+    private func content(theme: ResolvedTheme) -> some View {
         VStack(spacing: 0) {
             SuggestionToolbar(
                 state: state,
@@ -94,6 +153,11 @@ public struct KeyboardRootView: View {
                 onCursorMove: onCursorMove,
                 onDismissSuggestions: onDismissSuggestions
             )
+            // 툴바도 자판과 같은 폭 안에 둔다. 자판만 좁히면 도구 아이콘 4개가 여전히 전폭에
+            // 균등 분배돼 **자판 밖으로 삐져나온다.** 가로 아이패드에서는 커서 ◀▶ 사이가
+            // 306pt(약 8cm)까지 벌어져 한 글자 고치는 데 손이 화면을 가로질렀다
+            // (검증자 실측 REQ-4).
+            .frame(maxWidth: areaMaxWidth)
             if state.showsClipboardPanel, let onClipboardEntryTap, let onToolTap {
                 ClipboardPanelView(
                     entries: state.clipboardEntries,
@@ -107,6 +171,7 @@ public struct KeyboardRootView: View {
                 .frame(height: state.keyboardHeight)
                 .padding(.horizontal, 3)
                 .padding(.bottom, 4)
+                .frame(maxWidth: areaMaxWidth)
             } else if state.showsEmojiPanel, let onEmojiTap, let onToolTap {
                 EmojiGridView(
                     recentEmojis: state.recentEmojis,
@@ -118,6 +183,7 @@ public struct KeyboardRootView: View {
                 .frame(height: state.keyboardHeight)
                 .padding(.horizontal, 3)
                 .padding(.bottom, 4)
+                .frame(maxWidth: areaMaxWidth)
             } else {
                 KeyboardLayoutView(
                     state: state,
@@ -130,9 +196,9 @@ public struct KeyboardRootView: View {
                 .frame(height: state.keyboardHeight)
                 .padding(.horizontal, 3)
                 .padding(.bottom, 4)
+                .frame(maxWidth: areaMaxWidth)
             }
         }
-        .background(theme.keyboardBackground)
     }
 
     // 툴바 구현은 SuggestionToolbar (별도 View) — 후보 프로퍼티 읽기 격리
@@ -159,7 +225,21 @@ private struct SuggestionToolbar: View {
         let snippet = state.snippetSuggestion
         let words = state.wordSuggestions
         let hasCandidates = snippet != nil || !words.isEmpty || state.pasteboardCode != nil
+        // **칩만 있을 때는 가운데 정렬한다** (사용자 요청 2026-09-11, 사장님 결정 5).
+        //
+        // 기준은 **닫기(✕)를 제외한 콘텐츠 영역의 가운데**다 — ✕는 오른쪽 끝에 그대로 두고
+        // 그 왼쪽 영역에서 칩을 가운데로 모은다. 화면 전체의 정확한 중앙이 아니라는 것을
+        // 명시해 둔다(반론자 E가 지적한 구분).
+        //
+        // **추천단어가 함께 있거나 추천단어만 있을 때는 건드리지 않는다** — 그 경우 후보가
+        // `maxWidth: .infinity`로 남은 폭을 균등 분배한다(Apple QuickType 방식). 여기에
+        // 선행 `Spacer`를 넣으면 그 분배가 깨진다. 도구 행도 지금 그대로다.
+        //
+        // **칩이 실제로 있을 때만** 켠다. 후보가 하나도 없는 경우(도구 행·"글쇠" 자리 표시)도
+        // `words.isEmpty`라서, 그 조건만 보면 도구 행이 선행 `Spacer`에 눌려 회귀한다.
+        let centersChipOnly = (snippet != nil || state.pasteboardCode != nil) && words.isEmpty
         return HStack(spacing: 10) {
+            if centersChipOnly { Spacer(minLength: 0) }
             if let code = state.pasteboardCode, let onPasteboardCodeTap {
                 Button(action: onPasteboardCodeTap) {
                     Label(code, systemImage: "doc.on.clipboard")
@@ -205,8 +285,15 @@ private struct SuggestionToolbar: View {
                         .foregroundStyle(theme.keyText.opacity(0.5))
                     Spacer()
                 } else {
-                    toolButtons  // 도구 행은 폭을 균등 분배해 우측 틈이 없다
-                        .transition(.opacity)
+                    // 도구 행은 남은 폭을 균등 분배하되, 버튼 하나가 아이폰에서보다 넓어지지는
+                    // 않게 묶고 가운데로 모은다 (REQ-4). 아이폰은 상한에 걸리지 않아 그대로다.
+                    // 추천단어 후보의 균등 분배는 손대지 않는다 — 규칙이 다른 두 콘텐츠다.
+                    HStack(spacing: KeyboardMetrics.toolButtonSpacing) {
+                        toolButtons
+                    }
+                    .frame(maxWidth: KeyboardMetrics.toolRowMaxWidth(count: state.visibleTools.count))
+                    .frame(maxWidth: .infinity)
+                    .transition(.opacity)
                 }
             } else if words.isEmpty {
                 Spacer()  // 칩만 있을 때는 내용 크기 유지
@@ -323,12 +410,17 @@ struct KeyboardLayoutView: View {
 
     private func rowView(_ row: [LayoutDefinition.Key], totalWidth: CGFloat) -> some View {
         let totalUnits = row.reduce(0) { $0 + $1.width }
-        let spacing: CGFloat = 5
-        let available = totalWidth - spacing * CGFloat(row.count - 1)
+        let spacing = KeyboardMetrics.keySpacing
+        // **음수 방어.** 등장 첫 레이아웃 패스에서는 `geometry.size.width`가 0으로 온다.
+        // 그때 `0 − 5 × 9 = −45`가 키 폭으로 들어가 SwiftUI가
+        // `Invalid frame dimension (negative or non-finite)`를 수십 줄 뱉고 자판이 빈 회색으로 떴다
+        // (전체 접근을 켠 직후 등장에서 재현, 2026-09-09 — 검증자가 두 번 목격한 증상).
+        // 폭이 확정되면 다음 패스에서 제대로 그려지므로, 여기서는 0으로 눌러 두기만 하면 된다.
+        let available = max(0, totalWidth - spacing * CGFloat(max(0, row.count - 1)))
         return HStack(spacing: spacing) {
             ForEach(row) { key in
                 keyView(key)
-                    .frame(width: available * CGFloat(key.width) / CGFloat(totalUnits))
+                    .frame(width: totalUnits > 0 ? available * CGFloat(key.width) / CGFloat(totalUnits) : 0)
             }
         }
         .frame(maxWidth: .infinity)

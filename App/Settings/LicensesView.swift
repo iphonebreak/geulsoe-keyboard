@@ -56,6 +56,7 @@ struct LicensesView: View {
                 .padding(.vertical, 2)
             }
         }
+        .settingsFormWidth()
         .navigationTitle("오픈소스 및 출처")
         .navigationBarTitleDisplayMode(.inline)
     }

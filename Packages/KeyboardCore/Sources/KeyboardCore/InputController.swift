@@ -471,7 +471,15 @@ public final class InputController {
     /// 채움글 삽입 — 트리거를 지우고 전문을 넣는다. `deleteBackward` + `insertText`만 쓰므로
     /// Full Access가 필요 없다. 매칭에 쓴 꼬리(`textTail`)와 문서 상태가 같아야 한다 —
     /// 키 입력 직후 조립 지점이 매칭·표시하므로 탭 시점에도 그대로다.
-    public func insertSnippet(_ suggestion: SnippetSuggestion) {
+    ///
+    /// **정합 검사(QA BLOCK-2).** 꼬리가 지금도 이 트리거로 끝날 때만 삽입한다. 검사가 없으면
+    /// 같은 칩이 두 번 들어올 때(퇴장 애니메이션 0.28초 중 더블탭) 2회차가 방금 삽입한 본문 끝을
+    /// `triggerLength`만큼 잘라냈다 — 절 범위(`창세기 1:1~13`)면 본문 1,444B가 다시 들어가고
+    /// 앞의 10자가 사라진다. 어긋나면 **아무 것도 하지 않는다** (문서를 건드리는 쪽이 늘 더 나쁘다).
+    /// - Returns: 실제로 삽입했으면 true.
+    @discardableResult
+    public func insertSnippet(_ suggestion: SnippetSuggestion) -> Bool {
+        guard !suggestion.trigger.isEmpty, textTail.hasSuffix(suggestion.trigger) else { return false }
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 (기존 규칙) — 문서 텍스트는 안 변한다
         output.deleteBackward(suggestion.triggerLength)
@@ -479,13 +487,24 @@ public final class InputController {
         output.insertText(inserted)
 
         committedTail.removeLast(min(suggestion.triggerLength, committedTail.count))
-        // 본문 마지막 줄만 꼬리에 남긴다 — 트리거는 줄을 넘지 않는다는 규칙과 일치
-        let lastLine = inserted.split(
-            separator: "\n", omittingEmptySubsequences: false).last
-        appendToTail(String(lastLine ?? ""))
-        // 본문 끝 한글 run은 사용자가 타이핑한 단어가 아니다 — 학습으로 보내지 않는다
+        // 본문 마지막 줄만 꼬리에 남긴다 — 트리거는 줄을 넘지 않는다는 규칙과 일치.
+        // 본문에 줄바꿈이 있으면 문서의 마지막 줄은 본문 뒤쪽뿐이므로 **앞에 남아 있던 꼬리는
+        // 버린다** — 남겨 두면 꼬리가 문서와 어긋나 다음 매칭이 엉뚱한 길이를 지운다
+        // (절 범위·애국가처럼 여러 줄인 본문에서 드러난다, PDR bible-verse-range).
+        if let newline = inserted.lastIndex(of: "\n") {
+            committedTail.removeAll()
+            appendToTail(String(inserted[inserted.index(after: newline)...]))
+        } else {
+            appendToTail(inserted)
+        }
+        // 본문 끝 한글 run은 사용자가 타이핑한 단어가 아니다 — 학습으로 보내지 않는다.
+        // `suppressesNextWordCommit`은 다음 문자 입력에서 바로 풀리므로 한 글자만 이어 치면
+        // "창조하시니라요"처럼 본문 조각이 학습 사전에 들어갔다 (QA N-2) — 붙여넣기와 같은
+        // 규칙으로 **다음 구분자(공백·리턴)까지** 막는다 (`insertProvidedText`와 동일).
         suppressesNextWordCommit = true
+        blocksLearningUntilSeparator = true
         updateAutoCapitalization()
+        return true
     }
 
     // MARK: - 추천단어
