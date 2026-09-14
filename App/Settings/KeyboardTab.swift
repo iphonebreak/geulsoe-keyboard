@@ -18,7 +18,7 @@ struct KeyboardTab: View {
                 feedbackSection
             }
             .settingsFormWidth()
-            .navigationTitle("자판")
+            .navigationTitle("키보드")
             // 입력 테스트 중 빈 여백을 누르면 키보드를 내린다 (사용자 요청 2026-09-10).
             //
             // **SwiftUI 제스처를 Form에 걸지 않는다.** 두 가지를 이미 실패했다:
@@ -28,7 +28,7 @@ struct KeyboardTab: View {
             //    제스처 경합에서 취소되고 긴 누름만 살아남아, 자판을 바꾸는 주 경로가 막혔다
             //    (검증자 R1, 2026-09-10 — `docs/release/qa-report-baseline-2026-09-10.md` 3-2).
             //
-            // 대신 창에 `cancelsTouchesInView = false`인 UIKit 탭 인식기를 건다. 그것은
+            // 대신 Form의 스크롤 뷰에 `cancelsTouchesInView = false`인 UIKit 탭 인식기를 건다. 그것은
             // **터치를 가로채지 않고** 탭이 끝났다는 사실만 따로 알려 주므로 아래 뷰(토글·슬라이더·
             // 선택기)는 전부 원래대로 동작한다. 아래 `DismissKeyboardOnTap` 참조.
             .background(DismissKeyboardOnTap().frame(width: 0, height: 0))

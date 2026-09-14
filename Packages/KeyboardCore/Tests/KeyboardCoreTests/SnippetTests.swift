@@ -18,6 +18,11 @@ private struct FakeBible: BibleVerseRepository {
     }
 }
 
+/// 66권 어느 절이든 아는 fake — 트리거 원문 되비추기 검증용(별칭·띄어쓴 이름 포함).
+private struct AnyVerseBible: BibleVerseRepository {
+    func text(book: Int, chapter: Int, verse: Int) -> String? { "본문 \(book)/\(chapter)/\(verse)" }
+}
+
 @Suite("성경 참조 파서")
 struct BibleReferenceParserTests {
 
@@ -196,8 +201,8 @@ struct SnippetMatcherTests {
         #expect(hit?.body == FakeBible.genesis11)
         #expect(hit?.triggerLength == 9)
         // 성경은 머리말이 붙어 들어간다 (사용자 결정 2026-09-03); 문구 팩은 붙지 않는다
-        #expect(hit?.prefix == "[창세기 1:1] ")
-        #expect(hit?.insertedText == "[창세기 1:1] " + FakeBible.genesis11)
+        #expect(hit?.prefix == "[창세기 1장 1절] ", "머리말은 사용자가 친 트리거 원문 그대로")
+        #expect(hit?.insertedText == "[창세기 1장 1절] " + FakeBible.genesis11)
         #expect(SnippetMatcher(bible: nil, entries: [anthem])
             .suggestion(forTail: "애국가 1절")?.insertedText == anthem.body)
         // 구문은 맞지만 존재하지 않는 절 — 후보 없음
@@ -212,6 +217,106 @@ struct SnippetMatcherTests {
         #expect(hit?.prefix == nil)
         #expect(hit?.insertedText == FakeBible.genesis11)
         #expect(hit?.title == "창세기 1:1", "칩 제목은 그대로")
+    }
+
+    // MARK: - 머리말은 트리거 원문 (사용자 보고 2026-09-14)
+
+    /// 사용자 결정: 머리말은 **사용자가 친 그대로**를 되비춘다. 파서 정규 표기(`display`)를
+    /// 쓰면 "창세기 1장 1절"을 친 사람도 `[창세기 1:1] `을 받아 표기가 제멋대로 바뀐다.
+    /// 칩 제목(`title`)은 정규 표기 그대로 둔다 — 바꾸라는 요청이 아니다.
+    @Test("단일 절 머리말은 트리거 원문을 그대로 되비춘다", arguments: [
+        "창세기 1장 1절",
+        "창세기1:1",
+        "창세기 1장1절",
+        "창세기1장 1절",
+        "창세기1장1절",
+        "창세기 1:1",
+        "창 1:1",
+        "창1:1",
+        "창 1장 1절",
+        "창1장1절"
+    ])
+    func singleVersePrefixIsVerbatim(tail: String) throws {
+        let matcher = SnippetMatcher(bible: FakeBible(), entries: [])
+        let hit = try #require(matcher.suggestion(forTail: tail))
+        #expect(hit.trigger == tail)
+        #expect(hit.prefix == "[\(tail)] ")
+        #expect(hit.insertedText == "[\(tail)] " + FakeBible.genesis11)
+        #expect(hit.title == "창세기 1:1", "칩 제목은 정규 표기 그대로")
+    }
+
+    /// 앞에 다른 텍스트가 있어도 머리말은 트리거 구간만 — 앞말·공백이 새어 들어가면 안 된다.
+    @Test("앞 텍스트는 머리말에 섞이지 않는다", arguments: [
+        ("말씀은 창 1:1", "창 1:1"),
+        ("오늘의 말씀 창세기 1장 1절", "창세기 1장 1절"),
+        ("1창세기1:1", "창세기1:1"),
+        ("어제 읽은 창세기 1:1~3", "창세기 1:1~3")
+    ])
+    func leadingTextIsNotInPrefix(testCase: (String, String)) throws {
+        let (tail, trigger) = testCase
+        let matcher = SnippetMatcher(bible: FakeBible(), entries: [])
+        let hit = try #require(matcher.suggestion(forTail: tail))
+        #expect(hit.trigger == trigger)
+        #expect(hit.prefix == "[\(trigger)] ")
+        #expect(hit.prefix?.hasPrefix("[\(trigger.first!)") == true, "여는 대괄호 뒤 공백 없음")
+        #expect(hit.prefix?.hasSuffix("] ") == true, "닫는 대괄호 뒤 공백 한 칸")
+    }
+
+    /// 범위 표기는 구분자 5종·`절` 붙임 여부가 제각각이다 — 전부 친 그대로 되비춘다.
+    @Test("절 범위 머리말도 구분자·표기를 그대로 유지한다", arguments: [
+        "창세기 1:1~3",
+        "창세기 1:1-3",
+        "창세기 1:1\u{FF5E}3",
+        "창세기 1:1\u{301C}3",
+        "창세기 1:1\u{2013}3",
+        "창세기 1:1 ~ 3",
+        "창세기 1:1~ 3",
+        "창세기1:1~3",
+        "창세기 1장 1~3절",
+        "창세기 1장 1절~3절",
+        "창세기1장1~3절",
+        "창세기 1장 1-3절",
+        "창 1:1~3"
+    ])
+    func verseRangePrefixIsVerbatim(tail: String) throws {
+        let matcher = SnippetMatcher(bible: FakeBible(), entries: [])
+        let hit = try #require(matcher.suggestion(forTail: tail))
+        #expect(hit.trigger == tail)
+        #expect(hit.prefix == "[\(tail)] ")
+        #expect(hit.title == "창세기 1:1-3", "칩 제목은 정규 표기 그대로")
+        #expect(hit.insertedText == "[\(tail)] " + hit.body)
+    }
+
+    /// 두 단어 별칭("요한 계시록")은 트리거가 앞말까지 확장된다 — 머리말도 그 구간 전체다.
+    @Test("띄어 친 두 단어 별칭도 원문 그대로 머리말이 된다", arguments: [
+        "요한 계시록 1장 1절",
+        "요한 계시록 1:1",
+        "계시록 1:1"
+    ])
+    func spacedAliasPrefixIsVerbatim(tail: String) throws {
+        let matcher = SnippetMatcher(bible: AnyVerseBible(), entries: [])
+        let hit = try #require(matcher.suggestion(forTail: tail))
+        #expect(hit.trigger == tail)
+        #expect(hit.prefix == "[\(tail)] ")
+        #expect(hit.title == "요한계시록 1:1", "칩 제목은 정식 명칭")
+    }
+
+    /// 머리말 스위치를 끄면 원문이든 정규 표기든 아무 것도 붙지 않는다.
+    @Test("biblePrefix가 꺼지면 원문 머리말도 붙지 않는다")
+    func verbatimPrefixRespectsToggle() throws {
+        let matcher = SnippetMatcher(bible: FakeBible(), entries: [], biblePrefix: false)
+        let hit = try #require(matcher.suggestion(forTail: "창세기 1장 1절"))
+        #expect(hit.prefix == nil)
+        #expect(hit.insertedText == FakeBible.genesis11)
+    }
+
+    /// 성경이 아닌 팩(인사·국가 상징문·사용자 문구)은 머리말이 없다 — 이번 변경과 무관하다.
+    @Test("문구 팩 후보는 여전히 머리말이 없다")
+    func entryPacksKeepNoPrefix() throws {
+        let matcher = SnippetMatcher(bible: FakeBible(), entries: [anthem])
+        let hit = try #require(matcher.suggestion(forTail: "애국가 1절"))
+        #expect(hit.prefix == nil)
+        #expect(hit.insertedText == anthem.body)
     }
 
     @Test("문구 트리거는 꼬리 접미사와 일치해야 한다")
@@ -246,14 +351,14 @@ struct SnippetMatcherTests {
         let matcher = SnippetMatcher(bible: FakeBible(), entries: [])
         let hit = try #require(matcher.suggestion(forTail: "창세기 1:1~3"))
         #expect(hit.title == "창세기 1:1-3")
-        #expect(hit.prefix == "[창세기 1:1-3] ")
+        #expect(hit.prefix == "[창세기 1:1~3] ", "구분자 `~`도 친 그대로")
         #expect(hit.body == """
             1 \(FakeBible.genesis11)
             2 창세기 1장 2절 본문
             3 창세기 1장 3절 본문
             """)
         #expect(hit.triggerLength == 9, "'창세기 1:1~3' 9자만 지운다")
-        #expect(hit.insertedText == "[창세기 1:1-3] " + hit.body)
+        #expect(hit.insertedText == "[창세기 1:1~3] " + hit.body)
     }
 
     @Test("biblePrefix가 꺼지면 범위 후보도 머리말이 없다")
@@ -281,7 +386,7 @@ struct SnippetMatcherTests {
         let matcher = SnippetMatcher(bible: FakeBible(), entries: [])
         let hit = try #require(matcher.suggestion(forTail: "창 1:1~1"))
         #expect(hit.body == FakeBible.genesis11, "절 번호를 붙이지 않는다")
-        #expect(hit.prefix == "[창세기 1:1] ")
+        #expect(hit.prefix == "[창 1:1~1] ", "접힌 범위도 친 그대로")
         #expect(hit.triggerLength == 7)
     }
 
@@ -392,7 +497,7 @@ struct InputControllerSnippetTests {
         #expect(suggestion?.triggerLength == 5)
 
         controller.insertSnippet(suggestion!)
-        let inserted = "[창세기 1:1] " + FakeBible.genesis11
+        let inserted = "[창 1:1] " + FakeBible.genesis11
         #expect(output.operations.suffix(2) == [
             .delete(5), .insert(inserted)
         ])
@@ -424,9 +529,9 @@ struct InputControllerSnippetTests {
             3 창세기 1장 3절 본문
             """
         #expect(output.operations.suffix(2) == [
-            .delete(7), .insert("[창세기 1:1-3] " + body)
+            .delete(7), .insert("[창 1:1~3] " + body)
         ])
-        #expect(output.text == "1[창세기 1:1-3] " + body)
+        #expect(output.text == "1[창 1:1~3] " + body)
         #expect(controller.textTail == "3 창세기 1장 3절 본문", "꼬리는 본문 마지막 줄만")
     }
 
@@ -447,7 +552,7 @@ struct InputControllerSnippetTests {
         let suggestion = try #require(matcher.suggestion(forTail: controller.textTail))
         #expect(controller.insertSnippet(suggestion), "1회차는 삽입된다")
 
-        let inserted = "[창세기 1:1] " + FakeBible.genesis11
+        let inserted = "[창 1:1] " + FakeBible.genesis11
         #expect(output.text == inserted)
         let operationsAfterFirst = output.operations
 

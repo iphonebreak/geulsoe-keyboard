@@ -10,13 +10,29 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     SWIFT_STRICT_CONCURRENCY: complete
-    DEVELOPMENT_TEAM: ""
+    # 서명 팀 — seongjae jang (사용자 제공 2026-09-14).
+    # **SW54B4C8SR 이 아니다.** 그 값은 "Apple Development: seongjae jang (SW54B4C8SR)"
+    # 인증서 이름에 붙는 개인 ID 이고, Xcode 가 요구하는 DEVELOPMENT_TEAM 은 Team ID 다.
+    # 실측 근거: 같은 바이너리(build-device/.../Tadak.app)를 codesign -dvv 로 읽으면
+    #   Authority=Apple Development: seongjae jang (SW54B4C8SR)
+    #   TeamIdentifier=7B5W35XPMW          ← 이쪽이 팀이다
+    # 둘이 한 파일에 함께 찍혀 있어 혼동할 여지가 없다.
+    DEVELOPMENT_TEAM: "7B5W35XPMW"
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    MARKETING_VERSION: "1.0.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "1.0.1"
+    CURRENT_PROJECT_VERSION: "2"
 
 packages:
+  # 이 저장소의 첫 외부 의존성 (2026-09-11, 사용자 결정). 나머지는 전부 로컬 경로다.
+  #
+  # **버전을 정확히 고정한다(upToNextMajor 아님).** 이 SDK는 네트워크를 쓰고, 자체
+  # 프라이버시 매니페스트를 들고 오며, 수출 규정 선언의 근거까지 건드린다 — 그런 것이
+  # 재해석 한 번에 조용히 바뀌면 안 된다. 올릴 때는 사람이 결정해서 이 줄을 고친다.
+  # 12.19.1은 사용자가 Xcode에서 이미 해석해 둔 버전과 같다(Package.resolved).
+  Firebase:
+    url: https://github.com/firebase/firebase-ios-sdk
+    exactVersion: 12.19.1
   HangulEngine:
     path: Packages/HangulEngine
   KeyboardCore:
@@ -40,6 +56,11 @@ targets:
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/Tadak.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        # Crashlytics 공식 문서 요구 사항("Add -ObjC flag to Other Linker Flags").
+        # **반드시 이 타깃 스코프다** — 최상위 settings에 넣으면 익스텐션까지 적용돼
+        # 60MB 한계선이 걸린다(검증자 지적 2026-09-11).
+        # 부수 효과: Analytics 측정 엔진(ObjC 전용 아카이브)도 이 플래그로 함께 링크된다.
+        OTHER_LDFLAGS: "-ObjC"
     dependencies:
       - target: TadakKeyboard
         embed: true
@@ -48,6 +69,57 @@ targets:
         product: TadakDomain
       - package: TadakData
         product: TadakData
+      # ★ Firebase는 **이 앱 타깃에만** 건다. TadakKeyboard에는 절대 걸지 마라 —
+      #   익스텐션은 60MB 강제 종료 한계가 있고, 사용자가 입력하는 모든 것을 보는 자리다.
+      #   security.md 1순위 규칙(입력 텍스트는 어디로도 나가지 않는다)은 그대로 살아 있다.
+      #
+      #   ★ **`FirebaseAnalytics`가 아니라 `FirebaseAnalyticsCore`다** (사용자 결정 2026-09-14).
+      #   넓은 쪽 `FirebaseAnalytics` 제품은 전이 의존으로 넷을 번들에 실었다:
+      #     FirebaseAnalytics / GoogleAppMeasurement / GoogleAppMeasurementIdentitySupport /
+      #     **GoogleAdsOnDeviceConversion**(= 광고 전환 추적)
+      #   우리 코드는 광고 API를 부르지 않는데도 런타임에 초기화돼 앱 컨테이너에
+      #   `com.google.ads.on_device_conversion.plist`(FirstLaunchTimestamp)를 썼다(실측 재현).
+      #   애플 정의상 추적이라 프라이버시 선언 범위가 추적 도메인·ATT까지 넓어진다 —
+      #   **우리가 쓰지 않는 기능이므로 표면 자체를 없앤다.**
+      #
+      #   `FirebaseAnalyticsCore`는 같은 `FirebaseAnalytics` 바이너리(= `Analytics.logEvent`
+      #   API 표면)와 같은 `GoogleAppMeasurement` 측정 엔진 바이너리를 그대로 쓰고,
+      #   `GoogleAppMeasurementCore` 경유라 IdentitySupport(IDFA)와 광고 전환만 빠진다
+      #   (firebase-ios-sdk 12.19.1 / GoogleAppMeasurement Package.swift 직접 확인).
+      #   **수집은 죽지 않는다** — 교체 후 `google-app-measurement.sql`의 `raw_events`에
+      #   `_f`·`_s`·`_e`가 그대로 쌓이는 것을 시뮬레이터로 확인했다(2026-09-14).
+      #   근거·실측: docs/release/firebase-on-hardening.md
+      - package: Firebase
+        product: FirebaseAnalyticsCore
+      # Crashlytics — 사용자 결정 2026-09-11(앞선 "넣지 마라" 철회). **앱 타깃만.**
+      # 익스텐션 크래시는 이걸로 안 잡힌다 — 한계와 판단 자료는 firebase-integration.md 10절.
+      - package: Firebase
+        product: FirebaseCrashlytics
+
+    postBuildScripts:
+      # Firebase Crashlytics dSYM 업로드. 경로·입력 파일은 공식 문서를 그대로 옮겼다
+      # (firebase.google.com/docs/crashlytics/ios/get-started, 2026-09-11 직접 확인).
+      # 이 프로젝트는 ENABLE_USER_SCRIPT_SANDBOXING=YES 이고 ENABLE_DEBUG_DYLIB=YES 라
+      # 문서가 지정한 .debug.dylib 입력 파일도 함께 넣는다.
+      - name: Firebase Crashlytics dSYM upload
+        script: '"${SRCROOT}/tools/firebase-crashlytics-run"'
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          # **스크립트를 저장소 안(tools/)에 두고 SRCROOT 로 부른다.**
+          # SDK 경로(DerivedData/SourcePackages)는 빌드 스크립트 샌드박스가 read 를 막는다
+          # (실측: "Sandbox: bash deny(1) file-read-data .../Crashlytics/run").
+          # 샌드박싱을 끄는 대신 이 방법을 쓴다 — 이 앱은 사용자가 입력하는 모든 것을 보는
+          # 자리라 보안 강화 옵션을 편의로 끄지 않는다(검증자 제안·빌드 확인 2026-09-11).
+          # `run`은 자기 디렉터리의 `upload-symbols`를 부르므로 **둘 다** tools/ 에 있어야 한다.
+          # SDK 버전(exactVersion 12.19.1)을 올릴 때 이 두 파일도 함께 갱신한다.
+          - $(SRCROOT)/tools/firebase-crashlytics-run
+          - $(SRCROOT)/tools/upload-symbols
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}.debug.dylib
 
   TadakKeyboard:
     type: app-extension

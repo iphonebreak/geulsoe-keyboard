@@ -54,7 +54,8 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     public var learningResetToken: Int
     /// 채움글(트리거 → 전문 자동완성) 전체 스위치.
     public var snippetsEnabled: Bool
-    /// 성경 채움글 삽입 시 머리말 `[창세기 1:1] `을 앞에 넣을지 (기본 켬). 설정 앱 성경 팩 상세의 스위치 (2026-09-07).
+    /// 성경 채움글 삽입 시 머리말을 앞에 넣을지 (기본 켬). 설정 앱 성경 팩 상세의 스위치 (2026-09-07).
+    /// 머리말은 사용자가 친 트리거 원문 그대로다 — `창세기 1장 1절`을 쳤으면 `[창세기 1장 1절] ` (2026-09-14).
     public var bibleSnippetPrefixEnabled: Bool
     /// 끈 내장 채움글 팩 id 목록 (`"bible"`, `"anthem"`). 옵트아웃이라 새 팩은 기본 켬.
     public var disabledSnippetPacks: [String]
@@ -67,6 +68,19 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 툴바 도구 표시 순서 (사용자 편집 가능). 목록에 없는 도구는 `orderedTools`가 뒤에 붙인다 —
     /// 새 도구가 추가돼도 구 저장분에서 사라지지 않는다.
     public var toolOrder: [ToolbarTool]
+    /// v1.0.1 툴바 순서 1회성 전환을 마쳤는가.
+    ///
+    /// **한 번 `true`가 되면 `toolOrder`를 다시는 자동으로 건드리지 않는다.** 값 비교만으로
+    /// 판단하면, 마이그레이션 뒤 사용자가 스스로 옛 순서로 되돌려 놓았을 때 그것을 "아직
+    /// 전환 안 된 구 저장분"으로 오인해 매번 다시 바꿔 버린다(영구 고착).
+    public var toolOrderMigratedV101: Bool
+
+    /// v1.0.0까지의 툴바 기본 순서. **마이그레이션 판정에만 쓴다 — 값을 바꾸지 마라.**
+    ///
+    /// `ToolbarTool.allCases`로는 이 값을 얻을 수 없다. `dismiss`를 맨 끝으로 옮기는 순간
+    /// `allCases`는 새 순서를 돌려주기 때문에, 구 순서는 리터럴로 박아 두어야 한다.
+    public static let legacyDefaultToolOrder: [ToolbarTool] =
+        [.dismiss, .cursorLeft, .cursorRight, .clipboard, .emoji]
 
     /// 저장된 순서 + 누락된 도구(신규) 보정. 중복은 첫 등장만 남긴다.
     public var orderedTools: [ToolbarTool] {
@@ -116,7 +130,13 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         longPressSymbolsEnabled: Bool = true,
         suggestionsEnabled: Bool = true,
         verificationCodeSuggestionsEnabled: Bool = true,
-        clipboardHistoryEnabled: Bool = true,
+        // **기본값이 끔이다** (사용자 결정 2026-09-11). 클립보드 기록은 사용자가 복사한 내용을
+        // App Group에 남기는 유일한 경로 중 하나라, 켜는 것을 사용자가 **의식적으로 선택**하게 한다.
+        //
+        // 마이그레이션: 저장분에 이 키가 있으면 디코더가 그 값을 그대로 쓴다(`init(from:)` 참조).
+        // 즉 **이미 켜 둔 사용자는 꺼지지 않는다.** 이 기본값은 키가 없는 경우에만 적용된다 —
+        // 새 설치, 그리고 이 필드가 생기기 전(Phase 6 이전)의 저장분이다.
+        clipboardHistoryEnabled: Bool = false,
         learningResetToken: Int = 0,
         snippetsEnabled: Bool = true,
         bibleSnippetPrefixEnabled: Bool = true,
@@ -125,6 +145,8 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         enabledTools: [ToolbarTool] = ToolbarTool.allCases,
         disabledTools: [ToolbarTool] = [],
         toolOrder: [ToolbarTool] = ToolbarTool.allCases,
+        // 신규 설치는 처음부터 새 순서라 전환할 것이 없다 — 완료로 시작한다.
+        toolOrderMigratedV101: Bool = true,
         hapticEnabled: Bool = true,
         hapticIntensity: Double = 0.6,
         keySoundEnabled: Bool = false,
@@ -154,6 +176,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.enabledTools = enabledTools
         self.disabledTools = disabledTools
         self.toolOrder = toolOrder
+        self.toolOrderMigratedV101 = toolOrderMigratedV101
         self.hapticEnabled = hapticEnabled
         self.hapticIntensity = hapticIntensity
         self.keySoundEnabled = keySoundEnabled
@@ -208,6 +231,20 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
             .map(ToolbarTool.decodeList) ?? base.disabledTools
         toolOrder = try container.decodeIfPresent([String].self, forKey: .toolOrder)
             .map(ToolbarTool.decodeList) ?? base.toolOrder
+        // v1.0.1 툴바 순서 1회성 전환.
+        //
+        // 기본값이 `base`가 아니라 **리터럴 `false`**인 것이 핵심이다. `base`(= `.default`)는
+        // 신규 설치용이라 이 플래그가 `true`이고, 그것을 기본값으로 쓰면 키가 없는 **구 저장분이
+        // 전부 "전환 완료"로 읽혀** 마이그레이션이 아무에게도 걸리지 않는다.
+        toolOrderMigratedV101 = try container.decodeIfPresent(Bool.self, forKey: .toolOrderMigratedV101) ?? false
+        if !toolOrderMigratedV101 {
+            // 구 기본값 그대로 쓰던 사용자만 새 기본값으로 옮긴다. 손수 바꾼 순서는 존중한다.
+            // (구 저장분의 단일 "cursor" 표기는 위 `decodeList`가 이미 둘로 펼친 뒤라 비교가 성립한다.)
+            if toolOrder == KeyboardSettings.legacyDefaultToolOrder {
+                toolOrder = ToolbarTool.allCases
+            }
+            toolOrderMigratedV101 = true
+        }
         hapticEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticEnabled) ?? base.hapticEnabled
         hapticIntensity = try container.decodeIfPresent(Double.self, forKey: .hapticIntensity) ?? base.hapticIntensity
         keySoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .keySoundEnabled) ?? base.keySoundEnabled
@@ -254,14 +291,18 @@ public enum ToolbarMode: String, Codable, CaseIterable, Sendable {
     case suggestions
 }
 
+/// **선언 순서가 곧 툴바 기본 순서다** — `toolOrder` 기본값이 `allCases`이기 때문이다.
+/// 순서를 바꾸면 기존 사용자에게도 영향이 가므로 `KeyboardSettings.legacyDefaultToolOrder`와
+/// 마이그레이션(`toolOrderMigratedV101`)을 함께 보라.
 public enum ToolbarTool: String, Codable, CaseIterable, Sendable {
-    case dismiss
     /// 커서 왼쪽/오른콽 — 원래 `cursor` 하나였던 것을 둘로 나눴다 (사용자 요청 2026-09-03:
     /// 각각 끄고 순서를 바꿀 수 있게). 구 저장분의 "cursor"는 `decodeList`가 둘로 펼친다.
     case cursorLeft
     case cursorRight
     case clipboard
     case emoji
+    /// 맨 끝 — v1.0.1에서 옮겼다 (사용자 요청: 자주 쓰는 도구를 앞으로).
+    case dismiss
 
     /// Full Access 없이 동작하는가.
     ///

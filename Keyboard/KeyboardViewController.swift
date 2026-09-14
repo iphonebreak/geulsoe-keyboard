@@ -1202,19 +1202,50 @@ final class KeyboardViewController: UIInputViewController {
     /// 창 없이 화면 크기를 얻는 지원 경로는 없다 — `UIScreen.main`은 iOS 16에서 폐기됐고
     /// 애플이 가리키는 대체 경로가 `windowScene.screen`이다 (Context7로 확인, 2026-09-09).
     private var maxKeyboardAreaHeight: CGFloat {
-        guard let screenHeight = view.window?.windowScene?.screen.bounds.height, screenHeight > 0 else {
+        guard let screen = view.window?.windowScene?.screen,
+              screen.bounds.height > 0, screen.bounds.width > 0 else {
             return .greatestFiniteMagnitude
         }
         // `screen.bounds`는 현재 방향을 반영한다 — 가로에서 짧은 변이 높이로 온다
         // (아이패드 가로 실측으로 확인: 상한이 820×0.45로 걸렸다)
-        let total = (screenHeight * Self.maxScreenFraction).rounded()
+        let total = (screen.bounds.height * screenFraction(for: screen.bounds)).rounded()
         let overhead = KeyboardRootView.toolbarHeight + Self.keyboardBottomPadding
         return max(Self.minKeyboardAreaHeight, total - overhead)
+    }
+
+    /// 이 화면에서 키보드 뷰가 차지해도 되는 높이 비율.
+    ///
+    /// **높이 하나가 아니라 높이와 폭을 함께 본다** (IP-1 수정, 2026-09-11).
+    /// 고정 비율 0.5는 화면이 짧은 아이폰(SE 3세대 667pt)의 **세로**를 함께 눌렀다 —
+    /// 120%+숫자 줄의 요청 312pt가 상한 284pt에 걸려 사용자가 켠 설정이 조용히 덜 먹혔다.
+    /// 그렇다고 비율을 전역으로 올리면 **가로 방어선이 풀린다**: 0.543까지 올려야 SE가 통과하는데
+    /// 그러면 아이폰 가로 상한이 151 → 198pt로 헐거워져 REQ-2가 잡은 값이 되돌아간다
+    /// (`docs/release/ip1-baseline.md` 5절에서 단일 비율로는 동시 만족이 **불가능**함을 수치로 보였다).
+    ///
+    /// **그래서 종횡비를 입력으로 쓴다.** 세로로 긴 화면(높이/폭 > 1)일수록 더 준다.
+    /// `if isLandscape` 같은 **명시적 방향 분기는 두지 않는다** — 가로는 높이/폭이 1 미만이라
+    /// 보너스 항이 0이 되고 기존 0.5가 그대로 남는다. 공식이 참조하는 치수가 하나 늘 뿐이다.
+    ///
+    /// 검증(`ip1-baseline.md` 3·4절이 before 값):
+    /// SE3 세로 320 ≥ 312 ✅ · 17 Pro 가로 151 유지 ✅ · 아이패드 11" 가로 360 유지 ✅ ·
+    /// 아이패드 가로 기본 366pt 미도달 유지(REQ-1의 1.13:1 보존) ✅.
+    private func screenFraction(for bounds: CGRect) -> CGFloat {
+        let aspect = bounds.height / bounds.width
+        let bonus = Self.tallScreenBonus * max(0, aspect - 1)
+        return min(Self.maxScreenFraction + bonus, Self.maxTallScreenFraction)
     }
 
     /// 키보드 뷰(툴바 + 자판 + 하단 여백)가 차지할 수 있는 화면 높이 비율의 상한.
     /// 시스템 키보드의 가로 점유율(아이폰 51.6% 실측 / 아이패드 ≈47%)에 맞춘 값이다.
     private static let maxScreenFraction: CGFloat = 0.5
+
+    /// 세로로 긴 화면에 더 주는 기울기 (높이/폭이 1을 넘는 만큼 × 이 값).
+    /// 0.07은 **가장 빡빡한 기기가 통과하는 최솟값보다 약간 위**로 골랐다 —
+    /// SE 3세대(1.779)에서 0.0548이면 정확히 312pt에 걸리므로 여유를 뒀다(실제 320pt).
+    private static let tallScreenBonus: CGFloat = 0.07
+
+    /// 아무리 세로로 길어도 이 비율을 넘지 않는다. 키보드가 화면을 삼키지 않게 하는 최종 방어선.
+    private static let maxTallScreenFraction: CGFloat = 0.62
     /// 상한이 아무리 조여도 자판이 이보다 낮아지지는 않는다 (Slide Over 등 극단적으로 짧은 창 방어).
     private static let minKeyboardAreaHeight: CGFloat = 120
     /// `KeyboardRootView`가 자판 아래에 두는 여백. 총 높이 계산과 상한이 같은 값을 봐야 한다.

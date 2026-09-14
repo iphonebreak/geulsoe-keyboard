@@ -22,6 +22,38 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- 수출 규정 선언. **법적 선언이다 — 근거 없이 건드리지 마라.**
+
+	     2026-09-11 최초 근거("이 앱은 암호화를 아예 안 쓴다")는 Firebase 도입으로 무너졌다.
+	     Firebase는 HTTPS로 서버에 보낸다. 2026-09-14에 근거를 다시 세웠고 결론은 그대로 false다.
+
+	     애플 공식 문서(Complying with Encryption Export Regulations) 원문:
+	       "Set the value to NO if your app - including any third-party libraries it links
+	        against - doesn't use encryption, **or if it only uses forms of encryption that are
+	        exempt from export compliance documentation requirements.**"
+	       "Typically, the use of encryption that's built into the operating system - for
+	        example, when your app makes HTTPS connections using URLSession - is exempt from
+	        export documentation upload requirements, whereas the use of proprietary
+	        encryption is not."
+	     App Store Connect Help도 같다: "Your app uses encryption limited to that within the
+	     Apple operating system - No documentation required in App Store Connect."
+
+	     우리가 그 면제 조건에 든다는 실측(빌드 산출물, 2026-09-14):
+	       - 번들에 암호화 라이브러리가 없다. 프레임워크는 FirebaseAnalytics /
+	         GoogleAppMeasurement 둘뿐이고 BoringSSL·OpenSSL류는 실리지 않는다
+	         (Firestore/gRPC를 안 쓰므로 openssl_grpc 경로가 없다).
+	       - 앱 바이너리의 암호 관련 미해결 심볼은 _CC_MD5 / _CC_SHA1 / _CC_SHA256 /
+	         _CC_SHA384 뿐 — 전부 OS의 CommonCrypto 해시이고 애초에 암호화가 아니다.
+	       - 링크된 것은 Security.framework 등 OS 프레임워크뿐. 네트워크는 NSURLSession(OS HTTPS).
+	     => 자체 암호화 구현 없음, OS 제공 HTTPS/TLS만 사용 => 면제. false 유지가 맞다.
+
+	     ⚠️ 다만 근거가 "암호화 없음"에서 "면제되는 암호화만 사용"으로 바뀌었다. 애플 문서는
+	       "If your app uses exempt forms of encryption, you might alternatively be required to
+	        submit a year-end self-classification report to the U.S. government."
+	     이라고 덧붙인다. 이건 코드가 아니라 행정·법무 판단이다 — 사장님 확인 대상.
+	     상세: docs/release/firebase-on-hardening.md -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>

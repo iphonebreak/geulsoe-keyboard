@@ -8,8 +8,9 @@ public struct SnippetSuggestion: Equatable, Sendable {
     public let trigger: String
     public let title: String
     public let body: String
-    /// 본문 앞에 함께 삽입되는 머리말 — 성경은 "[고린도전서 12:3] " (사용자 결정 2026-09-03:
-    /// 붙여넣은 본문이 어느 절인지 보이게). 문구 팩·사용자 문구는 nil.
+    /// 본문 앞에 함께 삽입되는 머리말 — 성경은 "[고전 12:3] " (사용자 결정 2026-09-03:
+    /// 붙여넣은 본문이 어느 절인지 보이게). **사용자가 친 트리거 원문을 그대로 되비춘다**
+    /// (2026-09-14) — 정규 표기로 바꾸지 않는다. 문구 팩·사용자 문구는 nil.
     public let prefix: String?
 
     /// 문서 끝에서 지울 문자 수 (트리거가 차지한 길이)
@@ -41,7 +42,8 @@ public struct SnippetMatcher: Sendable {
     /// - Parameters:
     ///   - bible: 성경 본문 저장소. nil이면 성경 매칭을 건너뛴다.
     ///   - entries: 트리거 문구 목록. **사용자 문구 → 내장 팩 순서로 합쳐 넣는다.**
-    /// 성경 후보 삽입 시 `[창세기 1:1] ` 머리말을 앞에 넣을지 (설정 `bibleSnippetPrefixEnabled`, 2026-09-07)
+    /// 성경 후보 삽입 시 `[창세기 1장 1절] `(친 그대로) 머리말을 앞에 넣을지
+    /// (설정 `bibleSnippetPrefixEnabled`, 2026-09-07)
     private let biblePrefix: Bool
 
     /// - Parameter biblePrefix: 성경 머리말 여부 (기본 켬)
@@ -69,10 +71,14 @@ public struct SnippetMatcher: Sendable {
         if let bible,
            let match = BibleReferenceParser.matchSuffix(of: tail),
            let text = Self.body(for: match, in: bible) {
+            // 머리말은 **사용자가 친 트리거 원문 그대로**다 (사용자 보고 2026-09-14).
+            // `match.display`(정규 표기)를 쓰면 "창세기 1장 1절"을 친 사람도 `[창세기 1:1] `을
+            // 받아 표기가 제멋대로 바뀐다. 칩 제목(`title`)은 정규 표기를 그대로 쓴다.
+            let trigger = String(tail.suffix(match.matchedLength))
             return SnippetSuggestion(
-                trigger: String(tail.suffix(match.matchedLength)),
+                trigger: trigger,
                 title: match.display, body: text,
-                prefix: biblePrefix ? "[\(match.display)] " : nil)
+                prefix: biblePrefix ? "[\(trigger)] " : nil)
         }
         return nil
     }

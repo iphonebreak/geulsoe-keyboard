@@ -360,13 +360,20 @@ struct LayoutDefinitionTests {
         for layout in [LayoutDefinition.layout(for: .hangul, hangulLayout: .dubeolsik, longPressSymbols: true),
                        LayoutDefinition.layout(for: .english, hangulLayout: .dubeolsik, longPressSymbols: true)] {
             #expect(alternates(layout, row: 0) == ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="])
-            #expect(alternates(layout, row: 1) == ["-", "/", ":", ";", "(", ")", "₩", "&", "@"], "9키 — 마지막 \" 없음")
-            #expect(alternates(layout, row: 2) == [".", ",", "?", "!", "'", nil, nil], "7키에 기호 5개 — ㅜ·ㅡ(n·m) 없음")
+            #expect(alternates(layout, row: 1) == ["-", "/", ":", ";", "(", ")", "₩", "&", "@"], "9키 — 마지막 \" 는 다음 행으로 이월")
+            // 2행에서 넘친 `"`가 3행의 남는 첫 자리(ㅜ / n)로 이월된다. 마지막 자리(ㅡ / m)는 여전히 빈다.
+            #expect(alternates(layout, row: 2) == [".", ",", "?", "!", "'", "\"", nil], "7키에 기호 5개 + 이월 1개")
         }
         let danmoeum = LayoutDefinition.layout(for: .hangul, hangulLayout: .danmoeum, longPressSymbols: true)
-        #expect(alternates(danmoeum, row: 0) == ["[", "]", "{", "}", "#", "%", "^", "*"])
-        #expect(alternates(danmoeum, row: 1) == ["-", "/", ":", ";", "(", ")", "₩", "&"])
-        #expect(alternates(danmoeum, row: 2) == [".", ",", "?", "!", "'", nil])
+        #expect(alternates(danmoeum, row: 0) == ["[", "]", "{", "}", "#", "%", "^", "*"], "8키 — + = 는 넘치고, 다음 행도 꽉 차 버려진다")
+        #expect(alternates(danmoeum, row: 1) == ["-", "/", ":", ";", "(", ")", "₩", "&"], "8키 — @ \" 가 넘쳐 다음 행으로 간다")
+        // ★ 사용자 보고(2026-09-14): 단모음에 @ 가 없다. 2행에서 넘친 @ 가 3행 빈 자리(ㅡ)로 이월돼 해결된다.
+        #expect(alternates(danmoeum, row: 2) == [".", ",", "?", "!", "'", "@"], "6키에 기호 5개 + 이월된 @")
+        #expect(danmoeum.rows[2].first { $0.label == "ㅡ" }?.alternate == .character("@"),
+                "단모음 ㅡ 를 길게 누르면 @ — 다른 자판의 @ 자리는 그대로다")
+        // 이월은 **바로 다음 행까지만** 간다. 단모음 1행에서 넘친 + = 는 2행이 꽉 차 있어 버려지고,
+        // 2행이 넘긴 @ 를 밀어내지 않는다 (누적 이월이면 3행 자리를 + 가 가져간다).
+        #expect(alternates(danmoeum, row: 2).compactMap { $0 }.contains("+") == false, "이월은 한 행만 — + 는 3행까지 오지 않는다")
         // 하단 행은 그대로 — 문장부호 키는 자기 대체 입력(,)을 지키고 나머지는 없다
         let bottom = LayoutDefinition.layout(for: .english, hangulLayout: .dubeolsik, longPressSymbols: true).rows.last!
         #expect(bottom.first { $0.id == "punct" }!.alternate == .character(","))

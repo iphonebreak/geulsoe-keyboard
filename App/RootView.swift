@@ -18,7 +18,7 @@ struct RootView: View {
     var body: some View {
         TabView {
             KeyboardTab(settings: $settings)
-                .tabItem { Label("자판", systemImage: "keyboard") }
+                .tabItem { Label("키보드", systemImage: "keyboard") }
             ToolbarTab(settings: $settings)
                 .tabItem { Label("툴바", systemImage: "slider.horizontal.3") }
             AppearanceTab(settings: $settings)

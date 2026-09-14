@@ -334,8 +334,17 @@ public struct LayoutDefinition: Equatable, Sendable {
     // **기호 자판(123) 1페이지와 같은 배열, 숫자 줄은 뺀다** (사용자 결정 2026-09-08 — 처음의 Gboard 배열에서 개정:
     // "ㅂㅈㄷㄱㅅ 줄에 숫자는 빼고 123 자판과 배열을 같게"). 기호 자판 2·3·4행의 문자 키 라벨을 그대로 가져와
     // 문자 자판 1·2·3행에 **자리(열) 순서**로 얹는다 — 1행 `[]{}#%^*+=`, 2행 `-/:;()₩&@"`, 3행 `.,?!'`.
-    // 행의 키 수가 기호 수보다 적으면 뒤 기호를 빼고(두벌식 2행 9키 → `"` 없음, 단모음 1·2행 8키), 많으면 뒤 키는
-    // 비운다(3행 7키에 기호 5개 → ㅜ·ㅡ 없음). `symbols` 배열에서 파생하므로 기호 자판을 고치면 함께 바뀐다(테스트 고정).
+    // 행의 키 수가 기호 수보다 적으면 뒤 기호가 넘치고, 많으면 뒤 키가 빈다.
+    //
+    // **넘친 기호는 바로 다음 행의 남는 뒤 자리로 이월한다** (2026-09-14, 사용자 보고 "단모음에 @ 가 없다").
+    // 이월은 자기 행 기호를 자리 순서로 다 얹은 **뒤**에만 일어나므로 "자리 기준"을 깨지 않는다 —
+    // 파생 기호가 밀려나는 일은 없고, 원래 비어 있었을 자리만 채운다. 특례표가 아니라 일반 규칙이라
+    // `symbols` 배열에서 파생되는 성질도 그대로다(기호 자판을 고치면 이월 내용도 함께 바뀐다).
+    //   두벌식·쿼티 2행 9키 → `"`가 넘쳐 3행 첫 빈 자리(ㅜ / n)로 간다. 마지막 자리(ㅡ / m)는 여전히 빈다.
+    //   단모음 2행 8키 → `@ "`가 넘치고, 3행 빈 자리 1개에 `@`가 들어간다.
+    // **이월은 한 행만 간다(누적하지 않는다).** 누적하면 단모음 1행 잔여 `+ =`가 줄을 서서 3행의 단
+    // 하나뿐인 빈 자리를 `+`가 가져가고 `@`는 또 버려진다 — 고치려던 문제가 그대로 남는다.
+    // `symbols` 배열에서 파생하므로 기호 자판을 고치면 함께 바뀐다(테스트 고정).
     // 동작은 문장부호 키의 `.` 길게 → `,`와 같다 (`Key.alternate`, KeyCapView 450ms 무장) — 새 제스처 없음.
     static let longPressSymbolRows: [[String]] = (1...3).map { rowIndex in
         symbols.rows[rowIndex].filter { !$0.isFunctionKey }.map(\.label)
@@ -346,13 +355,29 @@ public struct LayoutDefinition: Equatable, Sendable {
     /// (하단 행은 그대로). **숫자 줄을 붙이기 전에** 적용한다 — 숫자 키에는 기호가 붙지 않는다.
     public func addingLongPressSymbols() -> LayoutDefinition {
         var rows = self.rows
+        /// 앞 행에서 자리를 못 찾고 넘친 기호. **바로 다음 행까지만** 흘러간다 (아래 주석 참조).
+        var carry: [String] = []
         for (rowIndex, symbols) in Self.longPressSymbolRows.enumerated() where rowIndex < rows.count {
-            var remaining = symbols.makeIterator()
+            // 자기 행 기호를 자리 순서로 먼저 얹는다 — 여기가 "자리 기준"이고 바뀌지 않았다.
+            // 그러고도 남는 뒤 자리에만 앞 행 이월분을 채운다. 파생 기호를 밀어내는 일은 없다.
+            var placing = symbols.makeIterator()
+            var spilling = carry.makeIterator()
+            var overflowStart = 0
+            var placedFromOwn = 0
             for (index, key) in rows[rowIndex].enumerated() {
-                guard !key.isFunctionKey, key.alternate == nil, case .character = key.event,
-                      let symbol = remaining.next() else { continue }
-                rows[rowIndex][index] = key.withAlternate(.character(symbol))
+                guard !key.isFunctionKey, key.alternate == nil, case .character = key.event else { continue }
+                if let symbol = placing.next() {
+                    placedFromOwn += 1
+                    rows[rowIndex][index] = key.withAlternate(.character(symbol))
+                } else if let spilled = spilling.next() {
+                    rows[rowIndex][index] = key.withAlternate(.character(spilled))
+                }
             }
+            overflowStart = placedFromOwn
+            // 이월은 **누적하지 않는다.** 이 행에서 넘친 것만 다음 행으로 넘긴다.
+            // 누적하면 앞선 행의 잔여분이 줄을 서서 뒤 행의 빈 자리를 먼저 차지한다 —
+            // 단모음이 그 사례다: 1행 잔여 `+ =`가 누적되면 3행 빈 자리를 `+`가 가져가고 `@`는 또 버려진다.
+            carry = overflowStart < symbols.count ? Array(symbols[overflowStart...]) : []
         }
         return LayoutDefinition(rows: rows)
     }

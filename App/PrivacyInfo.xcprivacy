@@ -1,5 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  컨테이너 앱(Tadak) 프라이버시 매니페스트.
+
+  ★ 이 파일은 **앱만** 덮는다. 키보드 익스텐션은 Keyboard/PrivacyInfo.xcprivacy 가 따로 있고
+    거기 NSPrivacyCollectedDataTypes 는 **빈 배열이 맞다** — 익스텐션에는 Firebase가 없다
+    (nm/otool 실측 심볼 0건). 사용자가 입력한 텍스트는 어디로도 나가지 않는다
+    (.claude/rules/security.md 1순위 규칙).
+
+  왜 여기에 직접 적어야 하나 — SDK 매니페스트가 다 덮어주지 않는다.
+    Xcode는 앱 매니페스트와 SDK들이 들고 오는 매니페스트를 아카이브 때 합쳐 프라이버시
+    리포트를 만든다. 그런데 **측정 엔진 두 개는 매니페스트를 아예 안 들고 온다** —
+    FirebaseAnalytics.xcframework / GoogleAppMeasurement.xcframework 안에
+    PrivacyInfo.xcprivacy 가 없다(12.19.1 아티팩트 직접 확인, 2026-09-14).
+    즉 Analytics가 실제로 모으는 것(기기 식별자·앱 상호작용·사용 데이터)을 선언하는 주체가
+    아무도 없다. 그래서 **앱이 1차 책임자로 직접 선언한다.**
+    CrashData/OtherDiagnosticData는 FirebaseCrashlytics·FirebaseInstallations·
+    GoogleDataTransport 가 자기 매니페스트에 이미 적지만, 그 수집을 켠 주체는 우리이므로
+    중복을 감수하고 함께 적는다(애플이 합칠 때 같은 항목은 하나로 모인다).
+
+  Linked = false 인 이유: 이 앱은 계정·로그인이 없고 `setUserID`도 부르지 않는다.
+    수집은 전부 익명 앱 인스턴스 ID 기준이라 우리가 쥔 사용자 신원에 붙지 않는다.
+    (FirebaseCrashlytics SDK 자신도 같은 판단으로 false를 적는다.)
+
+  Tracking = false / NSPrivacyTrackingDomains 비어 있음인 이유:
+    2026-09-14에 `FirebaseAnalytics` → `FirebaseAnalyticsCore` 로 좁혀
+    GoogleAdsOnDeviceConversion·GoogleAppMeasurementIdentitySupport 두 프레임워크를
+    번들에서 뺐다. IDFA 접근 경로가 없고(런타임 로그 "IDFA will not be accessible"),
+    광고 전환 추적도 초기화되지 않는다. 데이터 브로커에 넘기지 않고, 다른 앱·사이트의
+    데이터와 엮지도 않는다 — 애플 정의상 추적이 아니다.
+    근거·실측: docs/release/firebase-on-hardening.md
+
+  값 목록은 애플 공식 문서(App Privacy Configuration)에서 확인한 정확한 문자열이다.
+    `NSPrivacyCollectedDataTypeCoarseLocation` / `...PurposeAnalytics` 두 키는 2026-09-14에
+    developer.apple.com 문서 데이터(describing-data-use-in-privacy-manifests의 하위
+    NSPrivacyCollectedDataType·NSPrivacyCollectedDataTypePurposes 열거)에서 다시 대조했다.
+    애플 정의: "Coarse location; information that describes the location of a user or device
+    with lower resolution than a latitude and longitude with three or more decimal places."
+
+  2026-09-14 추가 — 수집을 사용자가 끌 수 있게 됐다.
+    설정 > 정보 > 이용 분석·오류 진단에서 Analytics·Crashlytics를 각각 끈다
+    (심사 가이드라인 5.1.1(ii)). **기본값은 켬**이므로 이 매니페스트의 선언 범위는 그대로다 —
+    선언은 "기본 상태에서 수집될 수 있는 것"을 적는 것이지 사용자별 현재 설정이 아니다.
+    구현·근거: docs/release/analytics-optout.md
+-->
 <plist version="1.0">
 <dict>
 	<key>NSPrivacyTracking</key>
@@ -7,7 +51,101 @@
 	<key>NSPrivacyTrackingDomains</key>
 	<array/>
 	<key>NSPrivacyCollectedDataTypes</key>
-	<array/>
+	<array>
+		<!-- Analytics: 앱 인스턴스 ID 등 기기 수준 식별자. IDFA는 포함되지 않는다. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+		<!-- Analytics 자동 수집 이벤트: first_open / session_start / user_engagement 등
+		     앱을 어떻게 쓰는지. 입력한 텍스트는 대상이 아니다. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeProductInteraction</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+		<!-- Analytics가 이벤트에 함께 싣는 나머지 사용 맥락(앱 버전·기기 모델·OS·언어·지역 등). -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherUsageData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+		<!-- Coarse Location: 우리가 위치 API를 부르는 것이 아니라, Google Analytics가
+		     **업로드 IP(마스킹 후)에서 국가/지역 수준 위치를 도출**해 리포트에 쓴다.
+		     애플 App Privacy Details 원문은 조건문이다 — "You collect and store IP address from
+		     your users. Declare the relevant data types **based on how you use IP address**,
+		     such as precise location, coarse location, device ID, or diagnostics."
+		     "도출하면 무조건 declare하라"고 단정하지는 않는다(원문 확인 2026-09-14). 그럼에도
+		     선언하는 쪽인 이유: 콘솔에서 국가·지역 차원을 실제로 보므로 "용도"가 존재한다.
+		     PreciseLocation이 아닌 이유: 위경도를 받지 않는다.
+		     선언 비용은 이 항목 하나, 누락 비용은 라벨 정정 심사다 — 사장님 결정(2026-09-14, 비용 비대칭).
+		     Google 근거: support.google.com/analytics/answer/10285841 (반론자4 F4-4 실측 인용).
+		     GA 콘솔의 granular location-and-device data를 꺼도 Country/Region은 남으므로
+		     이 선언 의무는 콘솔 설정으로 대체되지 않는다.
+		     Linked=false / Tracking=false 는 위 4항목과 같은 근거다 (계정 없음·setUserID 없음,
+		     IDFA 경로 없음). Purposes=Analytics — 리포트 세분화가 유일한 용도다. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeCoarseLocation</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+		<!-- Crashlytics: 크래시 스택 트레이스와 그때의 앱 상태. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeCrashData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+		<!-- Crashlytics/Installations/GoogleDataTransport 의 진단·전송 메타데이터. -->
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSPrivacyAccessedAPITypes</key>
 	<array>
 		<dict>

@@ -483,7 +483,10 @@ public final class InputController {
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 (기존 규칙) — 문서 텍스트는 안 변한다
         output.deleteBackward(suggestion.triggerLength)
-        let inserted = suggestion.insertedText  // 머리말("[창세기 1:1] ") + 본문
+        // 머리말 + 본문. 머리말은 **사용자가 친 트리거 원문 그대로**다 — `창세기 1장 1절`을
+        // 쳤으면 `[창세기 1장 1절] `이고 정규 표기로 바꾸지 않는다(2026-09-14,
+        // PDR snippet-prefix-verbatim). 칩 제목만 정규 표기를 쓴다.
+        let inserted = suggestion.insertedText
         output.insertText(inserted)
 
         committedTail.removeLast(min(suggestion.triggerLength, committedTail.count))

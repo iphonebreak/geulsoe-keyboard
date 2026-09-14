@@ -82,7 +82,9 @@ struct KeyboardSettingsTests {
         #expect(decoded.learningResetToken == 0)
         #expect(decoded.snippetsEnabled == false)
         #expect(decoded.verificationCodeSuggestionsEnabled == true, "Phase 7 신규 필드도 기본 켬")
-        #expect(decoded.clipboardHistoryEnabled == true, "클립보드 기록 신규 필드도 기본 켬")
+        // 2026-09-11 기본값 전환: 키가 없는 저장분은 이제 **끔**으로 읽힌다.
+        // 이 JSON에는 clipboardHistoryEnabled 키 자체가 없다.
+        #expect(decoded.clipboardHistoryEnabled == false, "키가 없으면 새 기본값(끔)")
         #expect(decoded.hapticIntensity == 0.6, "진동 세기 기본 — 이전 .light 1.0과 비슷한 체감")
         #expect(decoded.keySoundVolume == 0.7)
     }
@@ -93,6 +95,54 @@ struct KeyboardSettingsTests {
         let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: json)
         #expect(decoded.clampedHapticIntensity == 1.0)
         #expect(decoded.clampedKeySoundVolume == 0.1)
+    }
+
+    // MARK: - 클립보드 기록 기본값 전환 마이그레이션 (2026-09-11)
+    //
+    // 위험은 "안 꺼지는 것"이 아니라 **이미 켜 둔 사용자가 조용히 꺼지는 것**이다.
+    // 끄면 보안 규칙상 저장분을 즉시 삭제하므로(PDR clipboard-history) 기록이 사라진다.
+    // 아래 넷이 그 경계를 고정한다. 인라인 휴리스틱으로 값을 되돌리지 않는다 —
+    // 툴바 순서에서 겪은 "영구 고착" 계열의 함정을 여기서 반복하지 않기 위해서다.
+
+    @Test("마이그레이션 1 — 새 설치는 클립보드 기록이 꺼져 있다")
+    func clipboardDefaultsOffOnFreshInstall() {
+        #expect(KeyboardSettings().clipboardHistoryEnabled == false)
+        #expect(KeyboardSettings.default.clipboardHistoryEnabled == false)
+    }
+
+    @Test("★ 마이그레이션 2 — 이미 켜 둔 사용자는 업데이트해도 꺼지지 않는다")
+    func clipboardStaysOnForExistingUser() throws {
+        // 앱이 설정을 저장하면 모든 키가 들어간다(구조체 전체를 인코딩한다).
+        // 즉 한 번이라도 설정을 저장한 사용자는 이 키를 갖고 있다.
+        let stored = #"{"clipboardHistoryEnabled":true}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: stored)
+        #expect(decoded.clipboardHistoryEnabled == true,
+                "저장된 값이 있으면 그대로 존중한다 — 기본값은 새 설치에만 적용된다")
+    }
+
+    @Test("마이그레이션 3 — 꺼 둔 사용자도 그대로다")
+    func clipboardStaysOffForExistingUser() throws {
+        let stored = #"{"clipboardHistoryEnabled":false}"#.data(using: .utf8)!
+        #expect(try JSONDecoder().decode(KeyboardSettings.self, from: stored)
+                .clipboardHistoryEnabled == false)
+    }
+
+    @Test("마이그레이션 4 — 키가 없는 구 저장분은 새 기본값(끔)을 따른다")
+    func clipboardFollowsNewDefaultWhenKeyAbsent() throws {
+        // 이 필드가 생기기 전(Phase 6 이전)의 저장분이다. 사용자가 켠 적이 없으므로
+        // "존중할 선택"이 존재하지 않는다 — 안전한 쪽(끔)으로 간다.
+        let ancient = #"{"activeHangulLayout":"cheonjiin"}"#.data(using: .utf8)!
+        #expect(try JSONDecoder().decode(KeyboardSettings.self, from: ancient)
+                .clipboardHistoryEnabled == false)
+    }
+
+    @Test("마이그레이션 5 — 켜 둔 값이 라운드트립을 견딘다")
+    func clipboardOnSurvivesRoundTrip() throws {
+        var settings = KeyboardSettings()
+        settings.clipboardHistoryEnabled = true
+        let data = try JSONEncoder().encode(settings)
+        #expect(try JSONDecoder().decode(KeyboardSettings.self, from: data)
+                .clipboardHistoryEnabled == true)
     }
 
     @Test("clipboardHistoryEnabled=false는 라운드트립에서 보존된다")
@@ -134,12 +184,69 @@ struct KeyboardSettingsTests {
         // 구 저장분의 "cursor"는 왼쪽·오른쪽 둘로 펼쳐진다 (2026-09-03 분리)
         let legacy = #"{"toolOrder":["emoji","cursor"]}"#.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
-        #expect(decoded.orderedTools == [.emoji, .cursorLeft, .cursorRight, .dismiss, .clipboard])
+        // 뒤에 붙는 순서는 `allCases` 순서다 — v1.0.1에서 dismiss가 맨 끝으로 갔다.
+        #expect(decoded.orderedTools == [.emoji, .cursorLeft, .cursorRight, .clipboard, .dismiss])
         #expect(KeyboardSettings.default.orderedTools == ToolbarTool.allCases)
         // 중복은 첫 등장만
         let dup = #"{"toolOrder":["cursor","cursor","dismiss"]}"#.data(using: .utf8)!
         #expect(try JSONDecoder().decode(KeyboardSettings.self, from: dup).orderedTools
                 == [.cursorLeft, .cursorRight, .dismiss, .clipboard, .emoji])
+    }
+
+    // MARK: - v1.0.1 툴바 순서 1회성 마이그레이션 (fixture 5종)
+    //
+    // 위험은 "안 바뀌는 것"이 아니라 **매번 바뀌는 것**이다. 값 비교만으로 판단하면 전환 뒤
+    // 사용자가 스스로 옛 순서로 되돌려도 그것을 구 저장분으로 오인해 계속 덮어쓴다(영구 고착).
+    // 그래서 플래그를 따로 둔다. 아래 5종이 그 경계를 전부 고정한다.
+
+    @Test("마이그레이션 1 — 신규 설치는 새 기본값이고 전환 완료 상태로 시작한다")
+    func migrationFreshInstall() {
+        let fresh = KeyboardSettings()
+        #expect(fresh.toolOrder == [.cursorLeft, .cursorRight, .clipboard, .emoji, .dismiss])
+        #expect(fresh.toolOrder == ToolbarTool.allCases)
+        #expect(fresh.toolOrderMigratedV101, "신규 설치는 전환할 것이 없다")
+    }
+
+    @Test("마이그레이션 2 — 구 기본값 그대로 쓰던 저장분은 새 기본값으로 1회 전환된다")
+    func migrationLegacyDefault() throws {
+        let legacy = #"{"toolOrder":["dismiss","cursorLeft","cursorRight","clipboard","emoji"]}"#
+            .data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
+        #expect(decoded.toolOrder == ToolbarTool.allCases, "dismiss가 맨 끝으로")
+        #expect(decoded.toolOrderMigratedV101, "전환했으면 플래그가 선다")
+    }
+
+    @Test("마이그레이션 3 — 손수 바꾼 순서는 건드리지 않는다")
+    func migrationCustomOrderPreserved() throws {
+        let custom = #"{"toolOrder":["emoji","dismiss","clipboard","cursorLeft","cursorRight"]}"#
+            .data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: custom)
+        #expect(decoded.toolOrder == [.emoji, .dismiss, .clipboard, .cursorLeft, .cursorRight],
+                "사용자가 정한 순서는 그대로")
+        #expect(decoded.toolOrderMigratedV101, "전환 대상이 아니어도 플래그는 선다 — 다시 묻지 않는다")
+    }
+
+    @Test("마이그레이션 4 — 전환 뒤 사용자가 옛 순서로 되돌려도 다시 덮어쓰지 않는다")
+    func migrationDoesNotRepeat() throws {
+        // 플래그가 이미 true인데 순서가 구 기본값과 같은 상태 = 사용자가 직접 그렇게 만든 것.
+        let reverted = #"""
+        {"toolOrder":["dismiss","cursorLeft","cursorRight","clipboard","emoji"],
+         "toolOrderMigratedV101":true}
+        """#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: reverted)
+        #expect(decoded.toolOrder == KeyboardSettings.legacyDefaultToolOrder,
+                "사용자 선택이므로 유지된다 — 여기서 덮어쓰면 영구 고착 버그다")
+        #expect(decoded.toolOrderMigratedV101)
+    }
+
+    @Test("마이그레이션 5 — 구형 단일 cursor 표기 저장분도 펼쳐진 뒤 전환된다")
+    func migrationLegacyCursorToken() throws {
+        // 2026-09-03 이전 저장분은 "cursor" 하나였다. decodeList가 둘로 펼친 뒤라야
+        // 구 기본값과의 비교가 성립한다 — 이 경로가 막히면 그 사용자만 옛 순서에 고착된다.
+        let ancient = #"{"toolOrder":["dismiss","cursor","clipboard","emoji"]}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: ancient)
+        #expect(decoded.toolOrder == ToolbarTool.allCases, "펼친 결과가 구 기본값이므로 전환된다")
+        #expect(decoded.toolOrderMigratedV101)
     }
 
     @Test("도구 목록의 미지 값은 버리고 설정 전체는 살린다 — 구 cursor는 disabledTools에서도 둘로")

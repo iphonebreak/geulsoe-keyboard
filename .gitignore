@@ -19,8 +19,25 @@ Package.resolved
 .claude/
 CLAUDE.md
 .mcp.json
+# Firebase 설정 — 커밋하지 않는다 (API_KEY 포함, security.md 시크릿 규칙).
+# **번들 반입은 이 파일이 막지 못한다** — XcodeGen은 .gitignore를 보지 않으므로
+# App/ 아래 있는 한 앱 번들에는 정상적으로 실린다(Firebase 동작에 필요하다).
+# 즉 여기 넣는 목적은 오직 "저장소에 올라가지 않게" 하는 것이다. (검증자 실측 2026-09-11)
+App/GoogleService-Info.plist
+
 /docs/
-/tools/
+# tools/ 는 로컬 전용이 원칙이지만 **Crashlytics dSYM 업로드 스크립트 둘만 예외**다.
+# project.yml 의 postBuildScripts 가 $(SRCROOT)/tools/ 로 부르므로, 커밋되지 않으면
+# 새로 클론한 사람의 빌드가 깨진다.
+#
+# **`/tools/` 가 아니라 `/tools/*` 여야 한다** — 디렉터리를 통째로 제외하면 그 안의 파일을
+# negation 으로 되살릴 수 없다(A-1 에서 `/docs/` 로 같은 함정을 겪었다).
+/tools/*
+!/tools/firebase-crashlytics-run
+!/tools/upload-symbols
+# 업로드 직전 규정 점검 스크립트도 커밋한다 — 새 클론에서 이게 없으면 점검 자체를 못 한다
+# (제출 아카이브에 nm 전체 심볼로 암호화·추적·익스텐션 순수성을 검사한다, 2026-09-14).
+!/tools/archive-compliance-check.sh
 
 # 서명 자산 — 절대 커밋하지 않는다
 *.p12
