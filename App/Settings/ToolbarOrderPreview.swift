@@ -27,8 +27,35 @@ struct ToolbarOrderPreview: View {
     /// 끌고 있는 도구와 그 순간의 x 이동량. 셀 하나를 지날 때마다 자리를 바꾸고 offset을 그만큼 뺀다.
     @State private var draggingTool: ToolbarTool?
     @State private var dragOffset: CGFloat = 0
-    /// 드래그를 **시작한** 자리. 이동량을 매번 여기서부터 다시 계산한다 — 아래 주석 참조.
-    @State private var dragStartIndex: Int?
+    /// 지금 겨누고 있는 자리를 **시작 자리로부터 몇 칸**으로 들고 있다. 경계 이력(hysteresis)의
+    /// 기준점이라 상태가 필요하다.
+    ///
+    /// **절대 인덱스가 아니라 상대 칸수인 이유.** 예전엔 `dragStartIndex`(시작 자리)와
+    /// `dragTargetIndex`(목표 자리)를 절대값으로 들고 있었다. 그런데 드래그 도중
+    /// 「기본 순서로 되돌리기」나 VoiceOver `move(_:by:)`가 순서를 바꾸면 두 값이 **stale**이 되어,
+    /// 오른쪽으로 한 칸 끌었는데 엉뚱한 자리로 확정됐다(지적 1). 확정 시점에 시작 자리만 다시
+    /// 읽어도 목표가 여전히 옛 시작 기준이라 고쳐지지 않는다 — 그래서 **목표를 상대값으로** 바꿨다.
+    /// "한 칸 오른쪽"은 배열이 어떻게 바뀌어도 뜻이 변하지 않는다.
+    @State private var dragStepDelta: Int = 0
+
+    /// **제스처가 살아 있는 동안에만 참인 값. 취소돼도 반드시 거짓으로 돌아온다.**
+    ///
+    /// 위 네 개는 평범한 `@State`라 우리가 지워야 하는데, `onEnded`는
+    /// *성공했을 때만* 온다 — 애플 원문: *"The onEnded action is only performed if the gesture
+    /// ends successfully… To track state that must reset regardless of whether the gesture
+    /// succeeds or is cancelled, use a **@GestureState** property."*
+    ///
+    /// 전화·알림·잠금·회전, 또는 다른 손가락이 「완료」를 눌러 `.gesture(isEditing ? … : nil)`이
+    /// nil이 되면 제스처는 **취소**된다. 그때 `onEnded`는 오지 않으므로, 이것 없이는
+    /// 끌던 셀이 1.12배 확대 + 그림자를 단 채 굳고 이웃은 offset −step으로 겹친 채 남는다
+    /// (`RootView`가 TabView라 탭을 옮겨도 `@State`가 살아 있어 안 풀린다).
+    ///
+    /// **`onDisappear`나 `isEditing` 변화 감시로 때우지 않는다** — 인터럽트 종류마다 구멍이 남는다.
+    /// SwiftUI 제스처 생명주기가 직접 주는 이 신호 하나가 **모든 취소 경로**를 덮는다.
+    @GestureState private var isDragActive = false
+
+    /// 스트립의 좌표계 이름. **셀이 아니라 스트립을 기준으로 드래그를 잰다** — 이유는 `reorderGesture` 주석.
+    private static let stripSpace = "toolbar-order-strip"
 
     // MARK: 치수 (디자인 문서 2.1)
 
@@ -49,6 +76,10 @@ struct ToolbarOrderPreview: View {
 
     private var tools: [ToolbarTool] { settings.orderedTools }
 
+    /// 이름표 두 줄이 들어갈 높이. `@ScaledMetric` 이 사용자 글자 크기에 맞춰 늘려 준다.
+    /// 기준 30 은 기본 크기에서 `.caption2` 두 줄이 들어가던 값이라 **일반 크기 화면은 그대로다.**
+    @ScaledMetric(relativeTo: .caption2) private var labelBoxHeight: CGFloat = 30
+
     var body: some View {
         GeometryReader { proxy in
             let width = cellWidth(forStripWidth: proxy.size.width)
@@ -58,8 +89,20 @@ struct ToolbarOrderPreview: View {
             }
         }
         // GeometryReader는 높이를 스스로 정하지 못하므로 바깥에서 고정한다.
-        .frame(height: Metrics.stripHeight + Metrics.labelTopSpacing + 30)
+        //
+        // **이름표 칸은 Dynamic Type 을 따라 늘어난다.** 예전엔 상수 30 이라 글자를 키운 사용자에게
+        // 이름표가 "왼… 오… 클… 이… 키…" 로 잘렸다 — **왼과 오가 서로 구분도 안 됐다**(반론자 O-2).
+        // 디자이너가 "아이콘만 두면 무슨 도구인지 모른다"며 지켜낸 정보가 **글자를 키운 사용자에게서
+        // 정확히 사라지는** 상태였다. VoiceOver 는 셀 라벨이 `displayName` 전체라 영향이 없었고,
+        // 잃는 쪽은 시각 사용자였다.
+        .frame(height: Metrics.stripHeight + Metrics.labelTopSpacing + labelBoxHeight)
         .animation(.easeInOut(duration: 0.25), value: isEditing)
+        // **취소 경로의 리셋 지점.** `@GestureState`는 제스처가 성공하든 취소되든 초기값으로
+        // 돌아오므로, false로 떨어지는 순간을 보고 평범한 `@State` 넷을 함께 지운다.
+        // 성공했을 때는 `onEnded`가 먼저 확정한 뒤 여기로 오고, `resetDragState`는 멱등하다.
+        .onChange(of: isDragActive) { _, active in
+            if !active { resetDragState(animated: true) }
+        }
     }
 
     // MARK: 스트립
@@ -72,6 +115,8 @@ struct ToolbarOrderPreview: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: Metrics.stripHeight)
+        // 드래그를 재는 기준 좌표계. 스트립은 셀이 재배열돼도 움직이지 않는다 — 그것이 요점이다.
+        .coordinateSpace(name: Self.stripSpace)
         .background(
             RoundedRectangle(cornerRadius: Metrics.stripCorner, style: .continuous)
                 .fill(Color(.secondarySystemFill))
@@ -107,7 +152,10 @@ struct ToolbarOrderPreview: View {
             .overlay(alignment: .bottomTrailing) { lockBadge(tool) }
             .scaleEffect(dragging ? 1.12 : 1)
             .shadow(color: .black.opacity(dragging ? 0.25 : 0), radius: dragging ? 10 : 0, y: dragging ? 4 : 0)
-            .offset(x: dragging ? dragOffset : 0)
+            // 끌리는 셀은 손가락을, 나머지는 비켜 준 자리를 **offset으로만** 표현한다.
+            // 드래그 중에 `ForEach`의 순서를 바꾸지 않는 것이 이 설계의 핵심이다 (`reorderGesture` 주석).
+            .offset(x: dragging ? dragOffset : displacement(of: tool, step: width + Metrics.cellSpacing))
+            .animation(dragging ? nil : .spring(response: 0.22, dampingFraction: 0.85), value: dragStepDelta)
             .zIndex(dragging ? 1 : 0)
             .contentShape(Rectangle())
             .onTapGesture { toggle(tool) }
@@ -146,8 +194,12 @@ struct ToolbarOrderPreview: View {
         // **조건부 렌더가 여기서는 안전하다.** "누르는 도중 서브트리를 바꾸지 않는다"는 규율은
         // *터치 중에 바뀌는* 상태를 말한다 — 자물쇠 여부는 도구마다 고정이라 절대 바뀌지 않는다.
         // `opacity(0)`으로 숨기면 보이지 않는 자물쇠가 **VoiceOver 트리에 남는다**(시뮬 스냅숏 실측
-        // 2026-09-14: 커서 셀에도 "잠금"이 붙어 나왔다). 순번 배지는 드래그 중에 숫자가 바뀌므로
-        // 그쪽만 opacity로 둔다.
+        // 2026-09-14: 커서 셀에도 "잠금"이 붙어 나왔다).
+        //
+        // 순번 배지는 셀의 `overlay`라 셀과 함께 움직이고, **드래그 중에는 숫자가 바뀌지 않는다**
+        // (순서 확정이 `onEnded` 한 번뿐이므로). 예전 주석은 "드래그 중에 숫자가 바뀌므로 opacity로
+        // 둔다"고 적었는데 그건 `onChanged`에서 순서를 바꾸던 시절의 서술이라 지금은 사실이 아니다.
+        // 배지를 여전히 opacity로 두는 이유는 **켜짐/꺼짐 토글로는 숫자가 바뀌기 때문**이다.
         if tool == .clipboard {
             Image(systemName: "lock.fill")
                 .font(.system(size: 9, weight: .semibold))
@@ -164,7 +216,8 @@ struct ToolbarOrderPreview: View {
     /// 아이콘만 두면 `doc.on.clipboard`가 무엇인지 모르는 사용자가 생긴다 —
     /// 방향을 고치자고 정보를 잃을 이유가 없다(디자인 0절). Dynamic Type을 따르고 최대 2줄.
     private func labels(cellWidth: CGFloat) -> some View {
-        HStack(spacing: Metrics.cellSpacing) {
+        let step = cellWidth + Metrics.cellSpacing
+        return HStack(spacing: Metrics.cellSpacing) {
             ForEach(tools, id: \.self) { tool in
                 Text(tool.displayName)
                     .font(.caption2)
@@ -172,6 +225,16 @@ struct ToolbarOrderPreview: View {
                     .lineLimit(2)
                     .foregroundStyle(settings.disabledTools.contains(tool) ? Color.secondary : Color.primary)
                     .frame(width: cellWidth)
+                    // **이름표는 아이콘과 같은 offset을 받아야 한다.**
+                    // 예전 판은 `onChanged`에서 순서를 바꿔 스트립과 이름표가 같은 배열을 보고 함께
+                    // 움직였다. 지금은 순서를 고정하고 offset으로만 비켜 주므로, 여기에 같은 offset을
+                    // 걸지 않으면 **아이콘만 움직이고 이름표는 제자리에 남는다** — 이모지를 맨 왼쪽까지
+                    // 끌면 1번 칸 아이콘 밑에 "키보드 내리기"라고 적히고, 손을 떼는 순간 이름표 5개가
+                    // 한꺼번에 점프한다(회귀 지적 3). 디자이너가 "아이콘만 두면 무슨 도구인지 모른다"며
+                    // 지켜낸 정보가 **조작하는 그 순간에만 틀린 값**을 가리키는 상태였다.
+                    .offset(x: draggingTool == tool ? dragOffset : displacement(of: tool, step: step))
+                    .animation(draggingTool == tool ? nil : .spring(response: 0.22, dampingFraction: 0.85),
+                               value: dragStepDelta)
             }
         }
         .frame(maxWidth: .infinity)
@@ -204,36 +267,147 @@ struct ToolbarOrderPreview: View {
     /// 인식 지연이 생기고(설계 5절 스파이크 질문 ②) 얻는 것이 없다.
     private func reorderGesture(_ tool: ToolbarTool, cellWidth: CGFloat) -> some Gesture {
         let step = cellWidth + Metrics.cellSpacing
-        return DragGesture(minimumDistance: 4)
+        // **드래그 중에는 저장 순서도 ForEach 순서도 바꾸지 않는다. 확정은 손을 뗄 때 한 번뿐이다.**
+        //
+        // 사용자 보고(2026-09-14, 실기 1.0.1(2)): "1번에 있는 것을 2번에 있는것과 겹치게 되면
+        // 1,2번 왔다갔다 하면서 떨린다."
+        //
+        // 예전 판은 `onChanged`마다 `settings.toolOrder`를 바꿨다. 그러면 두 가지가 한꺼번에 터진다.
+        //
+        // 1. **되먹임 고리.** `DragGesture`의 기본 좌표계는 `.local` — 제스처가 붙은 **셀 자신**의
+        //    좌표계다. 자리를 바꾸면 그 셀의 프레임이 한 칸 움직이고, 같은 손가락 위치가 새 좌표계에서
+        //    step 만큼 다른 값으로 읽힌다. 그 값으로 목표를 다시 재면 목표가 되돌아가고 → 프레임이 또
+        //    움직이고 → 값이 또 튄다. **손가락이 가만히 있어도 스스로 도는 고리**라 무한히 왕복한다.
+        // 2. **`ForEach` 정체성 파괴.** 순서를 바꾸면 `ForEach(tools, id: \.self)`가 셀 뷰를 다시 만들고,
+        //    진행 중인 제스처가 거기서 끊긴다. 화면과 저장값이 어긋나던 원인이다.
+        //
+        // 실측(iPhone 17 Pro, step 68pt, 고치기 전):
+        //   1칸(68pt)→1칸 · 2칸(136pt)→**0칸** · 3칸(204pt)→**1칸**
+        //   같은 136pt 세 번 반복 → 0칸 / 1칸 / 0칸  ← **같은 입력에 다른 결과 = 진동**
+        //
+        // 고친 방법은 셋이다.
+        //   (가) 좌표계를 **스트립**으로 고정한다 — 스트립은 셀이 비켜도 움직이지 않는다.
+        //   (나) 드래그 중 레이아웃 변화를 `offset`으로만 표현한다 — `ForEach` 순서는 그대로다.
+        //   (다) 경계에 **이력(hysteresis)**을 준다 — `steppedDelta` 참조.
+        // **제스처 우선순위는 건드리지 않았다.** 스파이크로 확인한 "세로 스크롤에 가로채이지 않는다"는
+        // 성질이 그대로 남는다(고친 뒤 402pt·375pt 두 기기에서 재검증했다).
+        return DragGesture(minimumDistance: 4, coordinateSpace: .named(Self.stripSpace))
+            // 제스처가 살아 있는 동안만 참. **취소돼도 SwiftUI가 스스로 false로 되돌린다** —
+            // 이것이 모든 취소 경로를 덮는 리셋 트리거다 (`isDragActive` 선언부 주석).
+            .updating($isDragActive) { _, active, _ in active = true }
             .onChanged { value in
+                // **소유권 검사 — 한 번에 한 도구만 끈다.** 상태 넷을 셀 5개가 공유하므로,
+                // 두 번째 손가락이 다른 셀을 잡으면 남의 start/target을 덮어써 **한 동작에 두 번
+                // 재배열**되고 드래그 중 이웃 셀이 두 배치를 왕복하며 눈에 보이게 떤다(지적 2).
+                // 아이폰 홈 화면도 한 번에 하나만 끌린다 — 두 번째 제스처는 **그냥 무시한다.**
+                if let owner = draggingTool, owner != tool { return }
                 if draggingTool != tool {
                     draggingTool = tool
-                    dragStartIndex = tools.firstIndex(of: tool)
+                    dragStepDelta = 0
                 }
-                guard let start = dragStartIndex else { return }
-                // **기준은 항상 드래그를 시작한 자리다.** `translation`은 시작점부터의 누적 이동량이므로,
-                // 목표 자리도 누적값 하나로 계산해야 한다. 예전 판은 매 프레임 `dragOffset`을
-                // `translation`으로 덮어쓴 뒤 자리를 바꿀 때마다 한 칸씩 빼는 방식이었는데,
-                // 다음 프레임에 덮어쓰기가 그 보정을 지워서 **한 번 끌 때 여러 칸이 밀렸다**
-                // (시뮬 실측 2026-09-14: 한 칸 끌었는데 저장값이 3칸 이동, 화면과 저장값이 어긋남).
-                let steps = Int((value.translation.width / step).rounded())
-                let target = min(max(start + steps, 0), tools.count - 1)
-                if let index = tools.firstIndex(of: tool), index != target {
-                    withAnimation(.spring(response: 0.22, dampingFraction: 0.85)) {
-                        reorder(from: index, to: target)
-                    }
-                }
-                // 자리를 옮긴 만큼은 셀이 이미 이동했으므로 offset에서 뺀다 — 손가락 아래 붙어 보인다.
-                dragOffset = value.translation.width - CGFloat(target - start) * step
+                guard let start = tools.firstIndex(of: tool) else { return }
+                dragOffset = rubberBandedOffset(value.translation.width, start: start, step: step)
+                dragStepDelta = steppedDelta(current: dragStepDelta,
+                                             rawSteps: value.translation.width / step,
+                                             start: start)
             }
-            .onEnded { _ in
-                withAnimation(.spring(response: 0.18, dampingFraction: 0.9)) {
-                    draggingTool = nil
-                    dragOffset = 0
+            .onEnded { value in
+                guard draggingTool == tool else { return }   // 소유권 검사 (지적 2)
+                // 확정은 여기서 **한 번**. App Group 쓰기도 Darwin 알림도 드래그당 1회로 줄어든다
+                // (예전 판은 칸을 지날 때마다 써서 떠 있는 키보드를 여러 번 깨웠다).
+                //
+                // **시작 자리를 지금 배열에서 다시 읽고, 목표는 거기에 상대 칸수를 더해 낸다.**
+                // 드래그 도중 「기본 순서로 되돌리기」나 VoiceOver `move(_:by:)`가 순서를 바꿔도
+                // "시작 자리 + 몇 칸"은 뜻이 변하지 않는다 — 저장된 절대 인덱스로 확정하던 예전 판이
+                // 오른쪽 한 칸을 엉뚱한 자리로 보내던 경로다(지적 1).
+                if let start = tools.firstIndex(of: tool) {
+                    let target = min(max(start + dragStepDelta, 0), tools.count - 1)
+                    if target != start { reorder(from: start, to: target) }
                 }
-                dragStartIndex = nil
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                resetDragState(animated: true)
             }
+    }
+
+    /// **취소·성공을 가리지 않는 단 하나의 리셋 지점.**
+    ///
+    /// `onEnded`는 성공했을 때만 오므로 거기서만 지우면 취소 시 상태가 영원히 남는다.
+    /// 그래서 `isDragActive`(`@GestureState`)가 false로 돌아오는 순간에도 이걸 부른다 —
+    /// 그 신호는 전화·알림·잠금·회전·제스처 제거를 **전부** 포함한다.
+    /// 여러 번 불려도 안전하도록 멱등하게 썼다.
+    private func resetDragState(animated: Bool) {
+        guard draggingTool != nil || dragOffset != 0 || dragStepDelta != 0 else { return }
+        let clear = {
+            draggingTool = nil
+            dragOffset = 0
+            dragStepDelta = 0
+        }
+        if animated {
+            withAnimation(.spring(response: 0.18, dampingFraction: 0.9), clear)
+        } else {
+            clear()
+        }
+    }
+
+    /// 끌리지 않는 셀이 비켜 줘야 하는 거리. 저장 순서는 그대로 두고 **보이기만** 옮긴다.
+    private func displacement(of tool: ToolbarTool, step: CGFloat) -> CGFloat {
+        guard let dragged = draggingTool, dragStepDelta != 0,
+              let start = tools.firstIndex(of: dragged),
+              let index = tools.firstIndex(of: tool) else { return 0 }
+        let target = min(max(start + dragStepDelta, 0), tools.count - 1)
+        guard start != target else { return 0 }
+        if start < target, index > start, index <= target { return -step }
+        if start > target, index >= target, index < start { return step }
+        return 0
+    }
+
+    /// 경계를 넘으면 **점점 덜 움직이되 절대 멈추지 않는다** — 고무줄(rubber band).
+    ///
+    /// **예전엔 단순 클램프였는데 그게 사각지대를 만들었다**(반론자 O-3).
+    /// 하한을 50pt 넘기면 51pt, 100pt 넘기면 101pt 동안 셀이 **아예 안 움직였다**(1:1).
+    /// `clampedOffset(-400)` 과 `(-332)` 가 같은 값이라 **어디를 클램프해도 남는 성질**이다 —
+    /// 반론자가 raw 를 먼저 가두는 수정을 넣어 보고 그대로 실패했다고 적었다.
+    ///
+    /// **내 예전 기각 사유가 방향이 반대였다.** "저항 곡선을 넣으면 raw 와 보이는 위치가 어긋난다"고
+    /// 적었는데, **단순 클램프가 이미 어긋나게 만들고 있었다** — 손가락은 가는데 셀이 굳어 있으니
+    /// 그게 최대치의 어긋남이다. iOS 스크롤 뷰가 클램프가 아니라 고무줄을 쓰는 이유가 이것이다.
+    ///
+    /// 곡선은 UIKit 관행과 같은 꼴이다: 초과분 `x` 를 `x / (1 + x/limit)` 로 눌러
+    /// **처음엔 거의 1:1, 멀어질수록 완만**해지고 `limit` 에 점근한다. 되돌아올 때도 단조라
+    /// 손가락과 셀이 같은 방향으로만 움직인다 — 사각지대가 사라진다.
+    ///
+    /// **확정 결과는 이 함수와 무관하다.** `dragStepDelta` 는 가두지 않은 `translation` 으로 갱신되므로
+    /// 손을 떼면 올바른 자리로 간다. 여기서 고치는 것은 **보이는 것뿐**이다.
+    private func rubberBandedOffset(_ raw: CGFloat, start: Int, step: CGFloat) -> CGFloat {
+        let lowerBound = -CGFloat(start) * step
+        let upperBound = CGFloat(tools.count - 1 - start) * step
+        /// 고무줄이 늘어날 수 있는 최대 — 셀 하나 폭이면 충분하다(자리가 5칸뿐이라 멀리 갈 일이 없다).
+        let limit = step
+        if raw > upperBound { return upperBound + resist(raw - upperBound, limit: limit) }
+        if raw < lowerBound { return lowerBound - resist(lowerBound - raw, limit: limit) }
+        return raw
+    }
+
+    /// 초과분을 눌러 주는 곡선. `x → x / (1 + x/limit)`, `limit` 에 점근하고 **단조 증가**다.
+    private func resist(_ overshoot: CGFloat, limit: CGFloat) -> CGFloat {
+        guard overshoot > 0, limit > 0 else { return 0 }
+        return overshoot / (1 + overshoot / limit)
+    }
+
+    /// 경계 이력(hysteresis)을 넣은 목표 자리 계산.
+    ///
+    /// **`round()`만 쓰면 정확히 0.5 지점에서 목표가 갈린다.** 손 떨림 한 픽셀이 그 선을 넘나들면
+    /// 매 프레임 자리가 바뀐다 — 좌표계 고리를 끊어도 남는 두 번째 떨림 원인이다.
+    /// 그래서 **전진과 후퇴의 문턱을 다르게** 둔다. 지금 자리에서 `threshold`칸 이상 더 가야 한 칸
+    /// 전진하고, `threshold`칸 이상 물러나야 한 칸 후퇴한다. 0.6이면 한 칸 올라선 뒤 raw가
+    /// 0.4~1.6 사이를 오가는 동안 **자리가 그대로다**(폭 1.2칸의 불감대).
+    /// 0.5면 이력이 없어지고, 1.0에 가까우면 한 칸 옮기기가 뻑뻑해진다.
+    private func steppedDelta(current: Int, rawSteps raw: CGFloat, start: Int) -> Int {
+        let threshold: CGFloat = 0.6
+        var next = current
+        while raw > CGFloat(next) + threshold, start + next < tools.count - 1 { next += 1 }
+        while raw < CGFloat(next) - threshold, start + next > 0 { next -= 1 }
+        return next
     }
 
     /// VoiceOver 커스텀 액션 — 드래그 없이 한 칸씩 옮긴다.
