@@ -44,6 +44,12 @@ swift test --package-path Packages/KeyboardCore
 
 ## 데이터 출처
 
-- 성경 본문: 개역한글판(1961) — 저작권 보호 기간 만료
+- 성경 본문: 개역한글판(1961) — 저작재산권 보호기간 만료(2011-12-31). 권리자(대한성서공회)가
+  [공개 확인](https://www.bskorea.or.kr/bbs/content.php?co_id=subpage2_3_4_1)한 사실이다.
+  성명표시권·동일성유지권은 남으므로 본문을 변경·절삭하지 않는다.
+  데이터 출처는 같은 모노레포의 `LifeBible_flutter/assets/hive/life_bible.hive`
+  (2026-09-15 채택 — 1961년 당시 표기 「세째·네째」를 유지하는 판). 변환: `tools/convert_bible.py`
 - 국가 상징문: 애국가·국기에 대한 맹세·대한민국 헌법(법제처 국가법령정보센터)·기미독립선언서 서두
-- 추천단어 사전: [FrequencyWords](https://github.com/hermitdave/FrequencyWords) ko_50k 파생 (CC-BY-SA-4.0)
+- 추천단어 사전: [FrequencyWords](https://github.com/hermitdave/FrequencyWords) ko_50k 파생.
+  파생물 `words.tdw` 는 **CC BY-SA 4.0 으로 배포한다** — 전문·개변 내역은
+  [`Packages/TadakData/Sources/TadakData/Resources/LICENSE-words.md`](Packages/TadakData/Sources/TadakData/Resources/LICENSE-words.md)

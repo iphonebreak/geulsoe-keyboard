@@ -23,6 +23,18 @@ private struct AnyVerseBible: BibleVerseRepository {
     func text(book: Int, chapter: Int, verse: Int) -> String? { "본문 \(book)/\(chapter)/\(verse)" }
 }
 
+/// **절은 있는데 본문이 비어 있는** fake — 조회 실패(nil)와는 다른 상태다.
+///
+/// 2026-09-15 에 실제로 이 상태가 있었다: 정본이 "1-2" 로 묶어 인쇄한 합병절의 **뒷절**이
+/// 원본 데이터에서 빈 문자열로 남아 있어(사 30:2 · 사 48:2 · 렘 21:2 · 겔 24:5 · 행 15:26 · 롬 9:2)
+/// 「로마서 9장 2절」을 치면 **빈 내용이 삽입됐다.** 데이터는 고쳤지만(뒷절에 앞절을 가리키는
+/// 표기를 넣었다) 데이터만 믿지 않는다 — 매처가 스스로 막는다.
+private struct EmptyBodyBible: BibleVerseRepository {
+    /// 공백만 있는 경우도 같이 본다 — 눈에는 비어 보이는 것이 사용자에게는 같은 버그다.
+    var body = ""
+    func text(book: Int, chapter: Int, verse: Int) -> String? { body }
+}
+
 @Suite("성경 참조 파서")
 struct BibleReferenceParserTests {
 
@@ -299,6 +311,32 @@ struct SnippetMatcherTests {
         #expect(hit.trigger == tail)
         #expect(hit.prefix == "[\(tail)] ")
         #expect(hit.title == "요한계시록 1:1", "칩 제목은 정식 명칭")
+    }
+
+    /// **본문이 비면 칩을 띄우지 않는다.** 조회가 성공했어도 마찬가지다.
+    ///
+    /// 빈 본문을 삽입하면 사용자에게는 "칩을 눌렀는데 아무 것도 안 들어갔다"가 된다.
+    /// 범위 조회가 이미 쓰고 있는 fail-closed 규칙(한 절이라도 없으면 nil)과 같은 방향이다.
+    @Test("본문이 비어 있으면 후보로 띄우지 않는다", arguments: ["", " ", "\n", "  \n "])
+    func emptyBodyProducesNoSuggestion(body: String) {
+        let matcher = SnippetMatcher(bible: EmptyBodyBible(body: body), entries: [])
+        #expect(matcher.suggestion(forTail: "로마서 9장 2절") == nil)
+        #expect(matcher.suggestion(forTail: "창 1:1") == nil)
+    }
+
+    /// 범위 안의 한 절만 비어도 전체를 띄우지 않는다 — 가운데가 빈 채로 삽입되면 안 된다.
+    @Test("범위 안에 빈 절이 섞이면 범위 전체가 후보에서 빠진다")
+    func emptyVerseInsideRangeSuppressesWholeRange() {
+        /// 창세기 1:2 만 비어 있는 fake
+        struct HoleBible: BibleVerseRepository {
+            func text(book: Int, chapter: Int, verse: Int) -> String? {
+                guard book == 1, chapter == 1, (1...31).contains(verse) else { return nil }
+                return verse == 2 ? "" : "창세기 1장 \(verse)절 본문"
+            }
+        }
+        let matcher = SnippetMatcher(bible: HoleBible(), entries: [])
+        #expect(matcher.suggestion(forTail: "창 1:1~3") == nil)
+        #expect(matcher.suggestion(forTail: "창 1:1") != nil, "빈 절을 비껴간 조회는 그대로 뜬다")
     }
 
     /// 머리말 스위치를 끄면 원문이든 정규 표기든 아무 것도 붙지 않는다.

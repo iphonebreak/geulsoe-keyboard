@@ -38,6 +38,15 @@ App/GoogleService-Info.plist
 # 업로드 직전 규정 점검 스크립트도 커밋한다 — 새 클론에서 이게 없으면 점검 자체를 못 한다
 # (제출 아카이브에 nm 전체 심볼로 암호화·추적·익스텐션 순수성을 검사한다, 2026-09-14).
 !/tools/archive-compliance-check.sh
+# **데이터 변환기도 같은 이유로 커밋한다 (2026-09-15).** 산출물(bible.tdb·words.tdw·
+# Snippets.json·key_click.wav)은 전부 추적되는데 **만드는 쪽이 하나도 없었다** — 새로 클론한
+# 사람은 데이터를 재생성할 수 없고, 변환기에 걸어 둔 가드도 함께 사라진다.
+# convert_bible.py 의 가드 둘(빈 본문 = 「절삭」 금지 · 합병절 표기 통일)이 로컬 트리에만
+# 있으면 재발 방지가 아니다. 근거: docs/release/ip-audit.md, bundle-audit.md 부록 B.
+!/tools/convert_bible.py
+!/tools/convert_words.py
+!/tools/convert_constitution.py
+!/tools/generate_click.py
 
 # 서명 자산 — 절대 커밋하지 않는다
 *.p12

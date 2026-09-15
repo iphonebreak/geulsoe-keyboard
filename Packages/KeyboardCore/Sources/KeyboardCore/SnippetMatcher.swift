@@ -92,19 +92,33 @@ public struct SnippetMatcher: Sendable {
     /// 삽입 형식: 절마다 `"번호 본문"`, 줄바꿈으로 잇는다. 단일 절은 기존 그대로 번호 없이 본문만.
     /// **한 절이라도 없으면 nil** — 장 끝을 넘긴 범위에 칩을 띄우지 않기 위한 fail-closed다
     /// (단일 절이 존재하지 않을 때 칩이 안 뜨는 기존 규칙과 같다).
+    ///
+    /// **본문이 빈 절도 "없는 절"과 똑같이 다룬다**(`nonEmpty`). 조회는 성공했는데 본문이
+    /// 비어 있으면 사용자에게는 "칩을 눌렀는데 아무 것도 안 들어갔다"가 된다 —
+    /// 2026-09-15 에 실제로 그랬다(정본이 "1-2" 로 묶어 인쇄한 합병절의 뒷절 6개가 원본
+    /// 데이터에서 빈 문자열이었다: 사 30:2 · 사 48:2 · 렘 21:2 · 겔 24:5 · 행 15:26 · 롬 9:2).
+    /// 데이터는 고쳤고 `tools/convert_bible.py` 가 재발을 막지만, **매처도 데이터를 믿지 않는다.**
     private static func body(
         for match: BibleReferenceParser.Match, in bible: any BibleVerseRepository
     ) -> String? {
         guard match.isRange else {
-            return bible.text(book: match.book, chapter: match.chapter, verse: match.verse)
+            return nonEmpty(bible.text(book: match.book, chapter: match.chapter, verse: match.verse))
         }
         var lines: [String] = []
         lines.reserveCapacity(match.verses.count)
         for verse in match.verses {
-            guard let text = bible.text(book: match.book, chapter: match.chapter, verse: verse)
+            guard let text = nonEmpty(
+                bible.text(book: match.book, chapter: match.chapter, verse: verse))
             else { return nil }
             lines.append("\(verse) \(text)")
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// 공백만 남는 본문은 없는 것으로 본다 — 눈에 비어 보이는 것이 사용자에게는 같은 버그다.
+    private static func nonEmpty(_ text: String?) -> String? {
+        guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return text
     }
 }
