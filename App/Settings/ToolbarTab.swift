@@ -22,8 +22,7 @@ struct ToolbarTab: View {
             Form {
                 toolsSection
                 suggestionSection   // 추천단어·채움글이 클립보드보다 자주 손대는 설정 (사용자 요청 2026-09-08)
-                clipboardSection
-                fullAccessSection   // 전체 접근이 필요한 기능들의 안내 (사용자 버그 보고 2026-09-11)
+                clipboardSection    // 전체 접근 안내를 이 절로 **합쳤다** (사용자 요청 2026-09-15)
             }
             .settingsFormWidth()
             .navigationTitle("툴바")
@@ -76,15 +75,53 @@ struct ToolbarTab: View {
         return "아이콘을 눌러 도구를 켜고 끌 수 있어요.\n순서를 바꾸려면 오른쪽 위 ‘순서 편집’을 누르세요.\n클립보드 도구는 전체 접근이 있을 때만 보여요."
     }
 
+    /// 클립보드 절 — **예전 「전체 접근」 절을 여기로 합쳤다** (사용자 요청 2026-09-15:
+    /// "툴바 탭에 클립보드와 전체 접근 영역을 클립보드 영역과 합하자, 너무 복잡해 보인다",
+    /// "설정 위치만 놔두고 전체 접근 글을 제거하자").
+    ///
+    /// **합치는 김에 「복사한 인증번호 제안」 토글도 여기로 옮겼다.** 옮기지 않으면
+    /// `suggestionSection` 푸터가 **사라진 「전체 접근」 헤더를 계속 가리킨다** — 그 문장은
+    /// 어차피 고쳐야 했고, 고칠 바엔 두 토글을 같은 절에 모으는 쪽이 더 간결하다
+    /// (반론자 R-1·R-6, 사장님 채택). 두 토글은 **같은 권한 하나**에 묶여 있다.
+    ///
+    /// ## 안내가 왜 "1단계 / 2단계"인가 — 병렬이 아니라 순서다
+    ///
+    /// 예전 문구는 「전체 접근 허용」과 「다른 앱에서 붙여넣기」를 **두 줄로 나란히** 적었다.
+    /// 검증자가 시뮬레이터에서 걸어 보니 그게 틀렸다(`docs/release/settings-path-truth.md`):
+    ///
+    /// - 「전체 접근 허용」 행은 **글쇠 스위치를 켜는 그 순간 같은 화면에 생긴다.** 화면 이동 없음.
+    /// - 「다른 앱에서 붙여넣기」 행은 **처음에 아예 없다.** 설치로도, 키보드를 켜도, 전체 접근을
+    ///   켜도 안 생긴다. **키보드가 클립보드를 처음 읽어 확인 창이 한 번 뜬 뒤에야** 생긴다.
+    ///
+    /// 즉 예전처럼 "설정에 가서 허용으로 바꾸세요"를 먼저 시키면 **사용자는 없는 행을 찾는다.**
+    /// 그래서 안내 순서가 실제 순서를 따른다.
+    ///
+    /// ## 상태를 말하지 않는다
+    ///
+    /// 컨테이너 앱은 `hasFullAccess`를 읽을 수 없다. "지금 꺼져 있어요" 류의 상태 문구를
+    /// 만들지 않는다 — 오탐(신규 설치 직후 허용 상태인데 "꺼짐")과 미탐(허용 뒤 철회를 모름)을
+    /// 구분할 수 없어서다. **요건만** 조건 없이 말한다. 조건부 잠금은 v1.1.0으로 미뤘다
+    /// (`docs/release/v1.1.0-backlog.md` 1절).
     private var clipboardSection: some View {
         Section {
             Toggle(isOn: clipboardHistoryBinding) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("클립보드 기록")
-                    Text("전체 접근 필요")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                settingLabel("클립보드 기록")
+            }
+            // **토글 옆에 요건을 적는다.** 권한이 없어도 토글은 켜진 채로 보이므로 사용자는
+            // "켰는데 왜 안 되지"가 된다 — 2026-09-11 버그 보고가 정확히 그 결과였다.
+            //
+            // **끔 → 켬 전환에서 권한 시트를 띄운다** (사장님 지시 2026-09-15). 시트를 만든 이유가
+            // "안내가 토글을 켜는 그 순간에 없어서 안 읽혔다"인데, 정작 그 버그 보고는
+            // **인증번호 쪽**이었다. 클립보드 기록 토글에만 붙어 있던 것을 두 토글에 마저 붙인다.
+            Toggle(isOn: fullAccessBinding(\.verificationCodeSuggestionsEnabled)) {
+                settingLabel("복사한 인증번호 제안")
+            }
+            // 복사한 **일반 텍스트**도 칩으로 — 사용자 요청 2026-09-15
+            // ("네이버키보드와 동일하게 1줄로 보여준다 … 누르면 붙여넣기가 됨").
+            // 인증번호 토글과 **따로 둔다**: 이쪽은 복사한 내용이 그대로 화면에 보인다
+            // (설계 `docs/design-reviews/paste-chip-plan.md` C-5).
+            Toggle(isOn: fullAccessBinding(\.pasteSuggestionEnabled)) {
+                settingLabel("복사한 텍스트 제안")
             }
             Button("클립보드 기록 지우기", role: .destructive) {
                 showsClipboardClearDialog = true
@@ -96,10 +133,66 @@ struct ToolbarTab: View {
             ) {
                 Button("지우기", role: .destructive) { clipboardHistoryRepository.clear() }
             }
+
+            Button {
+                // 컨테이너 앱은 **자기 설정 페이지만** 열 수 있고, 그마저도 어디에 떨어질지
+                // 보장되지 않는다 — 설정 앱이 떠 있으면 마지막 본 화면, 종료돼 있으면 설정 루트다
+                // (검증자 실측 2026-09-15). 그래서 라벨 아래에 완충 문구를 붙였다.
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label("글쇠 설정 열기", systemImage: "arrow.up.forward.app")
+                    Text("설정 앱을 열어요. 「글쇠」가 바로 안 보이면 「앱」에서 찾으세요.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            // **설명 글을 지우면서 이 버튼이 유일한 상시 안내 경로가 됐다.**
+            // 이름도 바꿨다 — 예전 「왜 두 가지가 필요한지 보기」의 "두 가지"는 iOS 설정 둘
+            // (전체 접근 허용 · 다른 앱에서 붙여넣기)을 가리키는 말이었는데, 이 절에 토글이 셋이라
+            // **우리 토글 두 개로 읽힐 여지**가 생겼다. 무엇이 나오는지를 이름이 말하게 한다.
+            Button {
+                showsClipboardPermissionSheet = true
+            } label: {
+                Label("전체 접근 켜는 방법 보기", systemImage: "questionmark.circle")
+            }
         } header: {
             Text("클립보드")
         } footer: {
-            Text("전체 접근이 필요해요 — 아래 「전체 접근」 안내를 보세요. 기록을 끄면 저장분이 바로 삭제돼요.")
+            // **둘 다 반드시 남긴다.** 앞 문장은 "권한을 안 켜면 앱을 못 쓴다"는 오해를 막는
+            // 안심 문장이고, 뒷 문장은 **개인정보 처리방침이 이용자 권리로 명시한 것**이라
+            // 안내 없이 지우면 방침과 화면이 어긋난다 (반론자 R-3).
+            Text("전체 접근 없이도 한글 입력·채움글·추천단어는 그대로 동작해요.\n"
+                 + "클립보드 기록을 끄면 저장분이 바로 삭제돼요.")
+        }
+    }
+
+    /// 전체 접근이 필요한 토글의 공용 바인딩 — **끔 → 켬 전환에서만** 권한 시트를 띄운다.
+    ///
+    /// 이미 켜 둔 사용자를 다시 괴롭히지 않으려고 전환 방향을 본다
+    /// (클립보드 기록 토글이 2026-09-11부터 쓰던 규칙과 같다).
+    private func fullAccessBinding(_ keyPath: WritableKeyPath<KeyboardSettings, Bool>) -> Binding<Bool> {
+        Binding(
+            get: { settings[keyPath: keyPath] },
+            set: { enabled in
+                let wasOff = !settings[keyPath: keyPath]
+                settings[keyPath: keyPath] = enabled
+                if enabled, wasOff { showsClipboardPermissionSheet = true }
+            }
+        )
+    }
+
+    /// 토글 라벨 — 제목 + "전체 접근 권한 필요" 한 줄. 세 토글이 같은 모양을 쓴다.
+/// (문구는 사용자 지시 2026-09-15: "전체 접근 필요 → 전체 접근 권한 필요")
+    private func settingLabel(_ title: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+            Text("전체 접근 권한 필요")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -119,58 +212,6 @@ struct ToolbarTab: View {
                 }
             }
         )
-    }
-
-    /// **전체 접근 안내 — 항상 보인다.**
-    ///
-    /// 설계 결정(사장님, 2026-09-11): **상태를 추정하지 않는다.** 컨테이너 앱은
-    /// `hasFullAccess`를 읽을 수 없고, App Group 쓰기 흔적으로 추정하면 오탐(신규 설치 직후
-    /// 허용 상태인데 "꺼짐"으로 보임)과 미탐(허용 뒤 철회를 모름)을 구분할 수 없다(반론자 B).
-    /// 그래서 "지금 켜졌는지"를 말하지 않고 **"이 기능에는 전체 접근이 필요하다"는 요건만**
-    /// 조건 없이 설명한다. App Group에 새 키를 만들지 않는다.
-    ///
-    /// **"다른 앱에서 붙여넣기"를 반드시 함께 안내한다.** 전체 접근만 켜면 iOS가 붙여넣기 확인
-    /// 창을 띄워 "여전히 안 된다"가 되기 때문이다 — 시뮬레이터에서 실측한 지점이다
-    /// (`paste-chip-plan.md` A-2).
-    private var fullAccessSection: some View {
-        Section {
-            VStack(alignment: .leading, spacing: 10) {
-                Label("인증번호 제안·클립보드 도구와 기록·키 입력 진동은 전체 접근이 있어야 동작해요.",
-                      systemImage: "lock.open")
-                    .font(.subheadline)
-                // 실측으로 짧은 경로를 확인해 바꿨다(2026-09-11) — `openSettingsURLString`이 여는
-                // `설정 > 글쇠` 페이지 안에 「키보드 ›」가 있고 그 안에 「전체 접근 허용」이 있다.
-                // 예전 문구(설정 > 일반 > 키보드 > 키보드 > 글쇠)도 맞지만 두 단계 더 돌아간다.
-                Text("켜는 곳: 설정 > 글쇠 > 키보드 > 전체 접근 허용")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                Divider()
-                Text("인증번호가 칩에 보이려면 키보드가 복사한 내용을 읽어야 해요. 그래서 iOS가 "
-                     + "\"붙여넣으려고 함\" 확인 창을 띄워요. 매번 누르기 번거로우면 아래에서 "
-                     + "「다른 앱에서 붙여넣기」를 \"허용\"으로 바꾸세요.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                // 기본값이 "묻기"다(실측). 선택지는 묻기·거부·허용 셋이다.
-                Text("바꾸는 곳: 설정 > 글쇠 > 다른 앱에서 붙여넣기 > 허용")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 2)
-
-            Button {
-                // 컨테이너 앱이라 자기 설정 페이지를 열 수 있다 (온보딩이 이미 쓰는 경로).
-                // 키보드 설정 화면까지 바로 가는 공개 URL은 없어 경로를 글로 적었다.
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
-                }
-            } label: {
-                Label("글쇠 설정 열기", systemImage: "arrow.up.forward.app")
-            }
-        } header: {
-            Text("전체 접근")
-        } footer: {
-            Text("전체 접근 없이도 한글 입력·채움글·추천단어 등 핵심 기능은 전부 동작해요.")
-        }
     }
 
     private var suggestionSection: some View {
@@ -194,22 +235,13 @@ struct ToolbarTab: View {
             } label: {
                 LabeledContent("채움글", value: settings.snippetsEnabled ? "켬" : "끔")
             }
-
-            // **토글 옆에 요건을 적는다.** 권한이 없어도 토글은 켜진 채로 보이므로,
-            // 사용자는 "켰는데 왜 안 되지"가 된다 — 이번 버그 보고가 정확히 그 결과다
-            // (2026-09-11). 상태를 추정하지 않고 **요건만** 조건 없이 말한다.
-            Toggle(isOn: $settings.verificationCodeSuggestionsEnabled) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("복사한 인증번호 제안")
-                    Text("전체 접근 필요")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            // 「복사한 인증번호 제안」 토글은 **클립보드 절로 옮겼다** (2026-09-15).
+            // 여기 있던 푸터가 **사라진 「전체 접근」 헤더를 가리키고 있었고**(반론자 R-1),
+            // 그 토글은 클립보드 기록과 **같은 권한 하나**에 묶여 있어 같은 절이 맞다.
         } header: {
             Text("추천과 채움글")
         } footer: {
-            Text("학습은 기기 안에서만 해요. 인증번호 제안은 전체 접근이 필요해요 — 아래 「전체 접근」 안내를 보세요.")
+            Text("학습은 기기 안에서만 해요.")
         }
     }
 

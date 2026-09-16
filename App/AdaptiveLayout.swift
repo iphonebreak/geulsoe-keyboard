@@ -14,7 +14,9 @@ enum AdaptiveLayout {
     /// 온보딩 한 페이지 내용의 최대 폭.
     static let onboardingMaxWidth: CGFloat = 560
 
-    static var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
+    /// `UIDevice.current` 는 MainActor 격리라 nonisolated 에서 읽으면 Swift 6 경고가 난다.
+    /// 호출부가 SwiftUI 뷰 본문 하나뿐이라(`OnboardingView.swift:201`) 격리를 명시해도 잃는 게 없다.
+    @MainActor static var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 }
 
 private struct ReadableWidth: ViewModifier {

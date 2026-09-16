@@ -440,7 +440,9 @@ struct ToolbarOrderPreview: View {
         } else {
             parts.append("꺼짐")
         }
-        if tool == .clipboard { parts.append("전체 접근 필요") }
+        // 토글 라벨과 **같은 문구**를 쓴다 — 보이는 글과 읽어 주는 글이 갈리면 안 된다
+        // (사용자 지시 2026-09-15: "전체 접근 필요 → 전체 접근 권한 필요").
+        if tool == .clipboard { parts.append("전체 접근 권한 필요") }
         return parts.joined(separator: ", ")
     }
 }
