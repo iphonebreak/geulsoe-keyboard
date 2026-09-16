@@ -130,6 +130,34 @@ fi
 echo "Tadak.xcodeproj 생성됨"
 
 # ---------------------------------------------------------------------------
+# 5-1. Package.resolved 를 제자리로 복사한다
+#
+# Xcode Cloud 는 **자동 의존성 해석이 꺼져 있다** — 이 파일이 없으면 이렇게 죽는다:
+#   "Could not resolve package dependencies: a resolved file is required when
+#    automatic dependency resolution is disabled and should be placed at
+#    .../Tadak.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved"
+# (2026-09-16 실측 — 첫 CI 빌드가 정확히 여기서 멈췄다.)
+#
+# 그 경로는 `Tadak.xcodeproj` 안이라 생성물과 함께 사라진다. 그래서 **저장소 루트가 SSOT**이고
+# (`.gitignore` 의 `!/Package.resolved`) 여기서 xcodegen 이 만든 자리로 옮겨 놓는다.
+# **반드시 xcodegen 뒤여야 한다** — 앞에 두면 생성 과정에서 덮여 사라진다.
+# ---------------------------------------------------------------------------
+SWIFTPM_DIR="Tadak.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
+if [ -f "Package.resolved" ]; then
+    mkdir -p "$SWIFTPM_DIR"
+    cp Package.resolved "$SWIFTPM_DIR/Package.resolved"
+    echo "Package.resolved: 제자리로 복사했다 ($SWIFTPM_DIR)"
+    # 무엇이 고정됐는지 로그에 남긴다 — 배포본과 우리가 검증한 버전이 같은지 나중에 대조할 수 있다.
+    /usr/bin/grep -E '"(identity|version)"' Package.resolved | /usr/bin/paste - - | /usr/bin/sed 's/^/  /' || true
+else
+    echo "실패: 저장소 루트에 Package.resolved 가 없다." >&2
+    echo "      Xcode Cloud 는 자동 의존성 해석이 꺼져 있어 이 파일이 반드시 필요하다." >&2
+    echo "      로컬에서 xcodegen generate 후 빌드해 만들고, 루트로 복사해 커밋하라:" >&2
+    echo "      cp $SWIFTPM_DIR/Package.resolved Package.resolved" >&2
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
 # 6. 빌드 전에 깨질 것들을 여기서 미리 잡는다
 #
 # CI 로그가 유일한 단서다. `xcodebuild`가 엉뚱한 에러로 터지기 전에 원인을 먼저 남긴다.

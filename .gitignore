@@ -13,7 +13,19 @@ xcuserdata/
 
 # SPM
 .swiftpm/
+# Package.resolved — **루트의 것 하나만 커밋한다** (2026-09-16).
+#
+# Xcode Cloud 는 자동 의존성 해석이 꺼져 있어 이 파일이 없으면 빌드가 아예 안 선다
+# ("a resolved file is required when automatic dependency resolution is disabled").
+# 그리고 커밋해야 할 이유가 CI 편의보다 크다 — Firebase 본체는 exactVersion 으로 고정돼
+# 있지만 **전이 의존성 13개는 범위로 해석된다.** 수출 규정·프라이버시 판단(IDFA/ATT 심볼,
+# BoringSSL 건수)이 전부 **지금 해석된 그 버전들**에 대한 측정이라, CI 가 다른 조합을 뽑으면
+# 우리가 검증한 것과 다른 앱이 배포된다. 편의가 아니라 정합성 문제다.
+#
+# 원래 자리(`Tadak.xcodeproj/…/swiftpm/`)는 생성물과 함께 사라지므로 루트를 SSOT 로 삼고,
+# `ci_scripts/ci_post_clone.sh` 가 xcodegen 뒤에 제자리로 복사한다.
 Package.resolved
+!/Package.resolved
 
 # 로컬 전용 — 원격에 올리지 않는다
 .claude/
