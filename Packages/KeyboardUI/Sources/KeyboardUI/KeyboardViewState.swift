@@ -19,14 +19,19 @@ public final class KeyboardViewState {
     public var keyboardHeight: CGFloat
     public var showsKeyPreview: Bool
     public var needsInputModeSwitchKey: Bool
-    /// 툴바에 띄울 채움글 후보. 트리거 근처에서만 nil↔값이 바뀌고
+    /// 툴바에 띄울 채움글 후보. 단축어 근처에서만 nil↔값이 바뀌고
     /// 구독자는 툴바뿐이라 키캡 뷰 리빌드를 일으키지 않는다 (성능 규율 유지).
     public var snippetSuggestion: SnippetSuggestion?
     /// 추천단어 후보 (최대 3개). 채움글 칩이 있으면 조립 지점이 비워 넣는다 (칩만 표시).
     /// 구독자는 툴바뿐 — 키캡 리빌드 없음.
     public var wordSuggestions: [String]
-    /// 클립보드에서 추출한 인증번호 — 칩에 값 그대로 표시된다. nil이면 칩 없음.
-    public var pasteboardCode: String?
+    /// 툴바 붙여넣기 칩 — **인증번호 또는 복사한 일반 텍스트** 하나. nil이면 칩 없음.
+    ///
+    /// 2026-09-15 이전에는 `pasteboardCode: String?`(인증번호 전용)였다. 사용자 요구로
+    /// 일반 텍스트도 칩이 되면서 **무엇을 보여 주고 무엇을 넣을지가 달라졌다** —
+    /// 일반 칩은 보이는 것(잘린 미리보기)과 넣는 것(원문 전체)이 다르다. 그 둘을 문자열 하나로는
+    /// 표현할 수 없어 값 타입으로 올렸다 (`KeyboardCore.PasteSuggestion`).
+    public var pasteSuggestion: PasteSuggestion?
     /// 툴바 도구 행에 보일 도구들 — 조립 지점이 설정(disabledTools)·권한(FA) 필터 후 넣는다.
     /// 후보(칩·추천단어)가 하나라도 있으면 후보가 우선한다 (PDR toolbar-tools).
     public var visibleTools: [ToolbarTool]
@@ -53,7 +58,7 @@ public final class KeyboardViewState {
         needsInputModeSwitchKey: Bool = false,
         snippetSuggestion: SnippetSuggestion? = nil,
         wordSuggestions: [String] = [],
-        pasteboardCode: String? = nil,
+        pasteSuggestion: PasteSuggestion? = nil,
         visibleTools: [ToolbarTool] = [],
         showsEmojiPanel: Bool = false,
         recentEmojis: [String] = [],
@@ -71,7 +76,7 @@ public final class KeyboardViewState {
         self.needsInputModeSwitchKey = needsInputModeSwitchKey
         self.snippetSuggestion = snippetSuggestion
         self.wordSuggestions = wordSuggestions
-        self.pasteboardCode = pasteboardCode
+        self.pasteSuggestion = pasteSuggestion
         self.visibleTools = visibleTools
         self.showsEmojiPanel = showsEmojiPanel
         self.recentEmojis = recentEmojis

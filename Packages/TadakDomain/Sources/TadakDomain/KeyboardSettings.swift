@@ -45,6 +45,13 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 복사한 인증번호를 툴바 칩으로 제안. **전체 접근이 있어야만 동작한다** —
     /// 없으면 조용히 비표시 (PDR verification-code-paste).
     public var verificationCodeSuggestionsEnabled: Bool
+    /// 복사한 **일반 텍스트**를 툴바 칩으로 제안할지 (기본 켬, 2026-09-15 사용자 결정).
+    ///
+    /// `verificationCodeSuggestionsEnabled` 와 **따로 둔다.** 성격이 다르다 —
+    /// 인증번호 칩은 숫자만 보이지만 이쪽은 **복사한 내용이 그대로 보인다.**
+    /// 하나로 묶으면 "인증번호만 원하는" 사용자가 내용 노출을 끌 방법이 없어진다
+    /// (설계 `docs/design-reviews/paste-chip-plan.md` C-5).
+    public var pasteSuggestionEnabled: Bool
     /// 클립보드 기록(툴바 클립보드 도구). 끄면 저장분을 즉시 삭제한다 — 보안 규칙 조항.
     /// 전체 접근 필요 (PDR clipboard-history).
     public var clipboardHistoryEnabled: Bool
@@ -52,10 +59,10 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 변화를 보고 엔진을 재생성한다(세션 메모리 폐기). 저장소만 비우면 살아 있는
     /// 프로세스가 다음 학습 때 옛 단어를 되살린다 — PDR settings-app 결정 4.
     public var learningResetToken: Int
-    /// 채움글(트리거 → 전문 자동완성) 전체 스위치.
+    /// 채움글(단축어 → 전문 자동완성) 전체 스위치.
     public var snippetsEnabled: Bool
     /// 성경 채움글 삽입 시 머리말을 앞에 넣을지 (기본 켬). 설정 앱 성경 팩 상세의 스위치 (2026-09-07).
-    /// 머리말은 사용자가 친 트리거 원문 그대로다 — `창세기 1장 1절`을 쳤으면 `[창세기 1장 1절] ` (2026-09-14).
+    /// 머리말은 사용자가 친 단축어 원문 그대로다 — `창세기 1장 1절`을 쳤으면 `[창세기 1장 1절] ` (2026-09-14).
     public var bibleSnippetPrefixEnabled: Bool
     /// 끈 내장 채움글 팩 id 목록 (`"bible"`, `"anthem"`). 옵트아웃이라 새 팩은 기본 켬.
     public var disabledSnippetPacks: [String]
@@ -130,6 +137,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         longPressSymbolsEnabled: Bool = true,
         suggestionsEnabled: Bool = true,
         verificationCodeSuggestionsEnabled: Bool = true,
+        pasteSuggestionEnabled: Bool = true,
         // **기본값이 끔이다** (사용자 결정 2026-09-11). 클립보드 기록은 사용자가 복사한 내용을
         // App Group에 남기는 유일한 경로 중 하나라, 켜는 것을 사용자가 **의식적으로 선택**하게 한다.
         //
@@ -167,6 +175,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.longPressSymbolsEnabled = longPressSymbolsEnabled
         self.suggestionsEnabled = suggestionsEnabled
         self.verificationCodeSuggestionsEnabled = verificationCodeSuggestionsEnabled
+        self.pasteSuggestionEnabled = pasteSuggestionEnabled
         self.clipboardHistoryEnabled = clipboardHistoryEnabled
         self.learningResetToken = learningResetToken
         self.snippetsEnabled = snippetsEnabled
@@ -218,6 +227,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         longPressSymbolsEnabled = try container.decodeIfPresent(Bool.self, forKey: .longPressSymbolsEnabled) ?? base.longPressSymbolsEnabled
         suggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .suggestionsEnabled) ?? base.suggestionsEnabled
         verificationCodeSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .verificationCodeSuggestionsEnabled) ?? base.verificationCodeSuggestionsEnabled
+        pasteSuggestionEnabled = try container.decodeIfPresent(Bool.self, forKey: .pasteSuggestionEnabled) ?? base.pasteSuggestionEnabled
         clipboardHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .clipboardHistoryEnabled) ?? base.clipboardHistoryEnabled
         learningResetToken = try container.decodeIfPresent(Int.self, forKey: .learningResetToken) ?? base.learningResetToken
         snippetsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snippetsEnabled) ?? base.snippetsEnabled

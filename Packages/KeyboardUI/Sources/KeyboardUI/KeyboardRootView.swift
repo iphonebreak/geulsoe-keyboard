@@ -224,7 +224,7 @@ private struct SuggestionToolbar: View {
     var body: some View {
         let snippet = state.snippetSuggestion
         let words = state.wordSuggestions
-        let hasCandidates = snippet != nil || !words.isEmpty || state.pasteboardCode != nil
+        let hasCandidates = snippet != nil || !words.isEmpty || state.pasteSuggestion != nil
         // **칩만 있을 때는 가운데 정렬한다** (사용자 요청 2026-09-11, 사장님 결정 5).
         //
         // 기준은 **닫기(✕)를 제외한 콘텐츠 영역의 가운데**다 — ✕는 오른쪽 끝에 그대로 두고
@@ -237,20 +237,11 @@ private struct SuggestionToolbar: View {
         //
         // **칩이 실제로 있을 때만** 켠다. 후보가 하나도 없는 경우(도구 행·"글쇠" 자리 표시)도
         // `words.isEmpty`라서, 그 조건만 보면 도구 행이 선행 `Spacer`에 눌려 회귀한다.
-        let centersChipOnly = (snippet != nil || state.pasteboardCode != nil) && words.isEmpty
+        let centersChipOnly = (snippet != nil || state.pasteSuggestion != nil) && words.isEmpty
         return HStack(spacing: 10) {
             if centersChipOnly { Spacer(minLength: 0) }
-            if let code = state.pasteboardCode, let onPasteboardCodeTap {
-                Button(action: onPasteboardCodeTap) {
-                    Label(code, systemImage: "doc.on.clipboard")
-                        .font(.system(size: 14, weight: .semibold).monospacedDigit())
-                        .foregroundStyle(theme.accent)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(theme.characterKey, in: Capsule())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("복사한 인증번호 \(code) 붙여넣기")
+            if let paste = state.pasteSuggestion, let onPasteboardCodeTap {
+                PasteChip(suggestion: paste, theme: theme, action: onPasteboardCodeTap)
             }
             if let snippet, let onSnippetTap {
                 SnippetChip(suggestion: snippet, theme: theme) {
@@ -278,7 +269,7 @@ private struct SuggestionToolbar: View {
                         .buttonStyle(.plain)
                 }
             }
-            if snippet == nil && words.isEmpty && state.pasteboardCode == nil {
+            if snippet == nil && words.isEmpty && state.pasteSuggestion == nil {
                 if state.visibleTools.isEmpty {
                     Text("글쇠")
                         .font(.system(size: 15, weight: .semibold))
@@ -350,7 +341,81 @@ private struct SuggestionToolbar: View {
     }
 }
 
-/// 채움글 후보 칩 — 제목 + 본문 첫 줄 미리보기. 탭하면 트리거가 전문으로 바뀐다.
+/// 붙여넣기 칩 — 복사한 내용을 **한 줄**로 보여 주고, 탭하면 넣는다.
+///
+/// ## 두 모양이 한 칩을 쓴다
+///
+/// - **인증번호**: 번호만. 예전 모양 그대로다(고정폭 숫자, accent 색) — 회귀를 만들지 않는다.
+/// - **일반 텍스트**: `복사됨` 라벨 + 내용 미리보기.
+///   사용자가 준 예시는 `'복사했어요 맘에 드십니...'` 였고, **문구는 2026-09-15 사용자 지시로 `복사됨`으로 바꿨다.**
+///
+/// ## 왜 라벨을 붙이나
+///
+/// 사용자 예시를 **앞부분이 라벨이고 뒤가 내용**으로 읽었다(2026-09-15 구현자 판단).
+/// 그 읽기는 사용자가 확인했다 — 문구만 `복사됨`으로 바꾸라고 했다.
+/// 근거 둘 — (1) 라벨이 있으면 이 칩이 **왜 갑자기 떴는지**를 사용자가 안다.
+/// (2) 바로 옆 `SnippetChip`이 이미 `[제목] 본문 미리보기` 구조라 시각적으로 일관된다.
+/// 다만 **대괄호는 쓰지 않는다** — 사용자 예시에 없었다.
+/// 틀렸으면 이 뷰 한 곳만 고치면 된다.
+///
+/// **보이는 것과 넣는 것이 다르다** — 미리보기는 잘리고 넣는 것은 원문 전체다.
+/// 그래서 잘렸다는 사실을 말줄임표로 반드시 알린다(`PasteSuggestion.previewLine`).
+private struct PasteChip: View {
+
+    let suggestion: PasteSuggestion
+    let theme: ResolvedTheme
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: 13, weight: .semibold))
+                if suggestion.kind == .text {
+                    Text("복사됨")
+                        .font(.system(size: 14, weight: .bold))
+                        .lineLimit(1)
+                        .fixedSize()
+                }
+                Text(suggestion.preview)
+                    .font(suggestion.kind == .verificationCode
+                          ? .system(size: 14, weight: .semibold).monospacedDigit()
+                          : .system(size: 14))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            // ★ 글자색은 `keyText`다 — `accent`가 아니다 (2026-09-15 사용자 보고).
+            //
+            // **같은 실수가 두 번째다.** 바로 위 `SnippetChip`이 2026-09-03에 똑같은 피드백으로
+            // 이미 고쳤는데("accent(파랑)는 배경과 대비가 약해 안 보인다"), 이 칩은 2026-09-15에
+            // 새로 만들면서 그 교훈을 못 받고 `accent`로 갔다. 다크 테마에서 파란 글자가
+            // `characterKey` 배경에 묻혀 안 보인다는 보고가 그대로 다시 왔다.
+            //
+            // **배경이 `characterKey`면 글자는 `keyText`다.** 팔레트가 배경 < 기능 키 < 문자 키
+            // 3단계 대비를 보장하는 짝이 그 둘이고(CLAUDE.md), `accent`는 그 대비 보장 밖이다 —
+            // 테마마다 값이 달라 어떤 테마에서는 우연히 보이고 어떤 테마에서는 묻힌다.
+            // 칩을 구분하는 일은 색이 아니라 클립보드 아이콘과 「복사됨」 라벨이 한다.
+            .foregroundStyle(theme.keyText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(theme.characterKey, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    /// 화면에 잘려 보이더라도 **읽어 줄 때는 미리보기 전체**를 읽는다 — 잘린 곳에서 끊기면
+    /// 무엇을 붙여넣는지 알 수 없다. (원문 전체가 아니라 미리보기다 — 문단을 다 읽지 않는다.)
+    private var accessibilityLabel: String {
+        switch suggestion.kind {
+        case .verificationCode: "복사한 인증번호 \(suggestion.preview) 붙여넣기"
+        case .text: "복사한 내용 \(suggestion.preview) 붙여넣기"
+        }
+    }
+}
+
+/// 채움글 후보 칩 — 제목 + 본문 첫 줄 미리보기. 탭하면 단축어가 전문으로 바뀐다.
 private struct SnippetChip: View {
 
     let suggestion: SnippetSuggestion
