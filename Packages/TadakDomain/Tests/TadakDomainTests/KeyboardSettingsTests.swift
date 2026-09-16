@@ -324,3 +324,133 @@ struct ThemeSpecTests {
         #expect(roundTrip.longPressSymbolsEnabled == false)
     }
 }
+
+/// **기존 설치의 저장본에는 새 키가 없다** — 폴백이 실제로 「켬」을 주는지 못 박는다.
+///
+/// 2026-09-15 에 사용자가 "복사했는데 칩이 안 뜬다"고 보고했을 때 의심 목록에 오른 자리다:
+/// `pasteSuggestionEnabled` 는 이번에 새로 생긴 필드라 **v1.0.1 이전에 저장된 JSON 에는 없다.**
+/// `decodeIfPresent ?? base` 가 기본 켬을 주지 않으면 **기존 사용자는 칩을 영영 못 본다.**
+/// 마이그레이션 함정이라 실제 JSON 으로 확인한다.
+@Suite("설정 마이그레이션 — 새 키가 없는 옛 저장본")
+struct KeyboardSettingsMigrationTests {
+
+    @Test("pasteSuggestionEnabled 키가 없으면 켬으로 온다")
+    func pasteSuggestionDefaultsOnForOldPayload() throws {
+        // 옛 저장본을 흉내 낸다 — 새 키가 아예 없다
+        let json = """
+        {"clipboardHistoryEnabled":true,"verificationCodeSuggestionsEnabled":true}
+        """
+        let settings = try JSONDecoder().decode(KeyboardSettings.self, from: Data(json.utf8))
+        #expect(settings.pasteSuggestionEnabled == true, "새 키가 없으면 기본 켬이어야 한다")
+    }
+
+    @Test("빈 JSON 객체도 기본값 전부로 온다")
+    func emptyPayloadYieldsDefaults() throws {
+        let settings = try JSONDecoder().decode(KeyboardSettings.self, from: Data("{}".utf8))
+        #expect(settings.pasteSuggestionEnabled == true)
+        #expect(settings.verificationCodeSuggestionsEnabled == true)
+    }
+
+    @Test("명시적으로 꺼 둔 저장본은 존중한다")
+    func explicitFalseIsRespected() throws {
+        let json = #"{"pasteSuggestionEnabled":false}"#
+        let settings = try JSONDecoder().decode(KeyboardSettings.self, from: Data(json.utf8))
+        #expect(settings.pasteSuggestionEnabled == false)
+    }
+}
+
+/// 단축어 정규화 — **설정 화면의 중복 판정과 키보드의 발동이 같은 함수를 써야 한다.**
+/// 두 군데서 따로 정의하면 "저장은 됐는데 안 뜬다"가 생긴다.
+@Suite("단축어 정규화")
+struct SnippetTriggerNormalizationTests {
+
+    @Test("공백·개행을 없앤다", arguments: [
+        ("우리집주소", "우리집주소"),
+        ("우리집 주소", "우리집주소"),
+        ("우 리 집 주 소", "우리집주소"),
+        ("  우리집\t주소\n", "우리집주소"),
+        ("", "")
+    ])
+    func normalizes(testCase: (String, String)) {
+        #expect(SnippetEntry.normalizedTrigger(testCase.0) == testCase.1)
+    }
+
+    /// 목록 id 는 **정규화 단축어를 이어 붙인 것**이라, 띄어쓰기만 다른 항목은 같은 id 가 된다
+    /// (= 중복으로 걸러진다).
+    @Test("띄어쓰기만 다른 항목은 같은 목록 id 를 갖는다")
+    func listIDIgnoresSpacing() {
+        let a = SnippetEntry(triggers: ["우리집주소", "집주소"], title: "A", body: "본문")
+        let b = SnippetEntry(triggers: ["우리집 주소", "집 주소"], title: "B", body: "다른 본문")
+        #expect(a.snippetListID == b.snippetListID)
+    }
+
+    @Test("단축어 집합이 다르면 목록 id 도 다르다")
+    func listIDDistinguishesDifferentSets() {
+        let a = SnippetEntry(triggers: ["집주소"], title: "A", body: "본문")
+        let b = SnippetEntry(triggers: ["집주소", "우리집주소"], title: "B", body: "본문")
+        #expect(a.snippetListID != b.snippetListID)
+    }
+}
+
+/// 단축어 **쉼표 파싱** — 편집 시트가 받은 한 줄을 단축어 목록으로 쪼개는 규칙.
+///
+/// 이 규칙은 원래 `SnippetEditorView` 안의 `private var parsedTriggers` 라 **테스트가 닿지
+/// 않았다.** 검증자가 코드를 읽어 8가지를 추적했지만 그건 추적이지 테스트가 아니다
+/// (`docs/release/verify-snippet-shortcut.md` 5-1). 그 8가지를 여기에 그대로 고정한다.
+@Suite("단축어 쉼표 파싱")
+struct SnippetTriggerParsingTests {
+
+    @Test("쉼표로 쪼갠다 — 띄어쓰기 3꼴이 모두 같은 결과", arguments: [
+        "우리집주소, 집주소",     // 1. 쉼표 + 공백
+        "우리집주소,집주소",       // 2. 공백 없음
+        "우리집주소 , 집주소"      // 3. 쉼표 앞뒤 공백
+    ])
+    func splitsOnComma(input: String) {
+        #expect(SnippetEntry.parseTriggers(input) == ["우리집주소", "집주소"])
+    }
+
+    @Test("빈 조각은 버린다 — 연속 쉼표·끝 쉼표·공백만 있는 조각", arguments: [
+        ("우리집주소,,집주소", ["우리집주소", "집주소"]),        // 4. 연속 쉼표
+        ("우리집주소,", ["우리집주소"]),                       // 5. 맨 끝 쉼표
+        ("우리집주소, , 집주소", ["우리집주소", "집주소"]),      // 6. 공백만 있는 조각
+        (",우리집주소", ["우리집주소"]),
+        ("  우리집주소  ", ["우리집주소"])
+    ])
+    func dropsEmptyPieces(testCase: (String, [String])) {
+        #expect(SnippetEntry.parseTriggers(testCase.0) == testCase.1)
+    }
+
+    /// 7. 정규화(공백 제거) 기준으로 같으면 하나로 합친다.
+    @Test("띄어쓰기만 다른 단축어는 하나로 합친다")
+    func mergesNormalizedDuplicates() {
+        #expect(SnippetEntry.parseTriggers("우리집주소, 우리집 주소") == ["우리집주소"])
+        #expect(SnippetEntry.parseTriggers("우 리 집 주 소, 우리집주소").count == 1)
+        #expect(SnippetEntry.parseTriggers("집주소, 집주소, 집주소") == ["집주소"])
+    }
+
+    /// 8. 건질 게 하나도 없으면 빈 배열 — 편집 시트의 저장 버튼이 이걸로 비활성된다.
+    @Test("건질 게 없으면 0개", arguments: [",", "", "   ", ",,,", " , , "])
+    func yieldsNothing(input: String) {
+        #expect(SnippetEntry.parseTriggers(input).isEmpty)
+    }
+
+    /// **정규화는 중복 판정에만 쓴다 — 저장되는 값은 사용자가 친 원문이다.**
+    /// 이게 뒤집히면 목록에 "우리집 주소"로 등록한 것이 "우리집주소"로 보인다.
+    @Test("원문을 그대로 보존한다 (정규화한 값을 저장하지 않는다)")
+    func preservesRawInput() {
+        #expect(SnippetEntry.parseTriggers("우리집 주소, 집 주소") == ["우리집 주소", "집 주소"])
+    }
+
+    /// 중복을 합칠 때 살아남는 것은 **먼저 친 쪽의 원문**이다.
+    @Test("중복을 합치면 먼저 친 원문이 남는다")
+    func keepsFirstSpelling() {
+        #expect(SnippetEntry.parseTriggers("우리집 주소, 우리집주소") == ["우리집 주소"])
+        #expect(SnippetEntry.parseTriggers("우리집주소, 우리집 주소") == ["우리집주소"])
+    }
+
+    /// 입력 순서를 그대로 지킨다 (첫 단축어가 제목 기본값이 되므로 순서가 보이는 값이다).
+    @Test("입력 순서를 지킨다")
+    func preservesOrder() {
+        #expect(SnippetEntry.parseTriggers("가, 나, 다, 라") == ["가", "나", "다", "라"])
+    }
+}

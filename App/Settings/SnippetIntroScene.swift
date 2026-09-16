@@ -125,7 +125,7 @@ enum SnippetIntroScript {
         apply(.linear(duration: 0.08)) { $0.chipPressed = true }
         try await pause(120)
 
-        // 6.95 — 트리거가 전문으로 바뀌고 칩은 도구 행으로 돌아간다 (실제 동작: 삽입 뒤 꼬리가 트리거와 안 맞는다)
+        // 6.95 — 단축어가 전문으로 바뀌고 칩은 도구 행으로 돌아간다 (실제 동작: 삽입 뒤 꼬리가 단축어와 안 맞는다)
         apply(.easeInOut(duration: 0.25)) {
             $0.text = SnippetIntroDemo.body
             $0.chipPressed = false

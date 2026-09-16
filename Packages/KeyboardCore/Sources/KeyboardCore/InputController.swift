@@ -42,7 +42,7 @@ public final class InputController {
     private let keystrokeLogLimit = 128
     private var keystrokeLogOverflowed = false
 
-    /// 채움글 트리거 매칭용 확정 텍스트 꼬리. 문서가 아니라 이 파이프라인이 직접 추적한다 —
+    /// 채움글 단축어 매칭용 확정 텍스트 꼬리. 문서가 아니라 이 파이프라인이 직접 추적한다 —
     /// 300자 문맥 제한·호스트별 프록시 편차와 무관해진다 (PDR snippet-autocomplete).
     /// 메모리에만 있고 48자 상한. 로그·파일·네트워크로 내보내지 않는다 (보안 규칙).
     private var committedTail = ""
@@ -159,7 +159,7 @@ public final class InputController {
             commitComposition()
             notifyWordCommitted()
             output.insertText("\n")
-            // 트리거는 줄을 넘지 않는다 — 꼬리를 새 줄에서 다시 시작한다
+            // 단축어는 줄을 넘지 않는다 — 꼬리를 새 줄에서 다시 시작한다
             committedTail.removeAll()
         case .shift: handleShift()
         case .toggleLanguage:
@@ -234,7 +234,7 @@ public final class InputController {
         if documentTail != nil { updateAutoCapitalization() }
     }
 
-    /// 문서 꼬리에서 마지막 줄의 끝 `limit`자 — 트리거는 줄을 넘지 않는다는 규칙과 일치
+    /// 문서 꼬리에서 마지막 줄의 끝 `limit`자 — 단축어는 줄을 넘지 않는다는 규칙과 일치
     private static func tailLine(of text: String, limit: Int) -> String {
         let lastLine = text.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
         return String(lastLine.suffix(limit))
@@ -314,7 +314,7 @@ public final class InputController {
         suppressesNextWordCommit = false
         guard mode == .hangul else {
             output.deleteBackward(1)
-            // 기호/영어 모드도 꼬리를 함께 걷는다 — 트리거의 숫자·콜론이 이 모드에서
+            // 기호/영어 모드도 꼬리를 함께 걷는다 — 단축어의 숫자·콜론이 이 모드에서
             // 지워지므로, 빠뜨리면 문서에 없는 텍스트로 칩이 뜨고 탭 시 문서를 파괴한다
             if !committedTail.isEmpty { committedTail.removeLast() }
             return
@@ -400,7 +400,7 @@ public final class InputController {
         commitComposition()
         notifyWordCommitted()
         output.insertText(" ")
-        appendToTail(" ")  // 트리거에 공백이 들어간다 ("창세기 1장 1절")
+        appendToTail(" ")  // 단축어에 공백이 들어간다 ("창세기 1장 1절")
         lastSpaceTimestamp = now
     }
 
@@ -468,11 +468,11 @@ public final class InputController {
 
     // MARK: - 채움글
 
-    /// 채움글 삽입 — 트리거를 지우고 전문을 넣는다. `deleteBackward` + `insertText`만 쓰므로
+    /// 채움글 삽입 — 단축어를 지우고 전문을 넣는다. `deleteBackward` + `insertText`만 쓰므로
     /// Full Access가 필요 없다. 매칭에 쓴 꼬리(`textTail`)와 문서 상태가 같아야 한다 —
     /// 키 입력 직후 조립 지점이 매칭·표시하므로 탭 시점에도 그대로다.
     ///
-    /// **정합 검사(QA BLOCK-2).** 꼬리가 지금도 이 트리거로 끝날 때만 삽입한다. 검사가 없으면
+    /// **정합 검사(QA BLOCK-2).** 꼬리가 지금도 이 단축어로 끝날 때만 삽입한다. 검사가 없으면
     /// 같은 칩이 두 번 들어올 때(퇴장 애니메이션 0.28초 중 더블탭) 2회차가 방금 삽입한 본문 끝을
     /// `triggerLength`만큼 잘라냈다 — 절 범위(`창세기 1:1~13`)면 본문 1,444B가 다시 들어가고
     /// 앞의 10자가 사라진다. 어긋나면 **아무 것도 하지 않는다** (문서를 건드리는 쪽이 늘 더 나쁘다).
@@ -483,14 +483,14 @@ public final class InputController {
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 (기존 규칙) — 문서 텍스트는 안 변한다
         output.deleteBackward(suggestion.triggerLength)
-        // 머리말 + 본문. 머리말은 **사용자가 친 트리거 원문 그대로**다 — `창세기 1장 1절`을
+        // 머리말 + 본문. 머리말은 **사용자가 친 단축어 원문 그대로**다 — `창세기 1장 1절`을
         // 쳤으면 `[창세기 1장 1절] `이고 정규 표기로 바꾸지 않는다(2026-09-14,
         // PDR snippet-prefix-verbatim). 칩 제목만 정규 표기를 쓴다.
         let inserted = suggestion.insertedText
         output.insertText(inserted)
 
         committedTail.removeLast(min(suggestion.triggerLength, committedTail.count))
-        // 본문 마지막 줄만 꼬리에 남긴다 — 트리거는 줄을 넘지 않는다는 규칙과 일치.
+        // 본문 마지막 줄만 꼬리에 남긴다 — 단축어는 줄을 넘지 않는다는 규칙과 일치.
         // 본문에 줄바꿈이 있으면 문서의 마지막 줄은 본문 뒤쪽뿐이므로 **앞에 남아 있던 꼬리는
         // 버린다** — 남겨 두면 꼬리가 문서와 어긋나 다음 매칭이 엉뚱한 길이를 지운다
         // (절 범위·애국가처럼 여러 줄인 본문에서 드러난다, PDR bible-verse-range).

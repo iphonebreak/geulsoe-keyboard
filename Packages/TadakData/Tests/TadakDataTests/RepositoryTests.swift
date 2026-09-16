@@ -170,27 +170,27 @@ struct SnippetRepositoryTests {
     @Test("국가 상징 팩 — 애국가 1~4절 + 국기에 대한 맹세·헌법 전문·제1조·독립선언서")
     func loadsBundledNational() {
         let entries = BundledSnippetRepository().entries()
-        let anthem = entries.filter { $0.trigger.hasPrefix("애국가") }
-        #expect(anthem.map(\.trigger) == ["애국가 1절", "애국가 2절", "애국가 3절", "애국가 4절"])
+        let anthem = entries.filter { $0.primaryTrigger.hasPrefix("애국가") }
+        #expect(anthem.map(\.primaryTrigger) == ["애국가 1절", "애국가 2절", "애국가 3절", "애국가 4절"])
         #expect(anthem.first?.body.hasPrefix("동해물과 백두산이") == true)
         for entry in anthem {
-            #expect(entry.body.contains("무궁화 삼천리 화려강산"), "\(entry.trigger) 후렴 포함")
+            #expect(entry.body.contains("무궁화 삼천리 화려강산"), "\(entry.primaryTrigger) 후렴 포함")
         }
-        let triggers = Set(entries.map(\.trigger))
+        let triggers = Set(entries.map(\.primaryTrigger))
         for expected in ["국기에 대한 맹세", "국기맹세", "헌법 전문", "헌법전문", "헌법 1조", "헌법 제1조", "헌법 2조", "헌법 제130조",
                          "독립선언서", "기미독립선언서"] {
             #expect(triggers.contains(expected), "\(expected)")
         }
-        #expect(entries.first { $0.trigger == "헌법 전문" }?.body.hasPrefix("유구한 역사와 전통에 빛나는") == true)
-        #expect(entries.first { $0.trigger == "헌법 1조" }?.body.contains("민주공화국") == true)
-        // 헌법 1~130조 전부, 두 트리거 형태 (tools/convert_constitution.py — 위키문헌 원문 변환)
+        #expect(entries.first { $0.primaryTrigger == "헌법 전문" }?.body.hasPrefix("유구한 역사와 전통에 빛나는") == true)
+        #expect(entries.first { $0.primaryTrigger == "헌법 1조" }?.body.contains("민주공화국") == true)
+        // 헌법 1~130조 전부, 두 단축어 형태 (tools/convert_constitution.py — 위키문헌 원문 변환)
         for number in 1...130 {
             #expect(triggers.contains("헌법 \(number)조") && triggers.contains("헌법 제\(number)조"), "헌법 \(number)조")
         }
         // 법제처 표기 그대로 — 항 번호 뒤 공백 없음 (tools/convert_constitution.py)
-        #expect(entries.first { $0.trigger == "헌법 2조" }?.body.hasPrefix("제2조 ①대한민국의 국민이 되는 요건은 법률로 정한다.") == true)
-        #expect(entries.first { $0.trigger == "헌법 제130조" }?.body.hasPrefix("제130조") == true)
-        #expect(entries.first { $0.trigger == "독립선언서" }?.body.hasPrefix("오등은 자에") == true)
+        #expect(entries.first { $0.primaryTrigger == "헌법 2조" }?.body.hasPrefix("제2조 ①대한민국의 국민이 되는 요건은 법률로 정한다.") == true)
+        #expect(entries.first { $0.primaryTrigger == "헌법 제130조" }?.body.hasPrefix("제130조") == true)
+        #expect(entries.first { $0.primaryTrigger == "독립선언서" }?.body.hasPrefix("오등은 자에") == true)
     }
 
     /// 인사·상용구 팩 — 자체 작성 문구, 붙여쓰기·띄어쓰기 트리거 쌍 (PDR snippet-packs-greetings-national)
@@ -200,14 +200,14 @@ struct SnippetRepositoryTests {
         #expect(greetings.count >= 20)
         for expected in ["새해인사", "새해 인사", "생일축하", "조의문", "조문답례", "감사인사", "사과문", "쾌유기원",
                          "입사인사", "입사 인사", "퇴사인사", "첫인사", "안부인사", "크리스마스인사", "졸업축하", "입학축하"] {
-            #expect(greetings.contains { $0.trigger == expected }, "\(expected)")
+            #expect(greetings.contains { $0.primaryTrigger == expected }, "\(expected)")
         }
         for entry in greetings {
-            #expect(!entry.body.isEmpty && !entry.title.isEmpty, "\(entry.trigger)")
-            #expect(entry.trigger.count >= 3, "짧은 트리거는 오탐 — \(entry.trigger)")
+            #expect(!entry.body.isEmpty && !entry.title.isEmpty, "\(entry.primaryTrigger)")
+            #expect(entry.primaryTrigger.count >= 3, "짧은 트리거는 오탐 — \(entry.primaryTrigger)")
         }
         let all = greetings + BundledSnippetRepository().entries()
-        #expect(Set(all.map(\.trigger)).count == all.count, "팩 간·팩 내 트리거 중복 없음")
+        #expect(Set(all.map(\.primaryTrigger)).count == all.count, "팩 간·팩 내 트리거 중복 없음")
     }
 
     @Test("리소스가 없는 번들이면 빈 배열이다")

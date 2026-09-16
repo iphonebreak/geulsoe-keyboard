@@ -770,3 +770,178 @@ struct InputControllerSnippetTests {
         #expect(output.text == "동해물과…")
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// 단축어 여러 개 · 띄어쓰기 무시 (2026-09-15 사장님 지시)
+// ─────────────────────────────────────────────────────────────────────────
+
+/// 용어가 「트리거」에서 **「단축어」**로 바뀌었다 — iOS 설정의 「텍스트 대치」가 쓰는 애플 공식
+/// 한국어 용어라 설명이 거의 필요 없다. **코드 식별자(`trigger`·`triggers`)는 영어 그대로** 둔다
+/// (글쇠 개명 때와 같은 원칙 — 사용자에게 보이는 문자열만 바꾼다).
+@Suite("단축어 — 저장 스키마 마이그레이션")
+struct SnippetEntryMigrationTests {
+
+    /// **옛 저장본은 `trigger` 단일 문자열**이다. 사용자 기기의 App Group 에 그대로 있다.
+    @Test("옛 스키마(trigger 문자열)를 읽는다")
+    func decodesLegacySingleTrigger() throws {
+        let json = #"{"trigger":"우리집 주소","title":"집","body":"서울시 ..."}"#
+        let entry = try JSONDecoder().decode(SnippetEntry.self, from: Data(json.utf8))
+        #expect(entry.triggers == ["우리집 주소"])
+        #expect(entry.title == "집")
+    }
+
+    @Test("새 스키마(triggers 배열)를 읽는다")
+    func decodesNewTriggers() throws {
+        let json = #"{"triggers":["우리집주소","집주소"],"title":"집","body":"서울시 ..."}"#
+        let entry = try JSONDecoder().decode(SnippetEntry.self, from: Data(json.utf8))
+        #expect(entry.triggers == ["우리집주소", "집주소"])
+    }
+
+    /// **새 스키마가 이긴다** — 둘 다 있으면 배열을 쓴다.
+    @Test("triggers 와 trigger 가 둘 다 있으면 triggers 를 쓴다")
+    func newSchemaWins() throws {
+        let json = #"{"triggers":["a","b"],"trigger":"c","title":"t","body":"b"}"#
+        let entry = try JSONDecoder().decode(SnippetEntry.self, from: Data(json.utf8))
+        #expect(entry.triggers == ["a", "b"])
+    }
+
+    /// **둘 다 없어도 크래시하지 않는다** — 발동하지 않는 죽은 항목이 될 뿐이다.
+    @Test("단축어 키가 아예 없으면 빈 배열이다 (크래시 없음)")
+    func missingTriggersIsEmpty() throws {
+        let json = #"{"title":"제목만","body":"본문만"}"#
+        let entry = try JSONDecoder().decode(SnippetEntry.self, from: Data(json.utf8))
+        #expect(entry.triggers.isEmpty)
+    }
+
+    @Test("왕복(encode → decode)이 같다")
+    func roundTrips() throws {
+        let original = SnippetEntry(triggers: ["우리집주소", "집주소"], title: "집", body: "서울시 ...")
+        let data = try JSONEncoder().encode(original)
+        #expect(try JSONDecoder().decode(SnippetEntry.self, from: data) == original)
+        // 인코딩은 **새 키로만** 쓴다 — 옛 키를 남기면 무엇이 진짜인지 모호해진다
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains("triggers"))
+        #expect(!text.contains("\"trigger\""))
+    }
+
+    /// 내장 팩 JSON(`Snippets.json`·`Greetings.json`)도 **단일 `trigger`** 형태다.
+    /// **그 JSON 을 고치지 않고 디코더가 흡수한다** — 번들 리소스를 건드리면 회귀 위험이 는다.
+    @Test("내장 팩 JSON 형태(배열 안의 단일 trigger)가 그대로 읽힌다")
+    func decodesBundledPackShape() throws {
+        let json = """
+        [{"trigger":"애국가 1절","title":"애국가 1절","body":"동해물과 …"},
+         {"trigger":"새해인사","title":"새해 인사","body":"새해 복 …"}]
+        """
+        let entries = try JSONDecoder().decode([SnippetEntry].self, from: Data(json.utf8))
+        #expect(entries.map(\.primaryTrigger) == ["애국가 1절", "새해인사"])
+    }
+
+    @Test("primaryTrigger 는 첫 단축어, 비었으면 빈 문자열")
+    func primaryTrigger() {
+        #expect(SnippetEntry(triggers: ["가", "나"], title: "", body: "b").primaryTrigger == "가")
+        #expect(SnippetEntry(triggers: [], title: "", body: "b").primaryTrigger == "")
+    }
+}
+
+@Suite("단축어 — 띄어쓰기 무시 매칭")
+struct SnippetSpacingTests {
+
+    private func matcher(_ entries: [SnippetEntry]) -> SnippetMatcher {
+        SnippetMatcher(bible: nil, entries: entries)
+    }
+
+    /// 사장님 지시 4 — "우리집주소"로 등록해도 "우리집 주소"·"우 리 집 주 소"로 발동한다.
+    @Test("띄어쓰기가 달라도 매칭된다", arguments: [
+        "우리집주소", "우리집 주소", "우 리 집 주 소", "우리집  주소"
+    ])
+    func ignoresWhitespace(tail: String) throws {
+        let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "서울시 ...")
+        let hit = try #require(matcher([entry]).suggestion(forTail: tail))
+        #expect(hit.body == "서울시 ...")
+    }
+
+    /// ★ **이 작업에서 제일 틀리기 쉬운 곳** — 지울 길이는 **꼬리 원문 기준**이다.
+    /// 5자짜리 단축어로 등록했어도 사용자가 6자를 쳤으면 6자를 지워야 한다.
+    @Test("지울 길이는 꼬리 원문 기준이다", arguments: [
+        ("우리집주소", 5), ("우리집 주소", 6), ("우 리 집 주 소", 9)
+    ])
+    func triggerLengthFollowsTail(testCase: (String, Int)) throws {
+        let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "본문")
+        let hit = try #require(matcher([entry]).suggestion(forTail: testCase.0))
+        #expect(hit.trigger == testCase.0)
+        #expect(hit.triggerLength == testCase.1)
+    }
+
+    /// 꼬리 앞에 다른 글자가 있어도 **접미사**로 맞으면 된다. 그리고 **맞은 구간 앞의 공백은
+    /// 포함하지 않는다** — 마지막으로 맞은 글자에서 끊는다.
+    @Test("앞에 글자가 있어도 접미사로 맞고, 앞 공백은 안 먹는다")
+    func matchesSuffixWithoutLeadingSpace() throws {
+        let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "본문")
+        let hit = try #require(matcher([entry]).suggestion(forTail: "보내줄게 우리집 주소"))
+        #expect(hit.trigger == "우리집 주소", "앞 공백을 먹지 않는다")
+    }
+
+    @Test("단축어 여러 개 — 어느 쪽으로 쳐도 매칭된다", arguments: ["우리집주소", "집주소", "집 주소"])
+    func anyOfMultipleTriggers(tail: String) throws {
+        let entry = SnippetEntry(triggers: ["우리집주소", "집주소"], title: "집", body: "본문")
+        _ = try #require(matcher([entry]).suggestion(forTail: tail))
+    }
+
+    /// 우선순위 — **정규화 길이가 긴 쪽이 이긴다.**
+    @Test("정규화 길이가 긴 단축어가 이긴다")
+    func longerNormalizedWins() throws {
+        let short = SnippetEntry(triggers: ["집주소"], title: "짧은", body: "짧은 본문")
+        let long = SnippetEntry(triggers: ["우리집주소"], title: "긴", body: "긴 본문")
+        let hit = try #require(matcher([short, long]).suggestion(forTail: "우리집 주소"))
+        #expect(hit.title == "긴")
+    }
+
+    /// 같으면 **앞선 엔트리**가 이긴다 — 사용자 문구를 내장 팩보다 앞에 넣으므로 사용자가 이긴다.
+    @Test("길이가 같으면 앞선 엔트리(사용자)가 이긴다")
+    func earlierEntryWinsOnTie() throws {
+        let user = SnippetEntry(triggers: ["새해인사"], title: "사용자", body: "사용자 본문")
+        let pack = SnippetEntry(triggers: ["새해 인사"], title: "내장", body: "내장 본문")
+        let hit = try #require(matcher([user, pack]).suggestion(forTail: "새해인사"))
+        #expect(hit.title == "사용자")
+    }
+
+    /// 한 엔트리 안에 여럿이면 **그중 가장 긴 매치**를 쓴다.
+    @Test("한 엔트리 안에서는 가장 긴 매치를 쓴다")
+    func longestWithinEntry() throws {
+        let entry = SnippetEntry(triggers: ["집주소", "우리집주소"], title: "집", body: "본문")
+        let hit = try #require(matcher([entry]).suggestion(forTail: "우리집 주소"))
+        #expect(hit.trigger == "우리집 주소", "짧은 쪽(집 주소)이 아니라 긴 쪽이 맞아야 한다")
+    }
+
+    @Test("빈 triggers 엔트리는 절대 매칭되지 않는다 (크래시도 없다)", arguments: ["", "아무 글", "   "])
+    func emptyTriggersNeverMatch(tail: String) {
+        let dead = SnippetEntry(triggers: [], title: "죽은 항목", body: "본문")
+        #expect(matcher([dead]).suggestion(forTail: tail) == nil)
+    }
+
+    @Test("공백만으로 이뤄진 단축어도 매칭되지 않는다")
+    func whitespaceOnlyTriggerNeverMatches() {
+        let blank = SnippetEntry(triggers: ["   "], title: "공백", body: "본문")
+        #expect(matcher([blank]).suggestion(forTail: "아무 글") == nil)
+        #expect(matcher([blank]).suggestion(forTail: "   ") == nil)
+    }
+
+    /// 기존 회귀 — 내장 팩 단축어가 **띄어쓰기 그대로도** 여전히 매칭된다.
+    @Test("내장 팩 회귀 — 띄어쓰기 그대로 매칭된다", arguments: [
+        "애국가 1절", "애국가1절", "새해인사", "새해 인사"
+    ])
+    func bundledPackStillMatches(tail: String) throws {
+        let entries = [
+            SnippetEntry(triggers: ["애국가 1절"], title: "애국가 1절", body: "동해물과 …"),
+            SnippetEntry(triggers: ["새해인사"], title: "새해 인사", body: "새해 복 …")
+        ]
+        _ = try #require(matcher(entries).suggestion(forTail: tail))
+    }
+
+    /// **엉뚱한 글자는 공백을 건너뛰어도 안 맞는다** — 공백만 무시하지 글자는 안 건너뛴다.
+    @Test("공백 외의 글자는 건너뛰지 않는다", arguments: ["우리집X주소", "우리 집이 주소"])
+    func doesNotSkipNonWhitespace(tail: String) {
+        let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "본문")
+        #expect(matcher([entry]).suggestion(forTail: tail) == nil)
+    }
+}
