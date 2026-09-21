@@ -2,10 +2,21 @@ import SwiftUI
 import TadakDomain
 import TadakData
 
-/// 테마 목록 행 — 라이트/다크 팔레트 스와치 + 체크마크. 화면 탭의 Section 안에 인라인으로 들어간다.
+/// 테마 목록 — 테마마다 **소형 미리보기 카드**(`ThemePreviewCard`) 하나. 화면 탭의 Section 안에
+/// 인라인으로 들어간다.
 ///
-/// 실물 키보드 미리보기(KeyboardUI 재사용)는 후속 후보 — 앱은 KeyboardUI를 import하지
-/// 않는다는 결정을 유지한다 (PDR settings-app 결정 5).
+/// ## 색 동그라미에서 미리보기 카드로 (v1.1.0)
+///
+/// 예전에는 이름 + 색 동그라미 다섯 개였다. 색만 봐서는 **어떤 키보드인지 알 수 없어서**
+/// 사용자가 고르고 → 키보드를 열어 보고 → 아니면 되돌아오는 왕복을 했다.
+/// 설계: `docs/design-reviews/v1.1.0-plan-v3.md` 5절.
+///
+/// **테마 개수를 고정하지 않는다** — `availableThemes()` 가 주는 만큼 전부 렌더한다.
+/// 테마는 데이터 주도라 `Themes.json` 에 항목을 더하면 코드 0으로 늘어난다(CLAUDE.md).
+/// 수용 기준 1번이 이것이다.
+///
+/// **`App/` 은 `KeyboardUI` 를 import 하지 않는다**(PDR settings-app 결정 5) — 이 파일도
+/// `TadakDomain`·`TadakData` 만 쓴다.
 struct ThemeRows: View {
 
     @Binding var selectedThemeID: String
@@ -17,42 +28,9 @@ struct ThemeRows: View {
             Button {
                 selectedThemeID = theme.id
             } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text(theme.displayName)
-                            .foregroundStyle(.primary)
-                        HStack(spacing: 10) {
-                            paletteSwatches(theme.light, caption: "라이트")
-                            paletteSwatches(theme.dark, caption: "다크")
-                        }
-                    }
-                    Spacer()
-                    if theme.id == selectedThemeID {
-                        Image(systemName: "checkmark")
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.tint)
-                    }
-                }
-                .contentShape(Rectangle())
+                ThemePreviewCard(theme: theme, isSelected: theme.id == selectedThemeID)
             }
             .buttonStyle(.plain)
-        }
-    }
-
-    private func paletteSwatches(_ palette: ThemeSpec.Palette, caption: String) -> some View {
-        HStack(spacing: 5) {
-            Text(caption)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            ForEach(Array([
-                palette.keyboardBackground, palette.characterKey,
-                palette.functionKey, palette.keyText, palette.accent
-            ].enumerated()), id: \.offset) { _, hex in
-                Circle()
-                    .fill(Color(themeHex: hex))
-                    .frame(width: 14, height: 14)
-                    .overlay(Circle().strokeBorder(.quaternary, lineWidth: 0.5))
-            }
         }
     }
 }
