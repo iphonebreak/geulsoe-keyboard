@@ -16,6 +16,10 @@ public struct BundledBibleRepository: BibleVerseRepository {
     private let verseCount: Int
     private let textStart: Int
 
+    /// 본문 검색기 — **같은 `Data`(같은 mmap)를 공유한다.** `Data`는 값 타입이지만 매핑을
+    /// 복사하지 않으므로 새로 `mmap`하지 않는다. 리소스가 없으면 nil이고 검색은 빈 배열이 된다.
+    private let scanner: BibleByteScanner?
+
     /// - Parameter bundle: nil이면 패키지 리소스 번들 (테스트에서만 바꾼다)
     public init(bundle: Bundle? = nil) {
         self.init(url: (bundle ?? .module).url(forResource: "bible", withExtension: "tdb"))
@@ -33,6 +37,7 @@ public struct BundledBibleRepository: BibleVerseRepository {
             data = nil
             verseCount = 0
             textStart = 0
+            scanner = nil
             return
         }
         let count = Int(Self.readUInt32(mapped, at: 8))
@@ -44,11 +49,19 @@ public struct BundledBibleRepository: BibleVerseRepository {
             data = nil
             verseCount = 0
             textStart = 0
+            scanner = nil
             return
         }
         data = mapped
         verseCount = count
         textStart = start
+        scanner = BibleByteScanner(
+            data: mapped,
+            verseCount: count,
+            indexStart: Self.headerSize,
+            entrySize: Self.entrySize,
+            textStart: start
+        )
     }
 
     public func text(book: Int, chapter: Int, verse: Int) -> String? {
@@ -99,5 +112,18 @@ public struct BundledBibleRepository: BibleVerseRepository {
         data.withUnsafeBytes {
             UInt32(littleEndian: $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self))
         }
+    }
+}
+
+/// 본문 검색 — 조회와 **같은 mmap**을 쓴다 (새로 매핑하지 않는다).
+/// 알고리즘과 성능 근거는 `BibleByteScanner` 참조.
+extension BundledBibleRepository: BibleVerseSearching {
+
+    public func search(_ query: String, limit: Int) -> [BibleVerseMatch] {
+        scanner?.search(query, limit: limit) ?? []
+    }
+
+    public func searchIgnoringSpaces(_ query: String, limit: Int) -> [BibleVerseMatch] {
+        scanner?.searchIgnoringSpaces(query, limit: limit) ?? []
     }
 }

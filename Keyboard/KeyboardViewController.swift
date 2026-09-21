@@ -21,7 +21,33 @@ final class KeyboardViewController: UIInputViewController {
 
     private let settingsRepository: SettingsRepository = AppGroupSettingsRepository()
     private let themeRepository: ThemeRepository = BundledThemeRepository()
-    private let bibleRepository: BibleVerseRepository = BundledBibleRepository()
+    /// 조회·검색이 **같은 인스턴스(같은 mmap)** 를 쓴다. 둘로 나누면 4.4MB 매핑과
+    /// 바이트 빈도표가 두 벌 생긴다.
+    private let bibleRepository = BundledBibleRepository()
+    /// 성경 검색 캐스케이드 — **낱말 창만** 쓴다(계획서 3-1).
+    /// 말끝 떼기는 2026-09-21 제거 — `docs/design-reviews/bible-suffix-strip-removal.md`.
+    private lazy var bibleSearchCascade = BibleSearchCascade(searcher: bibleRepository)
+
+    /// 120ms 디바운스 — **키를 칠 때마다가 아니라 손이 멈출 때마다** 캐스케이드를 돈다
+    /// (계획서 3-2가 「필수」로 정한 항목, 반론자2 F-1).
+    ///
+    /// 만료 시점에 `isStillValid`로 **꼬리와 게이트를 다시 본다** — 지연 동안 사용자가 더 쳤거나
+    /// secure로 바뀌었거나 칩이 떴을 수 있다. 결과가 갱신되면 `updateSuggestionBar()`를 한 번
+    /// 다시 돌려 **배지와 추천단어 개수를 함께** 낸다(둘이 같은 값을 쓰는 규율, 계획서 2-1).
+    private lazy var bibleSearchScheduler = BibleSearchScheduler(
+        cascade: bibleSearchCascade,
+        isStillValid: { [weak self] tail in
+            guard let self, let inputController else { return false }
+            // 사용자가 계속 쳤으면 옛 꼬리다 — 버린다
+            guard inputController.textTail == tail else { return false }
+            return canSearchBibleNow(tail: tail)
+        },
+        onResultChanged: { [weak self] in self?.updateSuggestionBar() }
+    )
+
+    /// 마지막 스캔 결과. 배지 건수·패널 내용·✕ 삭제 길이가 전부 여기서 나온다.
+    /// **스케줄러가 들고 있는 그 값 하나**다 — 조립 지점은 읽기만 한다.
+    private var bibleSearchResult: BibleSearchResult? { bibleSearchScheduler.result }
     private let bundledSnippetRepository: SnippetRepository = BundledSnippetRepository()
     private let greetingsSnippetRepository: SnippetRepository = BundledSnippetRepository(resourceName: "Greetings")
     private let userSnippetRepository: SnippetRepository = AppGroupSnippetRepository()
@@ -287,6 +313,9 @@ final class KeyboardViewController: UIInputViewController {
         // 새 필드에서는 자판부터 (@Observable은 같은 값 대입도 통지하므로 가드)
         if viewState?.showsEmojiPanel == true { viewState?.showsEmojiPanel = false }
         if viewState?.showsClipboardPanel == true { viewState?.showsClipboardPanel = false }
+        // 검색 패널도 같은 줄에 포함한다 (계획서 2-8) — 안 닫으면 앱 전환 뒤
+        // 자판 없이 패널만 떠 있는 상태가 남는다
+        if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
         dismissedSuggestionWord = nil  // ✕ 억제는 그 표시 세션에서만 (채움글 칩은 예외 — 편집 전까지 유지)
         suppressesWordSuggestionsAfterCursorMove = false
         updateVisibleTools()
@@ -481,6 +510,9 @@ final class KeyboardViewController: UIInputViewController {
                                             // 사라진 칩의 클립보드를 소비하지 못하게 한다
         viewState?.pasteSuggestion = nil
         if viewState?.clipboardEntries.isEmpty == false { viewState?.clipboardEntries = [] }
+        // 예약된 성경 검색은 버린다 — 내려간 키보드를 위해 본문을 훑을 이유가 없고,
+        // 다음 등장에서 꼬리가 다시 서면 그때 새로 예약된다.
+        bibleSearchScheduler.cancel()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -582,21 +614,19 @@ final class KeyboardViewController: UIInputViewController {
         if userEdited, let dismissedTail = Self.dismissedSnippetTail, dismissedTail != inputController.textTail {
             Self.dismissedSnippetTail = nil
         }
+        // 배지도 같은 규칙 — 사용자 편집으로 꼬리가 바뀌면 다시 뜬다
+        if userEdited, let dismissedTail = Self.dismissedBibleTail, dismissedTail != inputController.textTail {
+            Self.dismissedBibleTail = nil
+        }
         let snippet = (Self.dismissedSnippetTail == nil) ? matched : nil
 
         // 채움글 후보가 있으면 툴바는 채움글 칩만 보인다 — 추천단어("절대"·"저를")는 함께
         // 띄우지 않는다 (사용자 결정 2026-09-03: 단축어를 쳤을 땐 "붙여넣을지"만 묻는다).
         // 커서 이동(◀▶·트랙패드) 뒤에는 다음 키 입력까지 추천단어를 띄우지 않는다 — 커서가 단어
         // 중간에 있으면 후보 탭이 커서 앞만 바꿔 "안녕하세요요"처럼 뒤 글자가 남는다.
-        var words: [String] = []
-        if !secure, snippet == nil, dismissedSuggestionWord == nil,
-           !suppressesWordSuggestionsAfterCursorMove, let suggestionEngine {
-            words = suggestionEngine.suggestions(forWord: currentWord, limit: 3)
-        }
-        if viewState.snippetSuggestion != snippet { viewState.snippetSuggestion = snippet }
-        if viewState.wordSuggestions != words { viewState.wordSuggestions = words }
-
         // 사용자가 키를 누른 뒤에는 일반 붙여넣기 칩을 내린다 (아래 게이트 참조).
+        // **붙여넣기 칩 판정을 추천단어보다 먼저 한다** — 성경 배지가 칩 유무에 걸려 있고,
+        // 배지 유무가 다시 추천단어 개수를 정하기 때문이다(아래 참조).
         if userEdited { pasteChipSuppressedByTyping = true }
 
         // 붙여넣기 칩 — **두 종류가 같은 게이트를 쓴다** (2026-09-16 통일).
@@ -626,10 +656,188 @@ final class KeyboardViewController: UIInputViewController {
             guard !secure, let paste = pasteSuggestion else { return nil }
             return pasteChipSuppressedByTyping ? nil : paste
         }()
+
+        // MARK: 성경 검색 배지 (계획서 2-1·2-6)
+        //
+        // **우선순위**: 채움글 칩 > 붙여넣기 칩 > 배지 + 추천단어 2개 > 추천단어 3개/도구 행.
+        // 칩이 있으면 배지를 숨긴다 — 칩 하나가 이미 287~321pt를 쓴다.
+        // 붙여넣기 칩을 이기게 두는 이유는 4차 A3-4의 재현 경로다: 「믿음」을 쳐 둔 채 앱을
+        // 전환했다 돌아오면 꼬리가 다시 서고(배지 조건) 같은 등장에서 억제가 풀려(칩 조건)
+        // 둘이 한 줄에 같이 떴다.
+        //
+        // ★ **값 하나를 배지와 추천단어 개수가 함께 쓴다** (계획서 2-1).
+        //   두 곳에서 따로 계산하면 "배지는 없는데 추천단어는 2개"인 어긋남이 생긴다.
+        //
+        // ## 디바운스를 넣고도 그 규율이 유지되는 이유
+        //
+        // 여기서 캐스케이드를 **직접 부르지 않는다.** 예약만 걸고 `scheduler.result`를 읽는다 —
+        // 배지도 추천단어 개수도 그 한 값에서 나오므로 **어느 순간에도 둘이 어긋날 수 없다.**
+        // 지연이 끝나면 스케줄러가 이 함수를 한 번 다시 돌려 둘을 **함께** 다시 낸다.
+        // (그때 `schedule`은 같은 꼬리라 아무 것도 하지 않는다 — 재진입이 끊긴다.)
+        //
+        // ## 패널이 열려 있는 동안은 **얼린다**
+        //
+        // 패널은 자판 자리를 차지하므로 그동안 사용자는 칠 수 없다. 그런데 호스트가 보내는
+        // `textDidChange` 메아리로 꼬리는 흔들릴 수 있고, 그러면 옛 결과가 버려져 **읽고 있던
+        // 목록이 사라지거나 다시 그려진다.** 사용자가 손대지 않은 화면이 저절로 바뀌면 안 된다.
+        // 그래서 패널이 열린 동안에는 예약도 취소도 하지 않고 지금 값을 그대로 둔다 —
+        // 패널은 열릴 때의 결과를 닫을 때까지 유지한다.
+        if viewState.showsBibleSearchPanel {
+            // 얼림 — 아무 것도 하지 않는다.
+            //
+            // ## ★ 다만 꼬리가 결과와 어긋나면 닫는다 (2026-09-21)
+            //
+            // 자판이 가려져 **사용자는** 칠 수 없지만 **호스트는** 커서를 옮기거나 글자를 바꿀 수
+            // 있고, `textDidChange`가 그 문맥으로 꼬리를 다시 세운다.
+            //
+            // **검색어 칩과 ✕가 사라진 뒤로도 이 가드는 남긴다** — 막는 대상이 바뀌었다.
+            // 이제 `typedText`를 쓰는 곳은 **구절 삽입**뿐인데, 꼬리가 어긋나면
+            // `insertSnippet`의 정합 검사가 **조용히 거절한다**(문서는 안전하지만 탭이 먹통이 된다).
+            // 사용자에게는 *눌러도 아무 일이 안 일어나는 패널*로 보인다 — 그 상태로 두느니 닫는다.
+            if let result = bibleSearchScheduler.result,
+               !inputController.textTail.hasSuffix(result.typedText) {
+                closeBibleSearchPanel()
+            }
+        } else if canSearchBibleNow(tail: inputController.textTail), snippet == nil, chip == nil {
+            bibleSearchScheduler.schedule(tail: inputController.textTail)
+        } else {
+            bibleSearchScheduler.cancel()
+        }
+        let searchResult = bibleSearchScheduler.result
+        // 0건이면 배지 없음 — 캐스케이드가 이미 nil을 준다
+        let badgeCount = searchResult?.matches.count
+
+        // 열려 있던 패널은 결과가 사라지면 함께 닫는다 — 빈 패널만 남으면 나갈 길이 칩뿐이다
+        if badgeCount == nil, viewState.showsBibleSearchPanel {
+            closeBibleSearchPanel()
+        }
+
+        var words: [String] = []
+        if !secure, snippet == nil, dismissedSuggestionWord == nil,
+           !suppressesWordSuggestionsAfterCursorMove, let suggestionEngine {
+            // 배지가 보이면 추천단어를 2개로 줄여 배지 자리를 만든다 (계획서 2-1 확정)
+            words = suggestionEngine.suggestions(forWord: currentWord, limit: badgeCount == nil ? 3 : 2)
+        }
+
+        if viewState.snippetSuggestion != snippet { viewState.snippetSuggestion = snippet }
+        if viewState.wordSuggestions != words { viewState.wordSuggestions = words }
+        if viewState.bibleMatchCount != badgeCount { viewState.bibleMatchCount = badgeCount }
         if viewState.pasteSuggestion != chip {
             viewState.pasteSuggestion = chip
         }
     }
+
+    // MARK: - 성경 검색 (v1.1.0 ①)
+
+    /// ⚠️ **임시 상수다.** 설정 스위치 `bibleSearchEnabled`와 합성 게이트 `canSearchBible`
+    /// (계획서 4절)은 **다음 단계**의 범위다. 지금은 UI가 그려지고 동작하는지까지만 본다.
+    ///
+    /// 다음 단계에서 이 자리가 `settings.bibleSearchEnabled && snippetsEnabled && 성경 팩 &&
+    /// !secure` 합성으로 바뀐다. **그 전까지는 실기·배포에 올리면 안 된다** —
+    /// 게이트가 없어 언제나 켜진 상태이기 때문이다.
+    ///
+    /// (예전 이 자리에 적혀 있던 「최대 8회 스캔이 돈다 · 디바운스도 아직 없다」는 둘 다 죽은 말이다 —
+    /// 최악은 **5회**가 됐고(말끝 떼기 제거) 디바운스는 **있다**(`BibleSearchScheduler` 120ms).)
+    private var bibleSearchEnabled: Bool { true }
+
+    /// 지금 이 꼬리로 스캔해도 되는가 — **예약 시점과 만료 시점이 같은 규칙을 본다.**
+    ///
+    /// 칩 유무(채움글·붙여넣기)는 `updateSuggestionBar`가 그 자리에서 계산한 값을 쓰므로
+    /// 여기서 중복 판정하지 않는다. 만료 시점에는 칩이 떠 있으면 어차피 다음 툴바 갱신이
+    /// 배지를 내리고, 그 갱신이 `cancel()`을 부른다.
+    private func canSearchBibleNow(tail: String) -> Bool {
+        guard bibleSearchEnabled,
+              textDocumentProxy.isSecureTextEntry != true,
+              Self.dismissedBibleTail == nil
+        else { return false }
+        return !tail.isEmpty
+    }
+
+    /// 배지 탭 — 패널을 열고 닫는다.
+    private func handleBibleBadgeTap() {
+        playToolbarHaptic()
+        // 도구 사용 = 조합 확정 (천지인 pending이 패널을 관통하지 않게 — 다른 패널과 같은 규칙)
+        inputController?.commitComposition()
+        if viewState?.showsBibleSearchPanel == true {
+            closeBibleSearchPanel()
+        } else {
+            openBibleSearchPanel()
+        }
+        updateSuggestionBar()
+    }
+
+    /// 결과 주소마다 본문을 **그때 한 번** 읽어 미리보기를 만든다.
+    /// 스캔 중에는 절대 `String`을 만들지 않는다는 계약(`BibleByteScanner`)은 그대로다 —
+    /// 여기는 사용자가 패널을 연 순간뿐이고 최대 100행이다.
+    private func openBibleSearchPanel() {
+        guard let viewState, let result = bibleSearchResult, !result.matches.isEmpty else { return }
+        viewState.bibleSearchQuery = result.matchedQuery
+        viewState.bibleSearchRows = result.matches.compactMap { match in
+            guard let text = bibleRepository.text(
+                book: match.book, chapter: match.chapter, verse: match.verse
+            ) else { return nil }
+            return BibleSearchRow(
+                match: match,
+                // ★ 머리부터 자르지 않는다 — 「사랑」 결과의 68%는 앞 12자 안에 검색어가 없다
+                preview: BibleVersePreview.window(of: text, matching: result.matchedQuery)
+            )
+        }
+        if viewState.showsEmojiPanel { viewState.showsEmojiPanel = false }
+        if viewState.showsClipboardPanel { viewState.showsClipboardPanel = false }
+        viewState.showsBibleSearchPanel = true
+    }
+
+    private func closeBibleSearchPanel() {
+        guard let viewState else { return }
+        viewState.showsBibleSearchPanel = false
+        viewState.bibleSearchRows = []
+        viewState.bibleSearchQuery = ""
+    }
+
+    /// 구절 탭 — **기존 채움글 삽입 경로**를 그대로 탄다.
+    /// 꼬리 정합 검사(QA BLOCK-2)·이중 탭 방어·학습 차단이 전부 딸려 온다.
+    private func handleBibleRowTap(_ row: BibleSearchRow) {
+        playToolbarHaptic()
+        guard let inputController, let result = bibleSearchResult else { return }
+        let match = row.match
+        guard let body = bibleRepository.text(
+            book: match.book, chapter: match.chapter, verse: match.verse
+        ) else { return }
+
+        // 머리말은 **정규 표기**다 — 사용자가 친 것(「사랑해」)은 절 주소가 아니다.
+        // 채움글 성경 경로가 쓰는 모양(`[창 1:1] `)을 그대로 따른다.
+        let reference = row.reference(includingBook: true)
+        let suggestion = SnippetSuggestion(
+            // 지울 구간은 문서에 실제로 있는 원문이다 (계획서 2-7 N-4)
+            trigger: result.typedText,
+            title: reference,
+            body: body,
+            prefix: settings.bibleSnippetPrefixEnabled ? "[\(reference)] " : nil
+        )
+        _ = inputController.insertSnippet(suggestion)
+        closeBibleSearchPanel()
+        refreshLayout()
+        suppressesWordSuggestionsAfterCursorMove = false
+        updateSuggestionBar(userEdited: true)
+    }
+
+
+    /// ✕로 내린 성경 배지의 꼬리 — 사용자가 편집해 꼬리가 바뀌기 전까지 배지를 숨긴다.
+    /// 숨어 있는 동안은 **스캔도 돌지 않는다.**
+    ///
+    /// ## ★ 인스턴스가 아니라 타입에 둔다 — 되돌리지 마라 (2026-09-21)
+    ///
+    /// 이 파일 위쪽 `consumedPasteboardChangeCount` 주석이 실기 계측 근거와 함께 적어 둔 그대로다:
+    /// **키보드 등장마다 이 VC가 새로 만들어지고 이전 것은 해제된다**
+    /// (`docs/release/flicker-evidence/device-frameprobe-2026-09-11.csv`).
+    /// 인스턴스 변수면 ✕ 억제가 **그 등장 한 번만 살아서**, 키보드를 내렸다 올리면 방금 내린
+    /// 배지가 그대로 되살아난다. 채움글 칩이 `dismissedSnippetTail`을 타입으로 올려 피한 함정을
+    /// 성경 배지만 다시 밟고 있었다(검증자 3-2 지적).
+    ///
+    /// **채움글의 `dismissedSnippetTail`과 충돌하지 않는다** — 둘은 **별개의 키**다.
+    /// 같은 꼬리 문자열이 들어가더라도 하나는 채움글 칩을, 다른 하나는 성경 배지를 숨길 뿐이고
+    /// 해제 조건(사용자 편집으로 꼬리가 바뀜)도 각자 따로 본다.
+    private static var dismissedBibleTail: String?
 
     /// ✕로 내린 추천단어 — 그 단어(접두)를 이어 치는 동안 억제되고, 단어가 끝나면 자동 해제
     /// (사용자 요청 2026-09-03). 키보드 재표시 시 초기화.
@@ -657,6 +865,12 @@ final class KeyboardViewController: UIInputViewController {
             // 새로 복사하면 changeCount가 달라져 다시 뜬다 (사용자 요구 2026-09-15).
             Self.consumedPasteboardChangeCount = probedPasteboardChangeCount
             pasteSuggestion = nil
+        }
+        // 배지도 함께 내린다 — 후보 행을 통째로 내리는 버튼인데 배지만 남으면
+        // 도구 행으로 영영 못 돌아간다(배지가 있으면 후보 행이 유지된다).
+        if viewState.bibleMatchCount != nil {
+            Self.dismissedBibleTail = inputController.textTail
+            if viewState.showsBibleSearchPanel { closeBibleSearchPanel() }
         }
         updateSuggestionBar()
     }
@@ -829,6 +1043,9 @@ final class KeyboardViewController: UIInputViewController {
             dismissKeyboard()
         case .clipboard:
             inputController?.commitComposition()
+            // 성경 패널이 열려 있으면 먼저 닫는다 — 패널 분기에서 성경이 앞에 있어
+            // 그냥 두면 클립보드를 켜도 성경 패널이 계속 보인다
+            if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
             if viewState?.showsClipboardPanel == true {
                 viewState?.showsClipboardPanel = false
             } else {
@@ -838,6 +1055,7 @@ final class KeyboardViewController: UIInputViewController {
         case .emoji:
             // 도구 사용 = 조합 확정 (천지인 연타·pending 상태가 패널을 관통하지 않게)
             inputController?.commitComposition()
+            if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
             if viewState?.showsClipboardPanel == true { viewState?.showsClipboardPanel = false }
             viewState?.showsEmojiPanel.toggle()
             updateSuggestionBar()
@@ -1144,6 +1362,12 @@ final class KeyboardViewController: UIInputViewController {
             onCursorDrag: { [weak self] offset in self?.handleCursorMove(offset, haptic: false) },
             onDismissSuggestions: { [weak self] in
                 DispatchQueue.main.async { self?.handleDismissSuggestions() }
+            },
+            onBibleBadgeTap: { [weak self] in
+                DispatchQueue.main.async { self?.handleBibleBadgeTap() }
+            },
+            onBibleRowTap: { [weak self] row in
+                DispatchQueue.main.async { self?.handleBibleRowTap(row) }
             },
             fillsContainer: Self.fillInputViewWithHost,   // 14차 H1 — 상자 전체 채움 + 하단 정렬
             transparentAbove: Self.transparentAboveContent  // 16차 — 자판 사각형 뒤에만 칠한다

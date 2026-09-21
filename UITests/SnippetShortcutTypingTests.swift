@@ -319,6 +319,154 @@ final class SnippetShortcutTypingTests: XCTestCase {
 
     // MARK: - 단계
 
+    // MARK: - 성경 검색 UI (v1.1.0 ①) — 배지와 패널이 실제로 그려지는가
+
+    /// 배지 → 패널 → 책 필터 → 구절 삽입까지 한 흐름으로 본다.
+    /// 판정은 전부 **익스텐션 프로세스의 접근성 라벨**로 한다.
+    func testBibleSearchBadgeAndPanel() throws {
+        try prepare()
+        clearAll()
+
+        // 1) 배지 — 「사랑」은 517건이라 999+ 상한에 안 걸린다
+        typeOnKeyboard("사랑")
+        Thread.sleep(forTimeInterval: 1.2)
+        let badge = keyboard.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "성경 구절 ")).firstMatch
+        let hasBadge = badge.waitForExistence(timeout: 5)
+        notes.append("★ B1 「사랑」 → 입력란 \(q(fieldValue())) / 배지 \(hasBadge ? q(badge.label) : "(없음)")")
+        shot("B1-배지")
+        XCTAssertTrue(hasBadge, "배지가 뜨지 않았다")
+
+        // 2) 패널
+        badge.tap()
+        Thread.sleep(forTimeInterval: 1.2)
+        let back = keyboard.buttons["자판으로 돌아가기"].firstMatch
+        notes.append("★ B2 패널 열림=\(back.waitForExistence(timeout: 5))")
+        let filters = keyboard.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "전체 ")).firstMatch
+        notes.append("   전체 탭 \(filters.exists ? q(filters.label) : "(없음)")")
+        shot("B2-패널")
+
+        // 3) 책 필터 — 두 번째 탭(건수 1위 책)을 눌러 본다
+        let books = keyboard.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "건")).allElementsBoundByIndex
+        notes.append("   책 탭 \(books.count)개: \(books.prefix(4).map { $0.label }.joined(separator: " / "))")
+        if books.count > 1 {
+            books[1].tap()
+            Thread.sleep(forTimeInterval: 0.8)
+            shot("B3-책-필터")
+        }
+
+        // 4) 구절 탭 → 기존 삽입 경로
+        let verse = keyboard.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", ":")).firstMatch
+        if verse.waitForExistence(timeout: 3) {
+            notes.append("★ B4 고른 행 \(q(verse.label))")
+            verse.tap()
+            Thread.sleep(forTimeInterval: 1.5)
+            notes.append("   삽입 뒤 입력란 \(q(fieldValue()))")
+        } else {
+            notes.append("★ B4 구절 행을 못 찾았다")
+        }
+        shot("B4-삽입-뒤")
+    }
+
+    /// ✕ 는 **친 글자 전체**를 지운다 (계획서 2-7 N-4).
+    /// 말끝 떼기 제거(2026-09-21) 뒤에는 찾은 말과 친 말이 언제나 같다.
+    func testBibleSearchQueryDeleteRemovesTypedWord() throws {
+        try prepare()
+        clearAll()
+
+        // ★ 2026-09-21 개정 — 말끝 떼기를 없애면서 「사랑해」는 0건이 됐다.
+        //   예전엔 이 테스트가 「사랑해」→「사랑」 폴백으로 배지를 띄우고 ✕가 **3자**를
+        //   지우는지 봤다. 이제 찾은 말과 친 말이 언제나 같으므로 직접 친 낱말로 본다.
+        typeOnKeyboard("사랑")
+        Thread.sleep(forTimeInterval: 1.2)
+        let badge = keyboard.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "성경 구절 ")).firstMatch
+        guard badge.waitForExistence(timeout: 5) else {
+            notes.append("★ X1 「사랑」에 배지가 안 떴다")
+            shot("X1-배지-없음")
+            return XCTFail("배지가 뜨지 않았다")
+        }
+        notes.append("★ X1 「사랑」 → 배지 \(q(badge.label))")
+        badge.tap()
+        Thread.sleep(forTimeInterval: 1.0)
+
+        let chipLabel = keyboard.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "검색어 ")).firstMatch
+        notes.append("   머리 칩 \(chipLabel.exists ? q(chipLabel.label) : "(없음)")")
+        shot("X2-패널")
+
+        let clear = keyboard.buttons["검색어 지우기"].firstMatch
+        guard clear.waitForExistence(timeout: 3) else {
+            return XCTFail("검색어 지우기 버튼이 없다")
+        }
+        clear.tap()
+        Thread.sleep(forTimeInterval: 1.2)
+        let after = fieldValue()
+        notes.append("★ X3 ✕ 뒤 입력란 \(q(after)) — 한 글자라도 남으면 실패다")
+        shot("X3-지운-뒤")
+        XCTAssertEqual(after, "", "✕ 가 친 낱말 전체를 지우지 않았다")
+    }
+
+    /// 기존 패널 회귀 — 성경 패널을 끼워 넣어도 **이모지·클립보드가 그대로 열리고 닫히는가.**
+    /// 패널 분기에서 성경이 앞에 있어 상호 배제가 깨지면 여기서 잡힌다.
+    func testExistingPanelsStillWork() throws {
+        try prepare()
+        clearAll()
+        Thread.sleep(forTimeInterval: 0.8)
+
+        for tool in ["이모지", "클립보드"] {
+            let button = keyboard.buttons[tool].firstMatch
+            guard button.waitForExistence(timeout: 4) else {
+                notes.append("★ R 도구 «\(tool)» 이 도구 행에 없다 (설정·권한으로 숨겨졌을 수 있다)")
+                continue
+            }
+            button.tap()
+            Thread.sleep(forTimeInterval: 1.0)
+            let back = keyboard.buttons["자판으로 돌아가기"].firstMatch
+            let opened = back.waitForExistence(timeout: 4)
+            notes.append("★ R \(tool) 패널 열림=\(opened)")
+            shot("R-\(tool)-열림")
+            XCTAssertTrue(opened, "\(tool) 패널이 열리지 않았다")
+            back.tap()
+            Thread.sleep(forTimeInterval: 1.0)
+            let closed = !back.exists
+            notes.append("   \(tool) 패널 닫힘=\(closed)")
+            XCTAssertTrue(closed, "\(tool) 패널이 닫히지 않았다")
+        }
+        shot("R-자판-복귀")
+    }
+
+    /// ★ 사장님이 실기에서 찾은 경로 — 「하세요」에 배지가 뜨면 안 된다 (2026-09-21).
+    /// 「하세」는 본문에 **6건이 실제로 걸린다.** 조사 결합 검사만이 이것을 막는다.
+    func testHaseyoShowsNoBadge() throws {
+        try prepare()
+        clearAll()
+
+        typeOnKeyboard("하세요")
+        Thread.sleep(forTimeInterval: 1.5)
+        let badge = keyboard.buttons.matching(
+            NSPredicate(format: "label BEGINSWITH %@", "성경 구절 ")).firstMatch
+        let appeared = badge.waitForExistence(timeout: 3)
+        notes.append("★ H1 「하세요」 → 입력란 \(q(fieldValue())) / 배지 \(appeared ? q(badge.label) : "(없음)")")
+        shot("H1-하세요-배지없음")
+        XCTAssertFalse(appeared, "「하세요」에 배지가 떴다 — 말끝을 자르고 있다")
+
+        // ★ 2026-09-21 개정 — 예전엔 여기서 「사랑해」가 폴백으로 떠야 했다.
+        //   말끝 떼기를 없앴으므로 이제 「사랑해」도 0건이다(받아들인 손실).
+        //   대신 **직접 친 낱말은 그대로 떠야 한다**는 것을 같은 실행에서 확인한다 —
+        //   검색 기능 자체가 죽지 않았음을 보는 자리다.
+        clearAll()
+        typeOnKeyboard("사랑")
+        Thread.sleep(forTimeInterval: 1.5)
+        let good = badge.waitForExistence(timeout: 5)
+        notes.append("★ H2 「사랑」 → 배지 \(good ? q(badge.label) : "(없음)")")
+        shot("H2-사랑-배지있음")
+        XCTAssertTrue(good, "직접 친 「사랑」까지 안 뜬다 — 검색이 통째로 죽었다")
+    }
+
     private func prepare() throws {
         host.launch()
         dismissAllContinues()

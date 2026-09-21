@@ -36,6 +36,8 @@ public struct KeyboardRootView: View {
     private let onClipboardClear: (() -> Void)?
     private let onCursorDrag: ((Int) -> Void)?
     private let onDismissSuggestions: (() -> Void)?
+    private let onBibleBadgeTap: (() -> Void)?
+    private let onBibleRowTap: ((BibleSearchRow) -> Void)?
     private let inputModeSwitchButton: AnyView?
 
     /// **상자를 전부 채우고 내용은 하단 정렬한다** (14차 H1, 기본 `false` = 기존 동작).
@@ -70,6 +72,8 @@ public struct KeyboardRootView: View {
     ///   - onClipboardEntryTap/Delete/Clear: 클립보드 기록 패널 항목 삽입·삭제·모두 지우기.
     ///   - onCursorDrag: 스페이스 트랙패드 모드의 문자 단위 커서 이동 (진동 없이 연속 호출된다).
     ///   - onDismissSuggestions: 후보 행 맨 오른쪽 ✕ — 후보를 내리고 도구 행으로 돌아간다.
+    ///   - onBibleBadgeTap: 툴바 성경 배지 — 검색 패널(화면 2)을 연다.
+    ///   - onBibleRowTap: 검색 패널의 구절 행 — 기존 채움글 삽입 경로로 넣는다.
     ///   - onCursorMove: 커서 이동 도구(◀ -1 / ▶ +1).
     ///   - onEmojiTap: 이모지 그리드에서 이모지를 골랐을 때.
     ///   - onKeyPress: 자판 키 터치다운(백스페이스 반복 포함) — 클릭음·진동 재생 시점.
@@ -91,6 +95,8 @@ public struct KeyboardRootView: View {
         onClipboardClear: (() -> Void)? = nil,
         onCursorDrag: ((Int) -> Void)? = nil,
         onDismissSuggestions: (() -> Void)? = nil,
+        onBibleBadgeTap: (() -> Void)? = nil,
+        onBibleRowTap: ((BibleSearchRow) -> Void)? = nil,
         fillsContainer: Bool = false,
         transparentAbove: Bool = false
     ) {
@@ -109,6 +115,8 @@ public struct KeyboardRootView: View {
         self.onClipboardClear = onClipboardClear
         self.onCursorDrag = onCursorDrag
         self.onDismissSuggestions = onDismissSuggestions
+        self.onBibleBadgeTap = onBibleBadgeTap
+        self.onBibleRowTap = onBibleRowTap
         self.fillsContainer = fillsContainer
         self.transparentAbove = transparentAbove
     }
@@ -151,14 +159,27 @@ public struct KeyboardRootView: View {
                 onPasteboardCodeTap: onPasteboardCodeTap,
                 onToolTap: onToolTap,
                 onCursorMove: onCursorMove,
-                onDismissSuggestions: onDismissSuggestions
+                onDismissSuggestions: onDismissSuggestions,
+                onBibleBadgeTap: onBibleBadgeTap
             )
             // 툴바도 자판과 같은 폭 안에 둔다. 자판만 좁히면 도구 아이콘 4개가 여전히 전폭에
             // 균등 분배돼 **자판 밖으로 삐져나온다.** 가로 아이패드에서는 커서 ◀▶ 사이가
             // 306pt(약 8cm)까지 벌어져 한 글자 고치는 데 손이 화면을 가로질렀다
             // (검증자 실측 REQ-4).
             .frame(maxWidth: areaMaxWidth)
-            if state.showsClipboardPanel, let onClipboardEntryTap, let onToolTap {
+            if state.showsBibleSearchPanel, let onBibleRowTap, let onBibleBadgeTap {
+                BibleSearchPanelView(
+                    query: state.bibleSearchQuery,
+                    rows: state.bibleSearchRows,
+                    theme: theme,
+                    onRowTap: onBibleRowTap,
+                    onClose: onBibleBadgeTap   // 토글 — 조립 지점이 패널을 닫는다
+                )
+                .frame(height: state.keyboardHeight)
+                .padding(.horizontal, 3)
+                .padding(.bottom, 4)
+                .frame(maxWidth: areaMaxWidth)
+            } else if state.showsClipboardPanel, let onClipboardEntryTap, let onToolTap {
                 ClipboardPanelView(
                     entries: state.clipboardEntries,
                     historyEnabled: state.clipboardHistoryEnabled,
@@ -220,11 +241,14 @@ private struct SuggestionToolbar: View {
     let onToolTap: ((ToolbarTool) -> Void)?
     let onCursorMove: ((Int) -> Void)?
     let onDismissSuggestions: (() -> Void)?
+    let onBibleBadgeTap: (() -> Void)?
 
     var body: some View {
         let snippet = state.snippetSuggestion
         let words = state.wordSuggestions
+        // 배지가 있으면 ✕도 남겨 둔다 — 배지만 떠 있을 때 내릴 방법이 없으면 안 된다
         let hasCandidates = snippet != nil || !words.isEmpty || state.pasteSuggestion != nil
+            || state.bibleMatchCount != nil
         // **칩만 있을 때는 가운데 정렬한다** (사용자 요청 2026-09-11, 사장님 결정 5).
         //
         // 기준은 **닫기(✕)를 제외한 콘텐츠 영역의 가운데**다 — ✕는 오른쪽 끝에 그대로 두고
@@ -263,6 +287,10 @@ private struct SuggestionToolbar: View {
                         .font(.system(size: 17))
                         .foregroundStyle(theme.keyText)
                         .lineLimit(1)
+                        // 배지가 오른쪽 폭을 가져가므로 긴 후보는 줄여 넣는다 (계획서 2-1).
+                        // 자르는 대신 줄이는 이유: 「창조하시니라」가 「창조하…」가 되면
+                        // 무엇을 넣을지 알 수 없다.
+                        .minimumScaleFactor(0.7)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 10)
                         .frame(maxWidth: .infinity)
@@ -289,6 +317,9 @@ private struct SuggestionToolbar: View {
             } else if words.isEmpty {
                 Spacer()  // 칩만 있을 때는 내용 크기 유지
             }
+            if let count = state.bibleMatchCount, let onBibleBadgeTap {
+                bibleBadge(count: count, action: onBibleBadgeTap)
+            }
             if hasCandidates, let onDismissSuggestions {
                 // 후보 내리기 — 도구 행으로 돌아간다 (사용자 요청 2026-09-03). 맨 오른쪽 고정.
                 Button(action: onDismissSuggestions) {
@@ -307,6 +338,36 @@ private struct SuggestionToolbar: View {
         // 칩 등장/퇴장에만 애니메이션 — 추천단어 후보는 키마다 바뀌므로 애니메이션을 걸지 않는다
         // (매 키 입력마다 툴바가 꿈틀거리면 산만하고 비용도 든다)
         .animation(.spring(duration: 0.28, bounce: 0.25), value: snippet?.title)
+    }
+
+    /// 성경 검색 배지 — **오른쪽 끝 고정(✕ 왼쪽)**.
+    ///
+    /// ## 왜 오른쪽인가 (계획서 2-1, 양보 불가)
+    ///
+    /// 왼쪽에 두면 배지가 떴다 사라질 때마다 **추천단어 전체가 매 타 85~94pt씩 옆으로 뛴다.**
+    /// 사용자는 방금 본 자리를 누르는데 그 사이에 다른 후보가 와 있어 **오삽입**이 된다.
+    /// 오른쪽 끝이면 배지가 나타나도 추천단어의 시작 자리가 그대로다.
+    private func bibleBadge(count: Int, action: @escaping () -> Void) -> some View {
+        // 표기 규칙은 `BibleCountText` 한 곳에 있다 — 패널의 「전체」 칩과 **같은 규칙**을 써야
+        // 둘이 다른 말을 하지 않는다(2026-09-21: 배지 999+ / 패널 전체(1000) 불일치를 닫았다).
+        let label = BibleCountText.label(count)
+        return Button(action: action) {
+            HStack(spacing: 3) {
+                Image(systemName: "book")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(label)
+                    .font(.system(size: 13, weight: .semibold))
+                    // 숫자가 바뀔 때 폭이 흔들리지 않게 — 옆의 추천단어가 따라 흔들린다
+                    .monospacedDigit()
+            }
+            .foregroundStyle(theme.keyText)
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(theme.functionKey, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("성경 구절 \(BibleCountText.spokenCount(count)), 검색 열기")
     }
 
     /// 도구 행 — 후보가 없을 때의 기본 툴바 내용 (PDR toolbar-tools). 아이콘·라벨은 `ToolbarTool`이 정한다
