@@ -75,8 +75,14 @@ public struct BibleSearchResult: Equatable, Sendable {
 /// ## 최악 10회
 ///
 /// 정확 5회 + 느슨 5회 = **본문 훑기 최대 10회.** 오전의 5회 계약을 다시 쓴 값이다.
-/// 실측 **5.84ms**로 60Hz 프레임 예산 16.7ms의 35%다(정확만 2.62ms · 느슨만 3.15ms).
-/// 근거: `docs/design-reviews/bible-space-insensitive-search.md`.
+///
+/// ★ **「프레임 예산의 35%」는 더 이상 현행 결론이 아니다** (2026-09-21 정정, 반론자2).
+/// 그 문장은 스캔이 주 스레드에서 돌던 때의 것이고, 지금은 `BibleSearchScheduler`가
+/// 스캔을 `Task.detached`로 낸다 — **주 스레드를 막는 시간이 아니다.** 게다가 그 5.84ms는
+/// fixture 하나의 값이라 최악도 아니었다(비싼 낱말 다섯 줄은 **11.6~13.0ms**).
+/// 지금 이 숫자가 뜻하는 것은 **결과가 배지에 뜨기까지의 지연**이다.
+/// 꼬리별 실측은 `BibleSearchBenchmark.cascadeRoundTrip`,
+/// 근거는 `docs/design-reviews/bible-space-insensitive-search.md`.
 public struct BibleSearchCascade: Sendable {
 
     /// 낱말 창 상한. **실기 실측 뒤 조정 가능한 값이지 고정 상수가 아니다**(계획서 3-2절).
@@ -123,15 +129,24 @@ public struct BibleSearchCascade: Sendable {
 
     /// - Parameter tail: `InputController.committedTail`(최대 48자, 조합 확정분만).
     /// - Returns: 한 건이라도 맞으면 결과, 전부 실패하면 nil(배지 없음).
+    ///
+    /// ## ★ 협조적 취소 (2026-09-21, 반론자2)
+    ///
+    /// 이 함수는 `BibleSearchScheduler`가 만든 **detached 스캔 안에서** 돈다. 취소가 오면
+    /// 한 바퀴(최대 10회 훑기)를 끝까지 돌 이유가 없다 — 결과는 어차피 버려진다.
+    /// 훑기 하나하나는 스캐너가 **절 256개마다** 끊고
+    /// (`BibleByteScanner.cancellationCheckInterval`), 훑기 **사이**는 여기서 끊는다.
     public func search(tail: String) -> BibleSearchResult? {
         let words = tail.split(whereSeparator: { $0.isWhitespace })
         guard let lastWord = words.last else { return nil }
+        guard !Task.isCancelled else { return nil }
 
         // ① 정확 한 바퀴 — 지금 되는 것은 하나도 바뀌지 않는다
         if let found = pass(tail: tail, words: words, lastWord: lastWord, ignoringSpaces: false) {
             return found
         }
         // ② 전부 0건일 때만 느슨 한 바퀴 — 0건이던 자리에만 결과가 생긴다
+        guard !Task.isCancelled else { return nil }
         return pass(tail: tail, words: words, lastWord: lastWord, ignoringSpaces: true)
     }
 
@@ -147,6 +162,7 @@ public struct BibleSearchCascade: Sendable {
     ) -> BibleSearchResult? {
         var windowSize = min(words.count, Self.wordWindowLimit)
         while windowSize >= 1 {
+            guard !Task.isCancelled else { return nil }
             let firstWord = words[words.count - windowSize]
             // 원문 그대로 — 낱말 사이 공백을 재조립하지 않고 꼬리에서 그대로 잘라 낸다.
             // 재조립하면 「태초에  하나님이」(공백 둘)가 본문과 어긋난다.

@@ -176,6 +176,11 @@ struct KeyboardSettingsTests {
         #expect(ToolbarTool.cursorLeft.worksWithoutFullAccess && ToolbarTool.cursorRight.worksWithoutFullAccess)
         #expect(ToolbarTool.emoji.worksWithoutFullAccess)
         #expect(ToolbarTool.dismiss.worksWithoutFullAccess)
+        // ★ 번들 bible.tdb를 mmap으로 읽을 뿐이라 권한이 필요 없다. 화이트리스트로 바꾸면서
+        //   빠뜨리면 **전체 접근을 끈 사용자에게서 📖 자리가 조용히 사라진다.**
+        #expect(ToolbarTool.bibleSearch.worksWithoutFullAccess)
+        // 전수 — 클립보드 하나만 거짓이다
+        #expect(ToolbarTool.allCases.filter { !$0.worksWithoutFullAccess } == [.clipboard])
     }
 
     /// 도구 순서 — 구 저장분에 없는 신규 도구는 뒤에 붙어야 사라지지 않는다.
@@ -185,12 +190,14 @@ struct KeyboardSettingsTests {
         let legacy = #"{"toolOrder":["emoji","cursor"]}"#.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
         // 뒤에 붙는 순서는 `allCases` 순서다 — v1.0.1에서 dismiss가 맨 끝으로 갔다.
-        #expect(decoded.orderedTools == [.emoji, .cursorLeft, .cursorRight, .clipboard, .dismiss])
+        // v1.1.0: 📖은 **뒤에 붙지 않는다** — 디코더가 이모지 바로 뒤로 끼운 뒤라서다
+        #expect(decoded.orderedTools == [.emoji, .bibleSearch, .cursorLeft, .cursorRight, .clipboard, .dismiss])
         #expect(KeyboardSettings.default.orderedTools == ToolbarTool.allCases)
         // 중복은 첫 등장만
         let dup = #"{"toolOrder":["cursor","cursor","dismiss"]}"#.data(using: .utf8)!
+        // 이모지가 저장 순서에 없으면 `dismiss` 앞으로 물러난다 (그 다음이 맨 뒤)
         #expect(try JSONDecoder().decode(KeyboardSettings.self, from: dup).orderedTools
-                == [.cursorLeft, .cursorRight, .dismiss, .clipboard, .emoji])
+                == [.cursorLeft, .cursorRight, .bibleSearch, .dismiss, .clipboard, .emoji])
     }
 
     // MARK: - v1.0.1 툴바 순서 1회성 마이그레이션 (fixture 5종)
@@ -202,7 +209,7 @@ struct KeyboardSettingsTests {
     @Test("마이그레이션 1 — 신규 설치는 새 기본값이고 전환 완료 상태로 시작한다")
     func migrationFreshInstall() {
         let fresh = KeyboardSettings()
-        #expect(fresh.toolOrder == [.cursorLeft, .cursorRight, .clipboard, .emoji, .dismiss])
+        #expect(fresh.toolOrder == [.cursorLeft, .cursorRight, .clipboard, .emoji, .bibleSearch, .dismiss])
         #expect(fresh.toolOrder == ToolbarTool.allCases)
         #expect(fresh.toolOrderMigratedV101, "신규 설치는 전환할 것이 없다")
     }
@@ -221,7 +228,9 @@ struct KeyboardSettingsTests {
         let custom = #"{"toolOrder":["emoji","dismiss","clipboard","cursorLeft","cursorRight"]}"#
             .data(using: .utf8)!
         let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: custom)
-        #expect(decoded.toolOrder == [.emoji, .dismiss, .clipboard, .cursorLeft, .cursorRight],
+        // ★ 기존 도구의 **상대 순서는 하나도 안 바뀐다.** 📖만 이모지 바로 뒤에 끼었다 —
+        //   스플라이스 방식을 안 쓴 이유가 이것이다(그쪽은 dismiss를 2번→6번으로 민다).
+        #expect(decoded.toolOrder == [.emoji, .bibleSearch, .dismiss, .clipboard, .cursorLeft, .cursorRight],
                 "사용자가 정한 순서는 그대로")
         #expect(decoded.toolOrderMigratedV101, "전환 대상이 아니어도 플래그는 선다 — 다시 묻지 않는다")
     }
@@ -234,8 +243,8 @@ struct KeyboardSettingsTests {
          "toolOrderMigratedV101":true}
         """#.data(using: .utf8)!
         let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: reverted)
-        #expect(decoded.toolOrder == KeyboardSettings.legacyDefaultToolOrder,
-                "사용자 선택이므로 유지된다 — 여기서 덮어쓰면 영구 고착 버그다")
+        #expect(decoded.toolOrder == KeyboardSettings.legacyDefaultToolOrder + [.bibleSearch],
+                "사용자 선택이므로 유지된다 — 여기서 덮어쓰면 영구 고착 버그다. 📖만 이모지 뒤에 붙는다")
         #expect(decoded.toolOrderMigratedV101)
     }
 
@@ -249,13 +258,150 @@ struct KeyboardSettingsTests {
         #expect(decoded.toolOrderMigratedV101)
     }
 
+    // MARK: - ★ v1.1.0 — 📖를 도구 순서에 끼우는 마이그레이션 (저장분 fixture)
+    //
+    // **이것이 이번 변경의 위험 전부다.** `orderedTools`가 빠진 도구를 무조건 뒤에 붙이므로,
+    // 마이그레이션이 없으면 현실적인 v1.0.1 저장분 전부에서 📖이 **맨 끝(내리기 뒤)** 으로 간다.
+    // 그리고 `ToolbarOrderPreview`가 `orderedTools`를 그대로 `toolOrder`에 되쓰므로
+    // **사용자가 순서 편집을 한 번 건드리면 그 끝자리가 영구 저장된다.**
+
+    @Test("📖 저장분 1 — 신규 설치는 선언 순서 그대로다")
+    func bibleOrderFreshInstall() {
+        #expect(KeyboardSettings().toolOrder
+                == [.cursorLeft, .cursorRight, .clipboard, .emoji, .bibleSearch, .dismiss])
+        #expect(KeyboardSettings().bibleSearchInToolOrderMigrated, "끼울 것이 없다")
+    }
+
+    @Test("📖 저장분 2 — v1.0.1 기본 순서: 이모지 바로 뒤")
+    func bibleOrderV101Default() throws {
+        // v1.0.1 기본값 = 그때의 `allCases`
+        let saved = #"{"toolOrder":["cursorLeft","cursorRight","clipboard","emoji","dismiss"],"toolOrderMigratedV101":true}"#
+            .data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: saved)
+        #expect(decoded.toolOrder
+                == [.cursorLeft, .cursorRight, .clipboard, .emoji, .bibleSearch, .dismiss])
+        #expect(decoded.bibleSearchInToolOrderMigrated)
+    }
+
+    @Test("📖 저장분 3 — 사용자가 바꾼 순서: 기존 상대 순서가 하나도 안 바뀐다")
+    func bibleOrderCustom() throws {
+        let saved = #"{"toolOrder":["dismiss","emoji","clipboard","cursorRight","cursorLeft"],"toolOrderMigratedV101":true}"#
+            .data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: saved)
+        #expect(decoded.toolOrder
+                == [.dismiss, .emoji, .bibleSearch, .clipboard, .cursorRight, .cursorLeft])
+        // ★ 「내리기」를 1번에 둔 사용자다. `dismiss` 앵커였다면 📖이 **맨 앞**에 꽂혀
+        //   사용자가 손수 정한 1번 자리를 빼앗았다. 이모지 앵커는 그런 일이 없다.
+        #expect(decoded.toolOrder.first == .dismiss, "사용자가 정한 1번 자리를 빼앗지 않는다")
+        // 📖를 뺀 나머지가 저장분과 **완전히 같다**
+        #expect(decoded.toolOrder.filter { $0 != .bibleSearch }
+                == [.dismiss, .emoji, .clipboard, .cursorRight, .cursorLeft])
+    }
+
+    @Test("📖 저장분 4 — 이모지를 끈 사용자도 이모지 **자리** 뒤다")
+    func bibleOrderEmojiDisabled() throws {
+        // 끔은 `disabledTools`라 `toolOrder`에는 이모지가 그대로 남는다
+        let saved = #"{"toolOrder":["cursorLeft","cursorRight","clipboard","emoji","dismiss"],"disabledTools":["emoji"],"toolOrderMigratedV101":true}"#
+            .data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: saved)
+        #expect(decoded.toolOrder
+                == [.cursorLeft, .cursorRight, .clipboard, .emoji, .bibleSearch, .dismiss])
+        #expect(decoded.disabledTools == [.emoji], "끔 상태는 그대로")
+    }
+
+    @Test("📖 저장분 5 — v1.0.0(단일 cursor + 구 기본 순서)은 v1.0.1 전환을 거친 뒤 끼워진다")
+    func bibleOrderAncient() throws {
+        let saved = #"{"toolOrder":["dismiss","cursor","clipboard","emoji"]}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: saved)
+        // 펼치면 구 기본값 → v1.0.1 전환으로 `allCases`(📖 포함) → 이미 있으므로 끼우지 않는다
+        #expect(decoded.toolOrder == ToolbarTool.allCases)
+        #expect(decoded.toolOrderMigratedV101 && decoded.bibleSearchInToolOrderMigrated)
+    }
+
+    @Test("★ 📖 저장분 6 — 이미 📖가 있으면 **어디 있든 그대로 둔다**")
+    func bibleOrderAlreadyPresentIsPreserved() throws {
+        // 사용자가 📖를 맨 앞으로 옮겨 둔 v1.1.0 저장분.
+        // **플래그 유/무 양쪽**에서 보존돼야 한다 — 판정이 존재 여부라 플래그와 무관하다.
+        let moved = [ToolbarTool.bibleSearch, .cursorLeft, .cursorRight, .clipboard, .emoji, .dismiss]
+        for flag in ["true", "false"] {
+            let saved = """
+            {"toolOrder":["bibleSearch","cursorLeft","cursorRight","clipboard","emoji","dismiss"],
+             "toolOrderMigratedV101":true,"bibleSearchInToolOrderMigrated":\(flag)}
+            """.data(using: .utf8)!
+            let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: saved)
+            #expect(decoded.toolOrder == moved, "플래그 \(flag)에서도 사용자 자리를 되돌리지 않는다")
+        }
+    }
+
+    @Test("★ 📖 전환 플래그는 리터럴 false에서 출발한다 — 구 저장분이 「완료」로 읽히면 기록이 거짓이다")
+    func bibleOrderFlagDefaultsToFalseNotBase() throws {
+        // 키가 없는 구 저장분: 끼워 넣기가 **실제로 일어나야** 한다.
+        // `base`(= .default)를 기본값으로 썼다면 true로 읽혀도 이 판정은 존재 여부라 결과는 같지만,
+        // 플래그가 「이 저장분은 전환을 겪지 않았다」를 기록하지 못한다.
+        let saved = #"{"toolOrder":["emoji"],"toolOrderMigratedV101":true}"#.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: saved)
+        #expect(decoded.toolOrder == [.emoji, .bibleSearch])
+        #expect(decoded.orderedTools
+                == [.emoji, .bibleSearch, .cursorLeft, .cursorRight, .clipboard, .dismiss])
+    }
+
+    @Test("📖 끼우기 — 이모지가 없으면 내리기 앞, 그것도 없으면 맨 뒤")
+    func bibleOrderFallbackAnchors() {
+        #expect(KeyboardSettings.insertingBibleSearch(into: [.clipboard, .dismiss, .cursorLeft])
+                == [.clipboard, .bibleSearch, .dismiss, .cursorLeft])
+        #expect(KeyboardSettings.insertingBibleSearch(into: [.clipboard, .cursorLeft])
+                == [.clipboard, .cursorLeft, .bibleSearch])
+        #expect(KeyboardSettings.insertingBibleSearch(into: []) == [.bibleSearch])
+    }
+
+    // MARK: - ★ 📖만 설정에서 못 끈다
+
+    @Test("★ 📖는 설정에서 끌 수 없다 — 나머지 다섯은 끌 수 있다")
+    func bibleSearchIsNotToggleable() {
+        #expect(ToolbarTool.bibleSearch.isToggleableInSettings == false)
+        #expect(ToolbarTool.allCases.filter(\.isToggleableInSettings)
+                == [.cursorLeft, .cursorRight, .clipboard, .emoji, .dismiss])
+        // 여섯 중 다섯만 탭으로 꺼진다 — 스트립의 탭 가드와 접근성 값이 이 사실에 걸려 있다
+        #expect(ToolbarTool.allCases.count == 6)
+    }
+
+    // MARK: - ★ 도구 이름 — SE에서 잘리지 않아야 한다 (2026-09-22)
+
+    @Test("★ 커서 두 개의 이름이 짧아졌다 — 도구가 6개가 되며 SE에서 잘렸다")
+    func cursorNamesShortened() {
+        #expect(ToolbarTool.cursorLeft.displayName == "좌측 커서 이동")
+        #expect(ToolbarTool.cursorRight.displayName == "우측 커서 이동")
+    }
+
+    /// ★ **이 테스트가 잠그는 것은 문자열이 아니라 「왜 바꿨나」다.**
+    ///
+    /// 순서 편집 스트립의 이름표는 `.caption2`(11pt) **2줄**이고 공백에서 줄바꿈한다.
+    /// SE(375pt)·도구 6칸에서 칸 폭이 **약 45~51pt**라, 공백으로 끊은 한 토막이
+    /// **5글자(≈55pt)면 넘쳐 잘린다.** 실제로 「오른쪽으로 커서 이동」의 「오른쪽으로」(5글자)가
+    /// 검증자 실화면에서 잘렸다(`verify-v110-copytrim.md` 0-2절).
+    ///
+    /// 4글자(≈44pt)까지는 들어간다 — 「클립보드」가 그 경계에 있고 잘리지 않았다.
+    /// **그래서 상한을 4로 잠근다.** 새 도구를 넣거나 이름을 바꿀 때 이 테스트가 먼저 운다.
+    @Test("★ 어떤 도구 이름도 공백으로 끊은 한 토막이 4글자를 넘지 않는다")
+    func noToolNameChunkExceedsFourCharacters() {
+        for tool in ToolbarTool.allCases {
+            let longest = tool.displayName
+                .split(separator: " ")
+                .map(\.count)
+                .max() ?? 0
+            #expect(longest <= 4, "\(tool.displayName)의 최장 토막이 \(longest)글자다 — SE 6칸에서 잘린다")
+        }
+        // 고치기 전에는 이 상한을 넘던 것이 있었다는 사실 자체를 남긴다
+        #expect("오른쪽으로".count == 5)
+    }
+
     @Test("도구 목록의 미지 값은 버리고 설정 전체는 살린다 — 구 cursor는 disabledTools에서도 둘로")
     func toolListsDecodeLeniently() throws {
         let json = #"{"disabledTools":["cursor","futureTool"],"toolOrder":["emoji","futureTool","dismiss"],"numberRowEnabled":true}"#
             .data(using: .utf8)!
         let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: json)
         #expect(decoded.disabledTools == [.cursorLeft, .cursorRight])
-        #expect(decoded.orderedTools == [.emoji, .dismiss, .cursorLeft, .cursorRight, .clipboard])
+        #expect(decoded.orderedTools == [.emoji, .bibleSearch, .dismiss, .cursorLeft, .cursorRight, .clipboard])
         #expect(decoded.numberRowEnabled == true, "한 원소가 이상해도 다른 필드는 정상 디코딩")
     }
 

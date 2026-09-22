@@ -23,6 +23,23 @@ struct ToolbarOrderPreview: View {
     @Binding var settings: KeyboardSettings
     /// 오른쪽 위 "순서 편집" 버튼이 켜는 모드. 드래그는 **이 모드에서만** 붙는다.
     let isEditing: Bool
+    /// ★ **여기서 못 끄는 도구를 눌렀다** — 조립 지점(`ToolbarTab`)이 토스트로 알린다.
+    ///
+    /// 전에는 그 탭이 **조용히 죽어 있었다.** `toggle()`이 `.bibleSearch`를 무시하므로
+    /// 눌러도 아무 일이 없고, 섹션 푸터는 「아이콘을 눌러 도구를 ON/OFF」라고 말한다 —
+    /// 그 도구에서만 **거짓**이다. 특히 평소 모드에서 헷갈린다(그때는 다른 도구가 실제로 켜지고 꺼진다).
+    ///
+    /// **토스트를 여기서 그리지 않는다.** 이 뷰는 스트립 하나만 그리는 부품이고,
+    /// 토스트는 화면 전체에 얹히는 것이라 조립 지점의 몫이다.
+    var onBlockedToggle: (ToolbarTool) -> Void = { _ in }
+
+    /// 📖만 여기서 못 끄는 이유를 말하는 **한 문장**. 화면(토스트)과 낭독(접근성 값)이
+    /// **같은 말**을 쓰게 한 곳에 둔다 — 둘이 갈리면 두 사용자가 다른 안내를 받는다.
+    ///
+    /// 두 값의 차이는 **구두점뿐**이다. VoiceOver는 `>`를 「보다 큼」으로 읽거나 건너뛰므로
+    /// 낭독용은 쉼표로 끊는다.
+    static let bibleSwitchHint = "채움글 > 성경에서 켜고 꺼요"
+    static let bibleSwitchHintSpoken = "채움글, 성경에서 켜고 꺼요"
 
     /// 끌고 있는 도구와 그 순간의 x 이동량. 셀 하나를 지날 때마다 자리를 바꾸고 offset을 그만큼 뺀다.
     @State private var draggingTool: ToolbarTool?
@@ -74,7 +91,12 @@ struct ToolbarOrderPreview: View {
         static let labelTopSpacing: CGFloat = 6
     }
 
-    private var tools: [ToolbarTool] { settings.orderedTools }
+    /// 스트립에 **보이는** 도구들.
+    ///
+    /// ★ 꺼진 📖은 목록에 없다 (사용자 지시 2026-09-22 — 전날의 「흐리게 보여 준다」를 뒤집었다).
+    /// **저장은 `persist(visibleOrder:)`를 거쳐야 한다** — 이 목록을 그대로 `toolOrder`에 쓰면
+    /// 안 보이는 도구가 배열에서 사라진다.
+    private var tools: [ToolbarTool] { settings.toolsShownInOrderEditor() }
 
     /// 이름표 두 줄이 들어갈 높이. `@ScaledMetric` 이 사용자 글자 크기에 맞춰 늘려 준다.
     /// 기준 30 은 기본 크기에서 `.caption2` 두 줄이 들어가던 값이라 **일반 크기 화면은 그대로다.**
@@ -129,11 +151,22 @@ struct ToolbarOrderPreview: View {
 
     /// 셀 하나.
     ///
+    /// ## ★ 📖 셀은 **끌 수는 있고 끌 수는 없다** (v1.1.0)
+    ///
+    /// 「끌어서 옮기기」는 되고 「탭해서 끄기」는 안 된다. 켜고 끄는 것은 채움글 > 성경이 정한다.
+    ///
+    /// **꺼져 있으면 스트립에 아예 안 보인다** (사용자 지시 2026-09-22).
+    /// 전날에는 「흐리게 보여 준다」였다 — *켰을 때 어디 나타날지 미리 알 수 있다*가 근거였는데
+    /// **사용자가 뒤집었다.** 그래서 켜야 보이고, 보일 때 자리는 `toolOrder`가 정한 자리다.
+    ///
+    /// ★ 안 보이는 동안에도 **저장에는 남아 있다** — `persist(visibleOrder:)` 참조.
+    /// 그래서 껐다 다시 켜도 끌어 둔 자리가 그대로다.
+    ///
     /// **누르는 도중 서브트리 구조를 바꾸지 않는다** (CLAUDE.md 2026-09-05 트랙패드 버그와 같은 이유).
     /// 켜짐/꺼짐·집힘·편집 모드를 전부 **배경·테두리·transform·투명도**로만 표현한다.
     /// `if`로 아이콘을 갈아끼우거나 오버레이를 넣고 빼면 진행 중인 터치가 제스처에서 떨어진다.
     private func cell(_ tool: ToolbarTool, width: CGFloat) -> some View {
-        let enabled = !settings.disabledTools.contains(tool)
+        let enabled = isOn(tool)
         let dragging = draggingTool == tool
 
         return Image(systemName: tool.symbolName)
@@ -223,7 +256,7 @@ struct ToolbarOrderPreview: View {
                     .font(.caption2)
                     .multilineTextAlignment(.center)
                     .lineLimit(2)
-                    .foregroundStyle(settings.disabledTools.contains(tool) ? Color.secondary : Color.primary)
+                    .foregroundStyle(isOn(tool) ? Color.primary : Color.secondary)
                     .frame(width: cellWidth)
                     // **이름표는 아이콘과 같은 offset을 받아야 한다.**
                     // 예전 판은 `onChanged`에서 순서를 바꿔 스트립과 이름표가 같은 배열을 보고 함께
@@ -243,15 +276,44 @@ struct ToolbarOrderPreview: View {
 
     // MARK: 조작
 
-    /// 셀 폭 = `min(84, (스트립 안쪽 폭 − 간격×4) ÷ 5)` (디자인 2.1).
-    /// 상한 84는 아이패드에서 과하게 벌어지지 않게 하는 값이고, 최소 폭 375pt에서 55.8pt가 나온다.
+    /// 셀 폭 = `min(84, (스트립 안쪽 폭 − 간격×(n−1)) ÷ n)` (디자인 2.1).
+    /// 상한 84는 아이패드에서 과하게 벌어지지 않게 하는 값이다.
+    ///
+    /// ★ **v1.1.0에서 `n`이 5 → 6이 됐다**(📖 편입). 좁은 기기에서 칸과 **이름표**가 그만큼 좁아진다 —
+    /// 이름표는 `.caption2` 2줄이라 「키보드 내리기」·「단어로 구절 찾기」가 잘릴 수 있다.
+    /// **이것은 화면에서 확인하지 못했다**(실기·시뮬레이터 금지) — 보고서에 「실기 확인 필요」로 남겼다.
+    /// 잘리면 손댈 곳은 여기가 아니라 `labelBoxHeight`·`lineLimit`이다.
     private func cellWidth(forStripWidth stripWidth: CGFloat) -> CGFloat {
         let count = CGFloat(max(tools.count, 1))
         let inner = stripWidth - Metrics.stripInset * 2 - Metrics.cellSpacing * (count - 1)
         return max(1, min(Metrics.cellMaxWidth, inner / count))
     }
 
+    /// 이 도구가 지금 **툴바에 나오는 상태**인가.
+    ///
+    /// ★ `.bibleSearch`만 `disabledTools`를 보지 않는다 — 그 도구의 on/off는
+    /// **채움글 > 성경 > 「단어로 구절 찾기」**(`bibleSearchEnabled`)가 정한다.
+    /// 어긋난 저장분(`bibleSearchEnabled`가 참인데 `disabledTools`에 들어 있는 경우)은
+    /// **여기서도 무해하게 무시**한다 — 사용자 데이터를 조용히 지우지 않기 위해서다.
+    private func isOn(_ tool: ToolbarTool) -> Bool {
+        tool.isToggleableInSettings
+            ? !settings.disabledTools.contains(tool)
+            : settings.bibleSearchEnabled
+    }
+
+    /// 탭으로 켜고 끄기.
+    ///
+    /// ★ **`.bibleSearch`는 여기서 아무 일도 하지 않는다**(끌기 전용). 이 가드가 없으면
+    /// 탭이 `disabledTools`에 값을 써 넣는데, 조립 지점은 그 값을 보지 않으므로
+    /// **화면만 꺼지고 실제로는 안 꺼지는** 스위치가 된다.
+    /// 툴바 탭에 성경 스위치를 두지 말라는 사용자 지시(2026-09-21)가 있어 여기서는 못 끈다 —
+    /// 왜 못 끄는지는 섹션 푸터가 설명한다.
     private func toggle(_ tool: ToolbarTool) {
+        // ★ 조용히 삼키지 않는다 — 왜 아무 일이 없는지 조립 지점이 알린다 (2026-09-22).
+        guard tool.isToggleableInSettings else {
+            onBlockedToggle(tool)
+            return
+        }
         if settings.disabledTools.contains(tool) {
             settings.disabledTools.removeAll { $0 == tool }
         } else {
@@ -421,15 +483,26 @@ struct ToolbarOrderPreview: View {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
     }
 
+    /// ★★ 저장은 **반드시 여기를 거친다.**
+    ///
+    /// `tools`는 화면에 **보이는** 목록이라 꺼진 📖이 빠져 있다. 그것을 그대로
+    /// `settings.toolOrder`에 쓰면 **안 보이는 도구가 저장에서 사라지고**,
+    /// 다시 켰을 때 사용자가 끌어 둔 자리가 기본 자리로 되돌아간다.
+    /// `mergingHiddenTools(into:)`가 숨은 도구를 원래 자리 번호에 되꽂는다
+    /// (규칙과 근거는 그 함수 주석에 있고, 도메인 테스트가 잠근다).
+    private func persist(visibleOrder: [ToolbarTool]) {
+        settings.toolOrder = settings.mergingHiddenTools(into: visibleOrder)
+    }
+
     private func reorder(from index: Int, to target: Int) {
         var order = tools
         let moved = order.remove(at: index)
         order.insert(moved, at: target)
-        settings.toolOrder = order
+        persist(visibleOrder: order)
     }
 
     private func enabledRank(_ tool: ToolbarTool) -> Int? {
-        let enabled = tools.filter { !settings.disabledTools.contains($0) }
+        let enabled = tools.filter(isOn)
         return enabled.firstIndex(of: tool).map { $0 + 1 }
     }
 
@@ -443,6 +516,13 @@ struct ToolbarOrderPreview: View {
         // 토글 라벨과 **같은 문구**를 쓴다 — 보이는 글과 읽어 주는 글이 갈리면 안 된다
         // (사용자 지시 2026-09-15: "전체 접근 필요 → 전체 접근 권한 필요").
         if tool == .clipboard { parts.append("전체 접근 권한 필요") }
+        // ★ 이 셀만 이중 탭으로 안 꺼진다 — 왜인지 들리지 않으면 고장으로 읽힌다.
+        //
+        // **이 문장을 지우지 않았다.** 그것이 가리키던 푸터 줄은 2026-09-22에 사용자 지시로
+        // 사라졌지만(「이 2줄만 남겨라」), **접근성에서 정보를 빼는 것이 더 나쁘다.**
+        // 대신 반대로 맞췄다 — 같은 말을 **토스트**로 시각 사용자에게도 준다.
+        // 그래서 이제 둘이 같은 상수에서 나온다.
+        if !tool.isToggleableInSettings { parts.append(Self.bibleSwitchHintSpoken) }
         return parts.joined(separator: ", ")
     }
 }

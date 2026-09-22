@@ -94,17 +94,74 @@ struct BibleSearchPanelView: View {
     /// 책 칩은 13pt 글자 + 위아래 6pt = 약 27.5pt라 34pt 안에서 넉넉하다
     /// (칩이 오기 전에도 이 줄은 34pt였고 그때 잘리지 않았다).
     /// 되돌린 2pt는 그대로 구절 목록 몫이 된다.
+    ///
+    /// ## ★ VoiceOver — 줄 전체가 **하나의 조절 가능한 요소**다 (2026-09-21)
+    ///
+    /// 계획서(`v1.1.0-plan-v5.md:524`)가 *"한 칩씩 스와이프가 유일하면 **실패**"* 라고
+    /// 못박은 항목이다. 고치기 전에는 대안 탐색이 **0건**이었다 — 가로 `ScrollView` 하나뿐이라
+    /// VoiceOver 사용자가 구절 목록에 닿으려면 **책 칩을 전부 지나쳐야** 했다.
+    /// 결과가 1,000건이면 책이 40~60개까지 생기므로, 목록에 닿는 데만 스와이프 수십 번이다.
+    ///
+    /// **셋 중 이것을 고른 이유.** 반론자2가 제시한 갈래는 로터 · 조절 가능한 요소 ·
+    /// 칩마다 커스텀 동작 셋이었다. 로터와 커스텀 동작은 *옮겨 다니는 길*을 하나 더 얹을 뿐
+    /// **칩 60개가 초점을 먹는 문제 자체는 그대로 둔다.** 조절 가능한 요소는 그 줄을
+    /// **초점 하나로 줄인다** — 실제 해악이 그것이므로 이쪽을 골랐다.
+    /// 덤으로 `UISegmentedControl`이 쓰는 것과 **같은 관례**라 사용자가 이미 아는 제스처다.
+    ///
+    /// **맞바꾼 것을 밝혀 둔다:** 칩 하나하나가 더는 초점을 받지 않으므로 **먼 책을 곧바로
+    /// 고를 수 없다.** 그래서 「전체 보기」를 커스텀 동작으로 따로 둬 되돌아가는 길은 한 번에
+    /// 끝나게 했다. 칩 라벨이 읽어 주던 내용(책 이름 + 건수)은 **값 문자열로 그대로 옮겼고**,
+    /// 개수 표기는 배지·칩과 같은 `BibleCountText` 규칙을 쓴다.
+    ///
+    /// ★ **실제 낭독·이동은 확인하지 못했다** — 실기·시뮬레이터가 금지된 작업이었다.
+    /// 이동 규칙과 값 문자열만 순수 함수로 내려(`BibleBookFilter.neighbor`·`spokenValue`)
+    /// 테스트로 잠갔다.
     private var bookFilterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6) {
-                ForEach(filters) { filter in
-                    bookButton(filter)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(filters) { filter in
+                        bookButton(filter).id(filter.id)
+                    }
+                }
+                .padding(.horizontal, 2)
+            }
+            // 고른 책이 화면 밖에 있으면 보이지 않는다 — 위/아래 스와이프로 바뀔 때 특히.
+            // (`filter.id`는 `book ?? 0`이고 실제 책 번호는 1~66이라 0이 「전체」다.)
+            .onChange(of: effectiveBook) { _, book in
+                withAnimation(.easeOut(duration: 0.2)) {
+                    proxy.scrollTo(book ?? 0, anchor: .center)
                 }
             }
-            .padding(.horizontal, 2)
         }
         .frame(height: 34)
         .padding(.top, 4)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("책 고르기")
+        .accessibilityValue(spokenFilterValue)
+        .accessibilityHint("위아래로 쓸어서 책을 바꿔요")
+        .accessibilityAdjustableAction { direction in
+            let offset: Int
+            switch direction {
+            case .increment: offset = 1
+            case .decrement: offset = -1
+            @unknown default: return
+            }
+            guard let next = BibleBookFilter.neighbor(
+                of: effectiveBook, in: filters, offset: offset
+            ) else { return }   // 끝이면 멈춘다 — 순환하지 않는다
+            selectedBook = next.book
+        }
+        .accessibilityAction(named: Text("전체 보기")) {
+            selectedBook = nil
+        }
+    }
+
+    /// 조절 가능한 요소가 읽어 줄 값 — 「시편, 24건, 40개 중 3번째」.
+    private var spokenFilterValue: String {
+        BibleBookFilter.spokenValue(of: effectiveBook, in: filters) {
+            BibleCountText.spokenCount($0)
+        }
     }
 
     /// 필터 칩의 글자.
@@ -153,24 +210,42 @@ struct BibleSearchPanelView: View {
 
     /// 검색어가 **행 배경 위에 얹히는** 불투명도.
     ///
-    /// ## 왜 이 값인가 — 8개 팔레트 전부를 계산했다 (앱 미실행)
+    /// ## 8개 팔레트를 계산했다 — **CIEDE2000으로** (2026-09-21 정정)
     ///
     /// 형광펜은 `accent`를 행 배경(`characterKey`) 위에 얹은 것이고, 글자는 `keyText` 그대로다.
-    /// `Themes.json`의 hex를 직접 읽어 WCAG 상대휘도로 잰 결과:
+    /// `Themes.json`의 hex를 직접 읽어 잰다(앱 미실행).
     ///
-    /// - **형광펜 위 글자 대비 최저 4.74:1** — 8개 전부 AA 본문 기준(4.5:1)을 넘는다
-    /// - **형광펜이 행에서 구분되는 정도 ΔE 최저 12.5** — 8개 전부 「뚜렷」(10) 이상
+    /// **★ 처음에는 CIE76으로 재고 「8개 전부 뚜렷(10 이상)」이라고 적었다. CIEDE2000에서는 거짓이었다** —
+    /// 미드나이트/라이트가 **ΔE76 12.5 인데 ΔE2000 8.7**로 문턱 아래였다(반론자1 A-3).
+    /// CIE76은 청록~파랑에서 색차를 **과대평가**하는 옛 식이고 미드나이트 accent가 정확히 그 영역이다.
+    /// 사장님과 내가 **같은 옛 식**을 써서 둘이 일치했던 것이다.
     ///
-    /// ★ **휘도비만 보면 틀린 결론이 나온다.** 시스템 다크는 `accent`(#0A84FF)와
-    /// `characterKey`(#6B6B6D)의 **휘도가 거의 같아** 휘도비가 1.12:1이다. 그런데 색차는
-    /// ΔE 34.4로 매우 뚜렷하다 — 회색 위의 파랑이다. 휘도비로 판정해 불투명도를 올리면
-    /// **형광펜은 여전히 안 보이면서 글자 대비만 깨진다**(0.6에서 4.45:1로 미달).
-    /// 그래서 두 지표를 **함께** 보고 라이트 0.30 / 다크 0.45로 정했다.
+    /// 그래서 라이트를 **0.30 → 0.38**로 올렸다. 두 지표를 **함께** 만족하는 값이다:
     ///
-    /// ★ **고정 노란색은 쓰지 않았다.** 형광펜의 문화적 기본색이지만, 어두운 팔레트
-    /// (미드나이트 `characterKey` #303462) 위의 노랑은 글자색 `keyText`(#E8E9F5)와 대비가 무너진다.
-    /// 테마가 고른 `accent`를 쓰면 **8개 조합 전부에서 팔레트가 스스로 대비를 보증**한다.
-    private var highlightOpacity: Double { theme.isDark ? 0.45 : 0.30 }
+    /// | 테마 | 모드 | 글자 대비 | ΔE2000 |
+    /// |---|---|---:|---:|
+    /// | 시스템 | light | 12.58:1 | 21.6 |
+    /// | 시스템 | dark | **4.74:1** | 19.9 |
+    /// | 퓨어 라이트 | light | 10.19:1 | 21.6 |
+    /// | 퓨어 라이트 | dark | 8.86:1 | 23.7 |
+    /// | 퓨어 다크 | light | 5.74:1 | 18.7 |
+    /// | 퓨어 다크 | dark | 5.76:1 | 21.4 |
+    /// | 미드나이트 | light | 4.84:1 | **11.1** |
+    /// | 미드나이트 | dark | 5.05:1 | 15.6 |
+    ///
+    /// **최저 글자 대비 4.74:1**(WCAG AA 본문 4.5 통과) · **최저 ΔE2000 11.1**(문턱 10 통과).
+    /// 더 올리면 글자 대비가 먼저 깨진다 — 0.42에서 4.62, 0.46에서 **4.41로 AA 미달**이다.
+    ///
+    /// ## ★ 확인하지 못한 것 — 합성 공간
+    ///
+    /// SwiftUI의 `opacity`가 **sRGB(감마) 공간**에서 섞이는지 **선형 공간**에서 섞이는지에 따라
+    /// 숫자가 달라진다. 위 표는 **sRGB 가정**이다(Core Animation 기본 동작이라 그쪽일 가능성이
+    /// 높다고 본다). 선형이면 일부 조합이 AA를 못 넘는다 — **픽셀을 읽어 확인한 사람은 없다**(반론자1 A-3).
+    /// 캡처 한 장이면 끝나는 확인이다.
+    ///
+    /// ★ **고정 노란색은 쓰지 않았다.** 어두운 팔레트(미드나이트 `characterKey` #303462) 위의
+    /// 노랑은 글자색 `keyText`와 대비가 무너진다. 테마의 `accent`를 쓰면 팔레트가 스스로 보증한다.
+    private var highlightOpacity: Double { theme.isDark ? 0.45 : 0.38 }
 
     /// 미리보기 줄에서 검색어 글자에만 배경을 깐다.
     ///

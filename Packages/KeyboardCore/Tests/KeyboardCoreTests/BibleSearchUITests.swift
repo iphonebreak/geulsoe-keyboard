@@ -110,3 +110,82 @@ struct BibleSearchPresentationTests {
         #expect(row.reference(includingBook: false) == "13:4")
     }
 }
+
+/// ★ 책 필터 줄의 **접근성 이동 규칙** (2026-09-21).
+///
+/// 패널의 책 필터 줄은 VoiceOver에서 **하나의 조절 가능한 요소**다 — 위/아래 스와이프로
+/// 책을 바꾼다(`BibleSearchPanelView.bookFilterBar`). 계획서가
+/// *"한 칩씩 스와이프가 유일하면 실패"* 라고 못박은 항목을 닫은 것이다.
+///
+/// ★ **실제 낭독·이동은 확인하지 못했다**(실기·시뮬레이터 금지). 화면 없이 잠글 수 있는 것은
+/// 이동 규칙과 읽어 줄 문자열뿐이라, 그 둘만 순수 함수로 내려 여기서 고정한다.
+@Suite("성경 패널 책 필터 — 접근성 이동")
+struct BibleBookFilterAdjustmentTests {
+
+    /// 「사랑」 결과의 모양을 흉내 낸 필터 줄 — 전체 + 책 셋.
+    private let filters = BibleBookFilter.filters(for: [
+        BibleVerseMatch(book: 19, chapter: 1, verse: 1),
+        BibleVerseMatch(book: 19, chapter: 2, verse: 1),
+        BibleVerseMatch(book: 19, chapter: 3, verse: 1),
+        BibleVerseMatch(book: 1, chapter: 1, verse: 1),
+        BibleVerseMatch(book: 1, chapter: 2, verse: 1),
+        BibleVerseMatch(book: 46, chapter: 13, verse: 4),
+    ])
+
+    @Test("줄 모양이 전체 → 건수 내림차순이다 — 이동 규칙의 전제")
+    func filterOrder() {
+        #expect(filters.map(\.name) == ["전체", "시편", "창세기", "고린도전서"])
+        #expect(filters.map(\.count) == [6, 3, 2, 1])
+    }
+
+    @Test("위로 쓸면 다음 책, 아래로 쓸면 이전 책")
+    func stepsForwardAndBack() {
+        #expect(BibleBookFilter.neighbor(of: nil, in: filters, offset: 1)?.name == "시편")
+        #expect(BibleBookFilter.neighbor(of: 19, in: filters, offset: 1)?.name == "창세기")
+        #expect(BibleBookFilter.neighbor(of: 1, in: filters, offset: -1)?.name == "시편")
+        #expect(BibleBookFilter.neighbor(of: 19, in: filters, offset: -1)?.name == "전체")
+    }
+
+    @Test("★ 끝에서는 멈춘다 — 순환하지 않는다")
+    func stopsAtBothEnds() {
+        // 맨 앞(전체)에서 더 뒤로 갈 곳이 없다
+        #expect(BibleBookFilter.neighbor(of: nil, in: filters, offset: -1) == nil)
+        // 맨 뒤(고린도전서)에서 더 앞으로 갈 곳이 없다
+        #expect(BibleBookFilter.neighbor(of: 46, in: filters, offset: 1) == nil)
+    }
+
+    @Test("검색어가 바뀌어 고른 책이 사라져도 자리를 잃지 않는다 — 맨 앞에 선 것으로 본다")
+    func unknownBookFallsBackToFirst() {
+        #expect(BibleBookFilter.neighbor(of: 66, in: filters, offset: 1)?.name == "시편")
+        #expect(BibleBookFilter.neighbor(of: 66, in: filters, offset: -1) == nil)
+    }
+
+    @Test("필터가 없으면 아무 데도 못 간다 — 빈 결과에서 터지지 않는다")
+    func emptyFiltersGoNowhere() {
+        #expect(BibleBookFilter.neighbor(of: nil, in: [], offset: 1) == nil)
+        #expect(BibleBookFilter.spokenValue(of: nil, in: []) { "\($0)건" } == "")
+    }
+
+    @Test("★ 읽어 줄 값에 이름·건수·자리가 다 들어간다")
+    func spokenValueIsUnderstandable() {
+        #expect(
+            BibleBookFilter.spokenValue(of: nil, in: filters) { "\($0)건" }
+                == "전체, 6건, 4개 중 1번째"
+        )
+        #expect(
+            BibleBookFilter.spokenValue(of: 19, in: filters) { "\($0)건" }
+                == "시편, 3건, 4개 중 2번째"
+        )
+    }
+
+    /// ★ 개수 표기는 **배지·칩과 같은 규칙**을 써야 한다 — 상한에 걸리면 「999건 이상」이다.
+    /// (규칙 자체는 `BibleCountText`가 갖고 있고 KeyboardUI에 있다. 여기서는 주입만 확인한다.)
+    @Test("상한에 걸린 건수는 호출자가 준 표기를 그대로 읽는다")
+    func cappedCountUsesInjectedWording() {
+        let big = BibleBookFilter.filters(for: (1...5).map {
+            BibleVerseMatch(book: 19, chapter: 1, verse: $0)
+        })
+        let spoken = BibleBookFilter.spokenValue(of: nil, in: big) { _ in "999건 이상" }
+        #expect(spoken == "전체, 999건 이상, 2개 중 1번째")
+    }
+}

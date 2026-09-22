@@ -3,8 +3,18 @@ import TadakDomain
 
 /// 번들 `bible.tdb`(개역한글 전권, 31,102절)에서 절 본문을 조회한다.
 ///
-/// 파일은 mmap(`.mappedIfSafe`)으로 열어 조회가 닿는 페이지만 물리 메모리에 올라온다 —
+/// 파일은 mmap(`.mappedIfSafe`)으로 열어 **조회만 할 때는 닿는 페이지만** 물리 메모리에 올라온다 —
 /// 4.5MB 전체를 힙에 올리지 않기 위한 선택이다 (60MB 익스텐션 예산).
+///
+/// ## ★ 단, 검색을 켜면 전체가 올라온다 (2026-09-21 정정)
+///
+/// `makeSearcher()`가 만드는 `BibleByteScanner`는 init에서 **본문 블롭 전체를 훑어**
+/// 바이트 빈도표를 만든다(최희소 앵커를 고르려면 필요하다). 그러면 4.4MB가 전부 페이지 인된다.
+/// 예전 이 주석은 *"조회가 닿는 페이지만 올라온다"*고만 적어 **검색을 켠 경우에 거짓**이었다.
+/// footprint는 clean file-backed라 안 오르지만(findings A-2) RSS는 오른다.
+///
+/// **그래서 스캐너를 저장 프로퍼티로 두지 않는다** — 검색을 쓰지 않는 사용자(기본값이 꺼짐이다)가
+/// 그 비용을 내지 않게 하려는 것이다. 자세한 근거는 `makeSearcher()`.
 /// 포맷 정의와 생성 스크립트: `tools/convert_bible.py`
 /// (헤더 16B + 절당 12B 인덱스 + UTF-8 텍스트 블롭, 리틀엔디언, (책,장,절) 정렬).
 public struct BundledBibleRepository: BibleVerseRepository {
@@ -15,10 +25,6 @@ public struct BundledBibleRepository: BibleVerseRepository {
     private let data: Data?
     private let verseCount: Int
     private let textStart: Int
-
-    /// 본문 검색기 — **같은 `Data`(같은 mmap)를 공유한다.** `Data`는 값 타입이지만 매핑을
-    /// 복사하지 않으므로 새로 `mmap`하지 않는다. 리소스가 없으면 nil이고 검색은 빈 배열이 된다.
-    private let scanner: BibleByteScanner?
 
     /// - Parameter bundle: nil이면 패키지 리소스 번들 (테스트에서만 바꾼다)
     public init(bundle: Bundle? = nil) {
@@ -37,7 +43,6 @@ public struct BundledBibleRepository: BibleVerseRepository {
             data = nil
             verseCount = 0
             textStart = 0
-            scanner = nil
             return
         }
         let count = Int(Self.readUInt32(mapped, at: 8))
@@ -49,19 +54,11 @@ public struct BundledBibleRepository: BibleVerseRepository {
             data = nil
             verseCount = 0
             textStart = 0
-            scanner = nil
             return
         }
         data = mapped
         verseCount = count
         textStart = start
-        scanner = BibleByteScanner(
-            data: mapped,
-            verseCount: count,
-            indexStart: Self.headerSize,
-            entrySize: Self.entrySize,
-            textStart: start
-        )
     }
 
     public func text(book: Int, chapter: Int, verse: Int) -> String? {
@@ -115,9 +112,47 @@ public struct BundledBibleRepository: BibleVerseRepository {
     }
 }
 
-/// 본문 검색 — 조회와 **같은 mmap**을 쓴다 (새로 매핑하지 않는다).
-/// 알고리즘과 성능 근거는 `BibleByteScanner` 참조.
-extension BundledBibleRepository: BibleVerseSearching {
+extension BundledBibleRepository {
+
+    /// 본문 검색기를 **그때 만든다** — 조회와 **같은 mmap**을 쓴다(새로 매핑하지 않는다).
+    ///
+    /// ## ★ 왜 저장 프로퍼티가 아닌가 (2026-09-21, 반론자1 A-6)
+    ///
+    /// 예전에는 `init`이 무조건 스캐너를 만들었고, 스캐너 `init`은 **본문 4.4MB를 훑어**
+    /// 바이트 빈도표를 만든다. 성경 검색은 **기본값이 꺼짐**인데 조립 지점이 저장소를
+    /// 저장 프로퍼티로 들고 있어서(성경 **채움글**이 쓴다) **모든 사용자가 키보드 등장마다**
+    /// 그 비용을 냈다(반론자1 실측 3.2~7.5ms).
+    ///
+    /// 이제 **검색이 처음 필요할 때** 조립 지점의 lazy 캐스케이드가 이것을 부른다.
+    /// 꺼 둔 사용자는 빈도표를 한 번도 만들지 않는다.
+    ///
+    /// **왜 `lazy var`가 아닌가:** 이 타입은 `struct`이고 `BibleVerseRepository: Sendable`이다.
+    /// `lazy var`는 접근이 `mutating`이 되어 `Sendable` 계약과 `let` 저장이 깨진다.
+    /// 잠금 달린 캐시 박스를 새로 만드는 것보다 **호출자가 한 번 만들어 들고 있는 쪽**이 단순하다.
+    ///
+    /// - Returns: 리소스가 없으면 모든 검색이 빈 배열인 검색기.
+    public func makeSearcher() -> BundledBibleSearcher {
+        BundledBibleSearcher(
+            scanner: data.map {
+                BibleByteScanner(
+                    data: $0,
+                    verseCount: verseCount,
+                    indexStart: Self.headerSize,
+                    entrySize: Self.entrySize,
+                    textStart: textStart
+                )
+            }
+        )
+    }
+}
+
+/// 본문 검색기 — 바이트 빈도표를 들고 있는 값. 만드는 순간 본문 전체를 한 번 훑는다.
+///
+/// **본문 조회(`BibleVerseRepository.text`)는 이것을 쓰지 않는다** — 그쪽은 인덱스 이진 탐색이라
+/// 빈도표가 필요 없다. 그래서 둘을 나눌 수 있었다.
+public struct BundledBibleSearcher: BibleVerseSearching {
+
+    let scanner: BibleByteScanner?
 
     public func search(_ query: String, limit: Int) -> [BibleVerseMatch] {
         scanner?.search(query, limit: limit) ?? []

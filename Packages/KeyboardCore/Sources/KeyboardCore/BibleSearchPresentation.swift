@@ -69,6 +69,47 @@ public struct BibleBookFilter: Equatable, Sendable, Identifiable {
 
         return [BibleBookFilter(book: nil, name: "전체", count: matches.count)] + books
     }
+
+    /// 접근성 **조절 가능한 요소**(위/아래 스와이프)가 옮겨 갈 이웃 책.
+    ///
+    /// ## 왜 여기 있나
+    ///
+    /// 패널의 책 필터 줄은 VoiceOver에서 **하나의 조절 가능한 요소**다
+    /// (`BibleSearchPanelView.bookFilterBar`). 그 이동 규칙을 뷰 안에 두면
+    /// **화면 없이는 검증할 수 없다** — 실기·시뮬레이터가 금지된 이번 작업에서는 더욱 그렇다.
+    /// 그래서 순수 함수로 내려 `BibleSearchPresentationTests`가 잠근다.
+    ///
+    /// **끝에서는 멈춘다(순환하지 않는다).** VoiceOver의 조절 가능한 요소는 슬라이더·
+    /// 스테퍼와 같은 관례를 따르고, 그쪽은 범위 끝에서 멈춘다. 순환시키면 사용자가
+    /// 「끝까지 왔다」를 알 방법이 없어 무한히 쓸게 된다.
+    ///
+    /// - Parameter book: 지금 고른 책. nil이면 「전체」.
+    /// - Parameter offset: +1이면 다음, -1이면 이전.
+    /// - Returns: 옮겨 갈 필터. 끝이라 움직일 데가 없으면 nil.
+    public static func neighbor(
+        of book: Int?, in filters: [BibleBookFilter], offset: Int
+    ) -> BibleBookFilter? {
+        guard !filters.isEmpty else { return nil }
+        // 지금 고른 것을 못 찾으면 맨 앞(「전체」)에 서 있는 것으로 본다
+        let current = filters.firstIndex { $0.book == book } ?? 0
+        let target = current + offset
+        guard filters.indices.contains(target) else { return nil }
+        return filters[target]
+    }
+
+    /// VoiceOver가 읽을 값 — 「시편, 24건, 40개 중 3번째」.
+    ///
+    /// 개수만 읽으면 **어디쯤인지** 알 수 없어 위/아래 스와이프를 몇 번 더 해야 하는지
+    /// 가늠할 수 없다. 그래서 자리를 함께 읽는다(슬라이더가 값과 범위를 함께 읽는 것과 같다).
+    /// 개수 표기는 배지·칩과 **같은 규칙**을 쓴다(호출자가 `BibleCountText`로 만들어 넘긴다).
+    public static func spokenValue(
+        of book: Int?, in filters: [BibleBookFilter], count: (Int) -> String
+    ) -> String {
+        guard !filters.isEmpty else { return "" }
+        let index = filters.firstIndex { $0.book == book } ?? 0
+        let filter = filters[index]
+        return "\(filter.name), \(count(filter.count)), \(filters.count)개 중 \(index + 1)번째"
+    }
 }
 
 /// 본문에서 **검색어가 보이는 창**을 잘라낸다.

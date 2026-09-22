@@ -52,7 +52,7 @@ struct BibleSearchBenchmark {
 
     @Test("한 번 스캔 — findings A-1 표본")
     func singleScan() {
-        let repository = BundledBibleRepository()
+        let repository = BundledBibleRepository().makeSearcher()
         var report = "\n[한 번 스캔]\n"
         for sample in Self.samples {
             let count = repository.search(sample, limit: 100).count
@@ -62,55 +62,56 @@ struct BibleSearchBenchmark {
         print(report)
     }
 
-    /// ★ 최악은 **낱말 창 5회**다 (말끝 떼기 제거, 2026-09-21).
+    /// ★ **fixture 하나로는 최악을 못 본다** (2026-09-21 정정, 반론자1 A-1).
     ///
-    /// 예전에는 1단계 5회 + 2단계(말끝 떼기) 3회 = 8회였다. 말끝 떼기가 사라져
-    /// **낱말 창이 전부**가 됐다 — `KeyboardCore.BibleSearchCascade.wordWindowLimit`.
+    /// 예전 벤치는 「둘 셋 넷 다섯 은혜로운말씀」 **하나**만 쓰고 5.51ms를 얻어
+    /// *"예산 16.7ms의 35%"* 라고 적었다. **값은 재현되지만 fixture가 최악이 아니다** —
+    /// 느슨 스캔 비용은 **앵커 히트 수**를 따라가 질의마다 10배까지 차이 난다
+    /// (ko_50k 4,000낱말 전수: 중앙 0.90ms · p95 2.19ms · **최대 6.39ms**).
     ///
-    /// ## ★ fixture 를 실제 캐스케이드 경로와 맞췄다 (반론자2 지적)
-    ///
-    /// 예전 fixture 는 **6·5·4·3·2낱말**이었다. 캐스케이드는 같은 꼬리에서
-    /// **5·4·3·2·1낱말**을 훑는데(`wordWindowLimit = 5`), 즉 캐스케이드가 **절대 하지 않는**
-    /// 6낱말 질의를 넣고 **실제로 하는** 1낱말 「은혜로운말씀」을 빼고 있었다.
-    ///
-    /// 사장님 대조 실측: **fixture 3.11ms / 실제 경로 2.51ms / 캐스케이드 통째로 2.12ms.**
-    /// 옛 fixture 가 실제보다 **비관적**이라 성능 판단을 위험하게 만들지는 않았지만 계약이 틀렸다.
-    ///
-    /// 개수만 세던 것도 고쳤다 — **각 질의가 0건인지 단언한다.**
-    /// 하나라도 걸리면 캐스케이드가 거기서 멈추므로 **애초에 최악 경로가 아니다.**
-    @Test("★ 최악 10회 — 캐스케이드 두 바퀴(정확 + 느슨)")
+    /// 그래서 **실사용 문장**을 넣고 **최소·중앙·최대를 전부** 찍는다.
+    /// `min`만 찍으면 사용자가 겪는 나쁜 쪽이 안 보인다.
+    @Test("★ 캐스케이드 한 바퀴 — 꼬리별 최소·중앙·최대")
     func worstCaseCascade() {
-        let repository = BundledBibleRepository()
+        let repository = BundledBibleRepository().makeSearcher()
 
-        // 꼬리 「둘 셋 넷 다섯 은혜로운말씀」에서 캐스케이드가 실제로 훑는 창 다섯 개.
-        // 넓은 쪽부터 좁혀 마지막 한 낱말까지 간다.
-        let missAll = [
-            "둘 셋 넷 다섯 은혜로운말씀",
-            "셋 넷 다섯 은혜로운말씀",
-            "넷 다섯 은혜로운말씀",
-            "다섯 은혜로운말씀",
-            "은혜로운말씀",
+        /// 꼬리 하나가 도는 창 다섯 — 캐스케이드가 실제로 훑는 순서 그대로.
+        func windows(_ tail: String) -> [String] {
+            let words = tail.split(separator: " ")
+            return (1...min(words.count, 5)).reversed().map {
+                words.suffix($0).joined(separator: " ")
+            }
+        }
+
+        /// 정확 5회 + 느슨 5회 = 한 바퀴.
+        func roundMilliseconds(_ tail: String) -> Double {
+            milliseconds {
+                for query in windows(tail) {
+                    _ = repository.search(query, limit: 1_000)
+                    _ = repository.searchIgnoringSpaces(query, limit: 1_000)
+                }
+            }
+        }
+
+        let tails = [
+            ("벤치 fixture", "둘 셋 넷 다섯 은혜로운말씀"),
+            ("실사용 문장", "그래서 내가 말했잖아 지금 당장 어디예요"),
+            ("비싼 낱말 다섯", "위해서가 어디예요 자네에겐 시간이야 괴물이야"),
         ]
-        #expect(missAll.count == 5)
-        // ★ 전부 0건이어야 최악이다
-        for query in missAll {
-            #expect(repository.search(query, limit: 100).isEmpty, "0건이 아니면 최악 경로가 아니다: \(query)")
+        print("\n[캐스케이드 한 바퀴 — 40회]  예산 16.7ms")
+        for (name, tail) in tails {
+            let runs = (0..<40).map { _ in roundMilliseconds(tail) }.sorted()
+            let median = runs[runs.count / 2]
+            print(String(format: "  %-16@ 최소 %5.2f / 중앙 %5.2f / 최대 %5.2f ms  (예산의 %.0f%%)",
+                         name as NSString, runs.first ?? 0, median, runs.last ?? 0,
+                         (runs.last ?? 0) / 16.7 * 100))
         }
-
-        let exact = best { for query in missAll { _ = repository.search(query, limit: 100) } }
-        let loose = best { for query in missAll { _ = repository.searchIgnoringSpaces(query, limit: 100) } }
-        let both = best {
-            for query in missAll { _ = repository.search(query, limit: 100) }
-            for query in missAll { _ = repository.searchIgnoringSpaces(query, limit: 100) }
-        }
-        print(String(format: "\n[최악] 정확 5회 %.2fms / 느슨 5회 %.2fms / 합계 10회 %.2fms  (예산 16.7ms)\n",
-                     exact, loose, both))
     }
 
     /// 느슨 스캔이 **정확 스캔보다 얼마나 비싼가** — 공백 건너뛰기 비교가 붙는 값이다.
     @Test("★ 띄어쓰기 무시 — 한 번 스캔 비용")
     func spaceInsensitiveCost() {
-        let repository = BundledBibleRepository()
+        let repository = BundledBibleRepository().makeSearcher()
         print("\n[띄어쓰기 무시 한 번]")
         for sample in ["오래참음", "태초에하나님이", "사랑", "은혜"] {
             let exact = best { _ = repository.search(sample, limit: 1_000) }
@@ -120,10 +121,32 @@ struct BibleSearchBenchmark {
         }
     }
 
-    @Test("저장소를 여는 비용 — 바이트 빈도표를 init에서 만든다")
+    /// ★ **꺼 둔 사용자가 빈도표 비용을 안 내는지** — 수치로 증명한다 (반론자1 A-6).
+    ///
+    /// 예전에는 `BundledBibleRepository.init`이 무조건 스캐너를 만들었고, 스캐너 init이
+    /// 본문 4.4MB를 훑어 바이트 빈도표를 만들었다. 성경 검색은 **기본값이 꺼짐**인데
+    /// 조립 지점이 저장소를 저장 프로퍼티로 들고 있어(성경 **채움글**이 쓴다)
+    /// **모든 사용자가 키보드 등장마다** 그 값을 냈다.
+    ///
+    /// 이제 스캐너는 `makeSearcher()`로 분리됐다. 아래 둘의 차이가 **꺼 둔 사용자가 아끼는 값**이다.
+    @Test("★ 저장소를 여는 비용 — 꺼짐 / 켜짐")
     func initCost() {
-        // 빈도표는 본문 블롭 4.4MB를 한 번 훑어 만든다. 키보드가 뜰 때 한 번 치르는 값이다.
-        let ms = best(of: 3) { _ = BundledBibleRepository() }
-        print(String(format: "\n[init] %.2fms\n", ms))
+        // 꺼진 사용자 경로: 저장소만 연다(mmap + 헤더 검증). 빈도표 없음.
+        let closed = best(of: 5) { _ = BundledBibleRepository() }
+        // 켠 사용자 경로: 저장소 + 검색기(본문 전체 훑기 → 빈도표)
+        let opened = best(of: 5) {
+            let store = BundledBibleRepository()
+            _ = store.makeSearcher()
+        }
+        // 검색기만 따로 — 이것이 예전에 모두가 내던 값이다
+        let store = BundledBibleRepository()
+        let searcherOnly = best(of: 5) { _ = store.makeSearcher() }
+
+        print(String(
+            format: "\n[init] 꺼짐 %.3fms / 켜짐 %.3fms / 검색기만 %.3fms  (차이가 꺼 둔 사용자가 아끼는 값)\n",
+            closed, opened, searcherOnly
+        ))
+        // 꺼진 경로가 켠 경로보다 **확실히** 싸야 한다 — 아니면 분리가 안 된 것이다
+        #expect(closed < opened)
     }
 }

@@ -66,6 +66,19 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     public var bibleSnippetPrefixEnabled: Bool
     /// 끈 내장 채움글 팩 id 목록 (`"bible"`, `"anthem"`). 옵트아웃이라 새 팩은 기본 켬.
     public var disabledSnippetPacks: [String]
+
+    /// 성경 키워드 검색(툴바 배지 + 구절 패널). **기본값은 꺼짐**(사용자 결정 2026-09-19).
+    ///
+    /// ## ★ 왜 `ToolbarTool` 케이스가 아니라 독립 `Bool`인가
+    ///
+    /// `disabledTools`가 **옵트아웃**이라(끈 것만 담는다) 새 케이스를 더하면
+    /// **기존 사용자 전원에게 기본 켬**으로 나타난다 — 저장분 4종으로 돌려서 확인했다(반론자1 B-3).
+    /// 「기본 꺼짐」 결정과 정면으로 어긋난다.
+    ///
+    /// 독립 `Bool`이면 디코더의 `decodeIfPresent` + 기본값 패턴이 그대로 먹어
+    /// **구 저장분은 자동으로 꺼짐**으로 읽힌다. 마이그레이션 플래그가 필요 없는 이유다
+    /// (`toolOrderMigratedV101` 같은 것을 또 만들지 않는다).
+    public var bibleSearchEnabled: Bool
     public var defaultToolbarMode: ToolbarMode
     /// 사용 안 함 — `disabledTools`로 대체됐다. 화이트리스트는 새 도구가 구 저장분에서
     /// 조용히 꺼지는 문제가 있다 (PDR toolbar-tools 결정 2). 디코딩 호환용으로만 남긴다.
@@ -82,12 +95,69 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 전환 안 된 구 저장분"으로 오인해 매번 다시 바꿔 버린다(영구 고착).
     public var toolOrderMigratedV101: Bool
 
+    /// v1.1.0에서 `.bibleSearch`를 **도구 순서에 끼워 넣는 전환**을 마쳤는가.
+    ///
+    /// ## ★ 이 플래그는 **고착 방어가 아니라 기록**이다 — `toolOrderMigratedV101`과 다르다
+    ///
+    /// v1.0.1 것은 **값 비교**(`toolOrder == legacyDefaultToolOrder`)라 플래그가 없으면
+    /// 사용자가 손수 옛 순서로 되돌릴 때마다 다시 덮어쓴다(영구 고착). 그래서 거기선 필수였다.
+    ///
+    /// 이번 것은 **존재 판정**(`toolOrder.contains(.bibleSearch)`)이라 성질이 다르다 —
+    /// **한 번 끼우면 스스로 조건을 거짓으로 만든다.** 사용자가 📖를 맨 앞으로 옮겨 둬도
+    /// 여전히 「있다」라서 다시 안 건드린다. 그래서 판정은 플래그를 **보지 않고** 돌리고,
+    /// 플래그는 *이 저장분이 전환을 겪었는가*를 **다음 판이 알 수 있게** 남기는 용도다.
+    ///
+    /// ★ 디코더 기본값은 **반드시 리터럴 `false`**다. `base.`를 쓰면 `.default`가 `true`라
+    /// 구 저장분 전부가 「전환 완료」로 읽혀 기록이 거짓이 된다(아래 v1.0.1 주석이 같은 함정을 적는다).
+    public var bibleSearchInToolOrderMigrated: Bool
+
     /// v1.0.0까지의 툴바 기본 순서. **마이그레이션 판정에만 쓴다 — 값을 바꾸지 마라.**
     ///
     /// `ToolbarTool.allCases`로는 이 값을 얻을 수 없다. `dismiss`를 맨 끝으로 옮기는 순간
     /// `allCases`는 새 순서를 돌려주기 때문에, 구 순서는 리터럴로 박아 두어야 한다.
     public static let legacyDefaultToolOrder: [ToolbarTool] =
         [.dismiss, .cursorLeft, .cursorRight, .clipboard, .emoji]
+
+    /// ★ 구 저장분의 `toolOrder`에 `.bibleSearch`를 **이모지 바로 뒤**로 끼운다 (v1.1.0).
+    ///
+    /// ## 왜 마이그레이션이 **반드시** 필요한가
+    ///
+    /// `orderedTools`가 빠진 도구를 **무조건 뒤에 붙이므로**, 그냥 두면 현실적인 v1.0.1 저장분
+    /// 전부에서 📖이 **맨 끝(내리기 뒤)** 으로 간다. 더 급한 것은 그것이 *화면에만* 있는 값이
+    /// 아니라는 점이다 — `ToolbarOrderPreview`가 `orderedTools`를 그대로 `toolOrder`에 되쓰므로
+    /// **사용자가 순서 편집을 한 번만 건드리면 끝자리가 영구 저장돼 나중에 못 고친다.**
+    ///
+    /// ## 왜 「이모지 앵커」인가 — `dismiss` 앵커를 버린 이유
+    ///
+    /// 「이모지와 내리기 사이」가 기본 자리인데, 둘 중 무엇을 기준으로 삼느냐가 갈린다.
+    /// `dismiss` 앵커(내리기 **앞**)는 **내리기를 1번으로 옮겨 둔 사용자**에게서 📖를
+    /// **순서의 맨 앞에 꽂는다.** 사용자가 손수 정한 1번 자리를 빼앗는 것이 끝자리보다 나쁘다.
+    /// 이모지 앵커는 이모지가 어디 있든 **문자 그대로 그 바로 뒤**라 그런 일이 없다.
+    ///
+    /// ## 되돌아가는 자리
+    ///
+    /// 이모지를 끈 사용자도 `toolOrder`에는 이모지가 남아 있다(끔은 `disabledTools`다).
+    /// 그래도 방어로 `dismiss` 앞 → 맨 뒤 순으로 물러난다.
+    ///
+    /// ## 스플라이스 방식을 **쓰지 않았다**
+    ///
+    /// 「`allCases` 순서를 기준으로 다시 짜기」는 현실 저장분에서 결과가 같지만
+    /// **기존 도구의 상대 순서를 바꾼다**(부분 저장분에서 「내리기」가 3번 → 6번).
+    /// 사용자가 고른 순서를 건드리지 않는 것이 이 함수의 유일한 목적이다.
+    public static func insertingBibleSearch(into order: [ToolbarTool]) -> [ToolbarTool] {
+        // ★ 이미 있으면 **그대로 둔다** — 사용자가 옮겨 둔 자리를 되돌리지 않는다.
+        //   이 한 줄이 「존재 판정은 스스로 조건을 거짓으로 만든다」의 실체다.
+        guard !order.contains(.bibleSearch) else { return order }
+        var result = order
+        if let emoji = result.firstIndex(of: .emoji) {
+            result.insert(.bibleSearch, at: emoji + 1)
+        } else if let dismiss = result.firstIndex(of: .dismiss) {
+            result.insert(.bibleSearch, at: dismiss)
+        } else {
+            result.append(.bibleSearch)
+        }
+        return result
+    }
 
     /// 저장된 순서 + 누락된 도구(신규) 보정. 중복은 첫 등장만 남긴다.
     public var orderedTools: [ToolbarTool] {
@@ -149,12 +219,15 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         snippetsEnabled: Bool = true,
         bibleSnippetPrefixEnabled: Bool = true,
         disabledSnippetPacks: [String] = [],
+        bibleSearchEnabled: Bool = false,
         defaultToolbarMode: ToolbarMode = .tools,
         enabledTools: [ToolbarTool] = ToolbarTool.allCases,
         disabledTools: [ToolbarTool] = [],
         toolOrder: [ToolbarTool] = ToolbarTool.allCases,
         // 신규 설치는 처음부터 새 순서라 전환할 것이 없다 — 완료로 시작한다.
         toolOrderMigratedV101: Bool = true,
+        // 같은 이유 — `allCases`에 `.bibleSearch`가 이미 들어 있다.
+        bibleSearchInToolOrderMigrated: Bool = true,
         hapticEnabled: Bool = true,
         hapticIntensity: Double = 0.6,
         keySoundEnabled: Bool = false,
@@ -181,11 +254,13 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.snippetsEnabled = snippetsEnabled
         self.bibleSnippetPrefixEnabled = bibleSnippetPrefixEnabled
         self.disabledSnippetPacks = disabledSnippetPacks
+        self.bibleSearchEnabled = bibleSearchEnabled
         self.defaultToolbarMode = defaultToolbarMode
         self.enabledTools = enabledTools
         self.disabledTools = disabledTools
         self.toolOrder = toolOrder
         self.toolOrderMigratedV101 = toolOrderMigratedV101
+        self.bibleSearchInToolOrderMigrated = bibleSearchInToolOrderMigrated
         self.hapticEnabled = hapticEnabled
         self.hapticIntensity = hapticIntensity
         self.keySoundEnabled = keySoundEnabled
@@ -233,6 +308,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         snippetsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snippetsEnabled) ?? base.snippetsEnabled
         bibleSnippetPrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .bibleSnippetPrefixEnabled) ?? base.bibleSnippetPrefixEnabled
         disabledSnippetPacks = try container.decodeIfPresent([String].self, forKey: .disabledSnippetPacks) ?? base.disabledSnippetPacks
+        bibleSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .bibleSearchEnabled) ?? base.bibleSearchEnabled
         defaultToolbarMode = try container.decodeIfPresent(ToolbarMode.self, forKey: .defaultToolbarMode) ?? base.defaultToolbarMode
         // 도구 목록은 raw 문자열로 읽어 관대하게 매핑한다 (구 "cursor" → 왼쪽·오른쪽, 미지 값 무시)
         enabledTools = try container.decodeIfPresent([String].self, forKey: .enabledTools)
@@ -255,6 +331,16 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
             }
             toolOrderMigratedV101 = true
         }
+        // v1.1.0 — `.bibleSearch`를 이모지 바로 뒤로 끼운다.
+        //
+        // ★ **플래그를 보지 않고 돌린다.** 판정이 존재 여부라 이미 있으면 함수가 그대로 돌려주고,
+        //   한 번 끼우면 다시는 발동하지 않는다(자기 조건을 스스로 거짓으로 만든다).
+        //   플래그를 게이트로 쓰면 얻는 것 없이 「플래그만 참인데 도구는 빠진」 상태가 생길 수 있다.
+        //   기본값이 리터럴 `false`인 이유는 위 v1.0.1 주석과 같다 — `base`는 `.default`라 참이다.
+        bibleSearchInToolOrderMigrated =
+            try container.decodeIfPresent(Bool.self, forKey: .bibleSearchInToolOrderMigrated) ?? false
+        toolOrder = KeyboardSettings.insertingBibleSearch(into: toolOrder)
+        bibleSearchInToolOrderMigrated = true
         hapticEnabled = try container.decodeIfPresent(Bool.self, forKey: .hapticEnabled) ?? base.hapticEnabled
         hapticIntensity = try container.decodeIfPresent(Double.self, forKey: .hapticIntensity) ?? base.hapticIntensity
         keySoundEnabled = try container.decodeIfPresent(Bool.self, forKey: .keySoundEnabled) ?? base.keySoundEnabled
@@ -311,6 +397,20 @@ public enum ToolbarTool: String, Codable, CaseIterable, Sendable {
     case cursorRight
     case clipboard
     case emoji
+    /// 「단어로 구절 찾기」 배지 — **v1.1.0에서 도구 순서에 들어왔다** (사용자 지시 2026-09-21).
+    ///
+    /// ## ★ 선언 자리가 곧 기본 자리다
+    ///
+    /// `toolOrder` 기본값이 `allCases`라 **여기 있는 것만으로 신규 설치가 끝난다** —
+    /// `[◀ ▶ 클립 이모지 📖 내리기]`. 기존 사용자는 그것으로 안 되므로
+    /// `KeyboardSettings.insertingBibleSearch(into:)`가 따로 끼운다.
+    ///
+    /// ## ★ 이 케이스만 `disabledTools`를 타지 않는다
+    ///
+    /// 켜고 끄는 것은 **채움글 > 성경 > 「단어로 구절 찾기」**가 정한다(`bibleSearchEnabled`).
+    /// `disabledTools`는 옵트아웃이라 여기에 얹으면 「기본 꺼짐」 결정과 어긋난다.
+    /// 판정은 `isToggleableInSettings`가 한 곳에서 한다.
+    case bibleSearch
     /// 맨 끝 — v1.0.1에서 옮겼다 (사용자 요청: 자주 쓰는 도구를 앞으로).
     case dismiss
 
@@ -318,18 +418,59 @@ public enum ToolbarTool: String, Codable, CaseIterable, Sendable {
     ///
     /// `clipboard`만 권한이 필요하다 (없으면 버튼 자체를 숨긴다). `emoji`는 입력 자체가
     /// 권한 없이 되고, 최근 사용은 세션 메모리라 권한 무관 (PDR toolbar-tools).
+    ///
+    /// ★ **화이트리스트로 바꾸지 마라.** `bibleSearch`는 번들 `bible.tdb`를 mmap으로 읽을 뿐이라
+    /// 권한이 필요 없는데, 목록 방식으로 바꾸면서 빠뜨리면 **전체 접근을 끈 사용자에게서
+    /// 📖 자리가 조용히 사라진다.** `ToolbarToolTests`가 이것을 잠근다.
     public var worksWithoutFullAccess: Bool {
         self != .clipboard
     }
 
-    /// 설정 앱 행·키보드 접근성 라벨 공용 (문구 개정 2026-09-08: "커서 왼쪽으로" → "왼쪽으로 커서 이동")
+    /// 설정 앱 순서 편집에서 **눌러서 끌 수 있는가.**
+    ///
+    /// `bibleSearch`만 거짓이다 — 그 도구의 on/off는 `disabledTools`가 아니라
+    /// **채움글 > 성경 > 「단어로 구절 찾기」**(`bibleSearchEnabled`)가 정한다.
+    /// 툴바 탭에 성경 스위치를 두지 말라는 사용자 지시(2026-09-21)가 있어 여기서는
+    /// **끌 수 없다.** 설명 줄도 2026-09-22에 사용자 지시로 지웠다 — 대신 **꺼져 있으면
+    /// 스트립에 아예 안 보인다**(`toolsShownInOrderEditor`).
+    public var isToggleableInSettings: Bool {
+        self != .bibleSearch
+    }
+
+
+    /// 설정 앱 행·키보드 접근성 라벨 공용. **이 저장소에서 도구 이름이 나오는 유일한 자리다** —
+    /// 순서 편집 스트립의 이름표도, 키보드 툴바 버튼의 접근성 라벨도 여기서 읽는다
+    /// (2026-09-22 `grep` 전수 확인: 따로 박힌 문자열 0건).
+    ///
+    /// ## 커서 두 개의 문구 이력 — **세 번째로 바꾸는 사람을 위해**
+    ///
+    /// | 언제 | 무엇 | 왜 |
+    /// |---|---|---|
+    /// | 2026-09-08 | 「커서 왼쪽으로」 → **「왼쪽으로 커서 이동」** | 방향이 먼저 와야 읽힌다 |
+    /// | **2026-09-22** | 「오른쪽으로 커서 이동」 → **「우측 커서 이동」**(좌측도 같이) | **도구가 6개가 되며 SE에서 잘렸다** |
+    ///
+    /// 두 번째 개정의 근거는 **우리가 만든 잘림**이다 — `.bibleSearch`를 넣어 스트립이 6칸이
+    /// 되면서 SE(375pt)에서 칸 폭이 좁아졌고, 검증자가 **실화면**에서
+    /// 「오른쪽으로/로 커서…」가 잘리는 것을 확인했다
+    /// (`docs/release/verify-v110-copytrim.md` 0-2절, 증거
+    /// `qa-evidence/verify-v110-copytrim/02-se-six-tools-truncated.png`).
+    /// 텍스트 폭 실측: 최장 토막이 「오른쪽으로」 **47.6pt** → 「우측」 **19.0pt**.
+    ///
+    /// ★ **📖이 꺼진 사용자(5칸)는 잘리지 않았다.** 즉 이름이 나빠서가 아니라 **칸이 늘어서**다.
+    /// 이름을 되돌리려면 먼저 칸 수를 5로 되돌리거나 스트립 레이아웃을 바꿔야 한다.
     public var displayName: String {
         switch self {
         case .dismiss: "키보드 내리기"
-        case .cursorLeft: "왼쪽으로 커서 이동"
-        case .cursorRight: "오른쪽으로 커서 이동"
+        case .cursorLeft: "좌측 커서 이동"
+        case .cursorRight: "우측 커서 이동"
         case .clipboard: "클립보드"
         case .emoji: "이모지"
+        // 설정 앱 채움글 > 성경의 스위치와 **같은 이름**이다 — 켜는 곳을 찾을 수 있어야 한다.
+        //
+        // ★ 「구절 찾기」에서 바꿨다 (사용자 지시 2026-09-22). 그 이름은 **주소로 찾는
+        //   단축어와 구분이 안 됐다** — 이 기능의 정체는 「단어로」다.
+        //   「성경」을 넣지 않는다: 도구 목록에서는 📖 아이콘이, 성경 화면에서는 제목이 그 몫을 한다.
+        case .bibleSearch: "단어로 구절 찾기"
         }
     }
 
@@ -341,6 +482,8 @@ public enum ToolbarTool: String, Codable, CaseIterable, Sendable {
         case .cursorRight: "chevron.right"
         case .clipboard: "doc.on.clipboard"
         case .emoji: "face.smiling"
+        // 툴바 배지(`KeyboardRootView.badgeCapsule`)와 같은 기호
+        case .bibleSearch: "book"
         }
     }
 
@@ -357,4 +500,152 @@ public enum ToolbarTool: String, Codable, CaseIterable, Sendable {
 
 public enum Appearance: String, Codable, CaseIterable, Sendable {
     case system, light, dark
+}
+
+public extension KeyboardSettings {
+
+    /// ★ 성경 검색 **합성 게이트** — 지금 검색이 동작해도 되는가.
+    ///
+    /// 넷이 **모두 참**이어야 한다. 하나라도 거짓이면 스캔 0회·배지 없음·열린 패널 즉시 닫힘.
+    ///
+    /// | 게이트 | 왜 |
+    /// |---|---|
+    /// | `bibleSearchEnabled` | 사용자 스위치. **기본 꺼짐**(사용자 결정 2026-09-19) |
+    /// | `snippetsEnabled` | 성경 검색은 채움글의 성경 팩 위에 선다 — 채움글을 끄면 함께 꺼진다 |
+    /// | 성경 팩이 켜져 있음 | `disabledSnippetPacks`에 `bible`이 없어야 한다 |
+    /// | secure가 아님 | 비밀번호 칸에서는 매칭·표시를 하지 않는다(보안 규칙) |
+    ///
+    /// ## ★ 왜 조립 지점이 아니라 여기 있나 (검증자 2절)
+    ///
+    /// 예전에는 이 식이 `KeyboardViewController`에 있었다. 익스텐션 타깃은 `swift test`가
+    /// 닿지 않아서 **테스트가 같은 식을 복제**했고, 그러면 *"프로덕션을 고쳐도 테스트가 전부
+    /// 통과한다"* — 단언 12개 중 프로덕션 논리를 지키는 것이 **0개**였다.
+    /// 식을 도메인으로 옮겨 테스트가 **이 함수를 직접** 부른다.
+    ///
+    /// ## ★ `isSecureTextEntry`가 `Bool?`인 이유
+    ///
+    /// `UITextDocumentProxy.isSecureTextEntry`는 옵셔널이고, **nil은 「secure 아님」으로 본다**
+    /// (모르면 막지 않는다 — 다른 게이트 셋이 이미 닫혀 있다). 예전 테스트는 `Bool`만 돌려
+    /// **nil 경로가 비어 있었다.** 그 구분을 서명에 남긴다.
+    func allowsBibleSearch(isSecureTextEntry: Bool?) -> Bool {
+        bibleSearchEnabled
+            && snippetsEnabled
+            && !disabledSnippetPacks.contains(SnippetPack.bible)
+            && isSecureTextEntry != true
+    }
+
+    /// ★ 툴바 도구 행에 **실제로 그릴 도구 목록** (v1.1.0).
+    ///
+    /// 사용자 편집 순서(`orderedTools`)에 세 가지 필터를 건다.
+    ///
+    /// | 필터 | 적용 대상 |
+    /// |---|---|
+    /// | 전체 접근 | `clipboard`만 권한이 필요하다 |
+    /// | `disabledTools` | **끌 수 있는 도구 다섯**뿐 (옵트아웃) |
+    /// | 합성 게이트 + 배지 유무 | `.bibleSearch` **전용** |
+    ///
+    /// ## ★ `.bibleSearch`가 `disabledTools`를 타지 않는 이유
+    ///
+    /// `disabledTools`는 옵트아웃이라(끈 것만 담는다) 새 케이스를 얹으면
+    /// **기존 사용자 전원에게 기본 켬**으로 나타난다 — 「기본 꺼짐」 결정과 정면으로 어긋난다.
+    /// 그래서 on/off는 채움글 > 성경이 정하고(`allowsBibleSearch`), 여기서는 **자리와 순서만** 준다.
+    ///
+    /// ## ★ 0건이면 **칸을 없앤다**
+    ///
+    /// 자리를 비워 두지 않는다. 사용자가 같은 날 추천단어 줄에서 빈 칸을 직접 물렸기 때문이다
+    /// (`docs/design-reviews/bible-badge-slot-revert.md`).
+    /// **그 대가로 도구 자리가 입력마다 움직인다** — 알고 고른 것이고, 되돌아갈 후보(빈 칸 유지)는
+    /// `docs/design-reviews/bible-badge-tool-order.md`에 있다.
+    ///
+    /// ## ★ 어긋난 저장분은 **무해하게 둔다**
+    ///
+    /// `bibleSearchEnabled`가 참인데 `disabledTools`에 `bibleSearch`가 들어 있는 저장분이
+    /// 생길 수 있다(손으로 고친 App Group, 미래 스키마). 디코더에서 지우지 않는다 —
+    /// 조용히 사용자 데이터를 지우면 나중에 복구할 근거가 사라진다. **읽는 쪽에서 무시**한다.
+    ///
+    /// ## ★ 왜 조립 지점이 아니라 여기 있나
+    ///
+    /// `allowsBibleSearch`와 같은 이유다 — 익스텐션 타깃은 `swift test`가 닿지 않아
+    /// 거기 두면 테스트가 식을 복제하고, 그러면 프로덕션을 고쳐도 테스트가 전부 통과한다.
+    ///
+    /// - Parameter hasBibleBadge: 지금 배지에 띄울 건수가 **있는가**(0건이면 거짓).
+    func visibleTools(
+        hasFullAccess: Bool,
+        isSecureTextEntry: Bool?,
+        hasBibleBadge: Bool
+    ) -> [ToolbarTool] {
+        orderedTools.filter { tool in
+            guard tool.worksWithoutFullAccess || hasFullAccess else { return false }
+            guard tool.isToggleableInSettings else {
+                return hasBibleBadge && allowsBibleSearch(isSecureTextEntry: isSecureTextEntry)
+            }
+            return !disabledTools.contains(tool)
+        }
+    }
+
+    /// ★ 설정 앱 **순서 편집 스트립에 보이는** 도구들 (사용자 지시 2026-09-22).
+    ///
+    /// 전날에는 꺼진 📖도 **흐리게** 보여 줬다(「켰을 때 어디 나타날지 미리 알 수 있다」).
+    /// **사용자가 뒤집었다** — *「채움글 > 성경 > 단어로 구절 찾기에서 ON하면 보여주고
+    /// OFF 하면 보여주지 말것」*. 그래서 꺼져 있으면 목록에서 **아예 빠진다.**
+    ///
+    /// 나머지 다섯은 꺼져도 보인다 — 그쪽은 **여기서** 켜고 끄므로 보여야 다시 켤 수 있다.
+    /// 📖은 여기서 켤 수 없으니 보일 이유도 없다는 것이 이 차이의 근거다.
+    ///
+    /// ★ **「보인다」와 「저장된다」는 다르다.** 안 보이는 동안에도 `toolOrder`에는 남아 있어야
+    /// 사용자가 끌어 둔 자리를 잃지 않는다 — `mergingHiddenTools(into:)`가 그것을 지킨다.
+    func toolsShownInOrderEditor() -> [ToolbarTool] {
+        orderedTools.filter { $0.isToggleableInSettings || bibleSearchEnabled }
+    }
+
+    /// ★★ 스트립에서 재배열한 결과를 **저장할 때** 쓸 전체 순서.
+    ///
+    /// ## 이것이 없으면 사용자가 옮겨 둔 자리를 잃는다 — 이 함수가 있는 이유
+    ///
+    /// 순서 편집은 화면에 **보이는 목록**을 재배열해 그대로 `toolOrder`에 쓴다.
+    /// 📖이 꺼져 화면에서 빠진 동안 사용자가 다른 도구를 하나라도 끌면,
+    /// 그 저장에서 **`.bibleSearch`가 배열에서 사라진다.** 그러면 다시 켰을 때
+    /// `orderedTools`의 보정이 📖을 **맨 뒤로** 돌린다 — 끌어 둔 자리가 조용히 없어진다.
+    ///
+    /// ## ★ 무엇을 보장하고 무엇을 보장하지 않나 (검증자가 경계 9종을 돌려 확정, 2026-09-22)
+    ///
+    /// 예전 주석은 *「자리를 보존한다」*고만 적었다. **그 말은 넓다** — 아래가 정확한 계약이다.
+    ///
+    /// | | |
+    /// |---|---|
+    /// | **보장한다** | **절대 자리 번호**(원래 몇 번째였나) · 범위 초과 시 맨 뒤로 clamp · 숨은 항목 생존 · 디코더 마이그레이션과 무충돌 |
+    /// | **보장하지 않는다** | **이웃 관계** · 중복·누락 입력 검증 |
+    ///
+    /// **「이웃 관계는 아니다」가 무슨 뜻인가.** 📖이 3번이고 그 앞이 「내리기」였다면,
+    /// 사용자가 보이는 목록을 뒤섞은 뒤에도 📖은 **여전히 3번**이지만 그 앞은
+    /// 「이모지」일 수 있다. 사용자가 *「내리기 옆에 뒀다」*고 기억한다면 그 기억은 깨진다.
+    /// **자리 번호를 고른 것은 의도다** — 이웃을 좇으려면 안 보이는 도구가 보이는 도구들의
+    /// 재배열을 따라 움직여야 하고, 그것은 사용자가 보지 못한 규칙이다.
+    ///
+    /// **중복·누락은 막지 않는다.** 그런 입력이 오면 결과에 그대로 남고,
+    /// 저장 후 재디코딩에서 `orderedTools`가 **길이만 복구**한다(자리는 밀린다).
+    /// 호출자가 정상 목록을 주는 것이 전제다 — 스트립은 항상 그렇게 준다.
+    ///
+    /// ## 어떻게
+    ///
+    /// 숨은 도구를 **원래 자리 번호에** 되꽂는다. `orderedTools` 순서로 돌기 때문에
+    /// 숨은 것이 여럿이어도 앞에서부터 차례로 제자리에 들어간다.
+    ///
+    /// ★ **숨은 도구가 둘 이상인 경우는 지금 타입으로 도달할 수 없다** —
+    /// `isToggleableInSettings`가 거짓인 케이스가 📖 하나뿐이다.
+    /// **둘 이상이 되는 날**, 이 함수는 지금처럼 각자의 원래 번호에 꽂으면 된다(코드 변경 없음).
+    /// 다만 그때는 **번호가 서로 밀려 뒤 도구가 한 칸씩 뒤로 간다** — 앞에서부터 꽂기 때문이다.
+    /// 그 동작이 맞는지는 그때 정해야 하고, 지금 미리 정하지 않는다.
+    ///
+    /// - Parameter visibleOrder: 스트립이 만든 **보이는 도구들의** 새 순서.
+    ///   중복·누락이 없다고 가정한다.
+    func mergingHiddenTools(into visibleOrder: [ToolbarTool]) -> [ToolbarTool] {
+        let shown = Set(toolsShownInOrderEditor())
+        var result = visibleOrder
+        for tool in orderedTools where !shown.contains(tool) {
+            let original = orderedTools.firstIndex(of: tool) ?? result.count
+            result.insert(tool, at: min(original, result.count))
+        }
+        return result
+    }
 }

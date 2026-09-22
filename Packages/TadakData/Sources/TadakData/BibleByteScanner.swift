@@ -32,11 +32,50 @@ struct BibleByteScanner: Sendable {
     /// `position - anchor`보다 **공백 수만큼 앞**이다. 그래서 앵커 히트마다 0~4칸을 물려 가며
     /// 공백 건너뛰기 비교를 돌린다.
     ///
-    /// **4의 성격:** 매직 넘버가 아니라 **비용과 회수의 맞바꿈 지점**이다(사장님 프로토타입 실측).
-    /// 키우면 앵커 히트마다 비교가 늘어 느려지고 경계를 넘는 헛것도 는다.
-    /// 줄이면 공백이 많이 낀 구절을 놓친다. 실측에서 이 값으로
-    /// 「오래참음」 9건·「태초에하나님이」 1건이 살아났고 최악 5회가 3.15ms였다.
-    static let maximumSkippedSpaces = 4
+    /// ## ★ 4의 성격 — 「맞바꿈 지점」이 아니라 **구조가 정한 값**이다 (2026-09-21 정정)
+    ///
+    /// 예전 주석은 *"비용과 회수의 맞바꿈 지점(프로토타입 실측)"*이라고 적었다. **틀렸다.**
+    /// 반론자1이 재 보니 이 값은 **낱말 창 상한에서 나온다**:
+    ///
+    /// 캐스케이드는 꼬리에서 **최대 5낱말**(`BibleSearchCascade.wordWindowLimit`)을 한 덩어리로
+    /// 잡는다. 낱말 5개 사이에는 공백이 **4개**다. 그러니 건너뛸 공백의 상한도 4다 —
+    /// 그보다 크면 쓸 일이 없고, **3으로 줄이면 5낱말 질의가 0% 발견**으로 떨어진다(실측).
+    ///
+    /// **그래서 상수를 따로 두지 않고 낱말 창 상한에서 파생시킨다** — 둘을 따로 두면
+    /// 한쪽만 바꿀 때 조용히 어긋난다. `wordWindowLimit`을 6으로 올리면 이 값도 5가 돼야 한다.
+    ///
+    /// `KeyboardCore`를 import할 수 없으므로(의존성 방향이 반대다) 숫자를 여기 두되
+    /// **관계를 주석과 테스트로 묶는다**(`BibleSpaceInsensitiveTests.maxSpacesFollowsWordWindow`).
+    static let wordWindowLimit = 5
+    static let maximumSkippedSpaces = wordWindowLimit - 1
+
+    /// **협조적 취소를 몇 절마다 확인하나** (2026-09-21, 반론자2).
+    ///
+    /// 스캔이 `Task.detached` 안에서 도는데 절 루프에 확인점이 하나도 없었다 —
+    /// 스케줄러가 취소를 보내도 31,102절을 **끝까지** 돌았고, 키보드가 내려가도 돌았다.
+    ///
+    /// ## ★ 256을 고른 근거 — **재 보고 골랐다**
+    ///
+    /// 걱정은 「절 하나당 일이 수십 ns(한 바퀴 0.5~1.7ms ÷ 31,102절 ≈ 16~55ns)인데
+    /// `Task.isCancelled`를 매 절마다 부르면 그 비율이 그대로 회귀가 된다」였다.
+    ///
+    /// 그래서 **간격을 4배로 늘려 보고 값이 달라지는지 확인했다**(release, 각 3회의 최솟값):
+    ///
+    /// | 꼬리 | 확인 없음 | N=256 | N=1024 |
+    /// |---|---|---|---|
+    /// | 벤치 fixture | 4.81ms | 4.89 | 4.87 |
+    /// | 실사용 문장 | 5.83 | 5.92 | 5.92 |
+    /// | 비싼 낱말 다섯 | 11.52 | 11.63 | 11.62 |
+    ///
+    /// **N을 4배로 늘려도 값이 같다.** 즉 비용은 확인 *횟수*가 아니라 **루프 안 분기 하나**이고,
+    /// 간격을 넓혀서 얻을 것이 없다. 전체 비용은 **+1.0~1.7%**로 회차 간 잡음 폭(±3%) 안이다.
+    ///
+    /// 그러니 **반응이 가장 빠른 쪽**을 고른다 — 256은 2의 거듭제곱이라 `index & 255`로 끝나고
+    /// (나눗셈 없음), 확인 간격이 최악에도 256 × 55ns ≈ **14µs**다.
+    ///
+    /// `index == 0`에서도 확인한다 — **이미 취소된 태스크 안에서 부르면 한 절도 안 돈다.**
+    /// (`BibleSearchTests.cancelledScanStopsImmediately`가 이것을 결정적으로 잰다.)
+    static let cancellationCheckInterval = 256
 
     private let data: Data
     private let verseCount: Int
@@ -151,6 +190,11 @@ struct BibleByteScanner: Sendable {
 
                 var hits: [Hit] = []
                 for index in 0..<verseCount {
+                    // 협조적 취소 — 새 꼬리가 들어왔거나 키보드가 내려갔으면 여기서 그만둔다.
+                    // 취소된 스캔의 결과는 호출자가 어차피 버리므로 빈 배열로 돌아가면 된다.
+                    if index & (Self.cancellationCheckInterval - 1) == 0, Task.isCancelled {
+                        return []
+                    }
                     let entry = indexStart + index * entrySize
                     guard entry + entrySize <= total else { break }
 

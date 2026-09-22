@@ -261,12 +261,62 @@ struct SnippetPackDetailView: View {
             Section {
                 Toggle("이 팩 사용", isOn: enabledBinding)
                 if pack.id == SnippetPack.bible {
+                    // ★ 설명을 **스위치마다** 붙인다 (사용자 지시 2026-09-21).
+                    //
+                    // 예전에는 설명 셋이 Section 바닥 footer에 뭉쳐 있어 **어느 설명이 어느
+                    // 스위치 것인지** 알기 어려웠다. 제목 + 설명 두 줄로 각 행 안에 넣는다.
+                    // 스타일은 이 저장소의 보조 문구 관례를 그대로 쓴다
+                    // (`.font(.footnote)` + `.foregroundStyle(.secondary)`).
+
                     // 삽입 텍스트 앞의 출처 머리말 — 키보드 매처가 설정을 읽어 붙인다 (SnippetMatcher biblePrefix)
-                    Toggle("출처 머리말 넣기", isOn: $settings.bibleSnippetPrefixEnabled)
-                        .disabled(!enabledBinding.wrappedValue)
+                    Toggle(isOn: $settings.bibleSnippetPrefixEnabled) {
+                        switchLabel(
+                            "출처 머리말 넣기",
+                            // 문구는 옮기기만 한다 — `pack.note`에 있던 그대로다
+                            pack.note ?? ""
+                        )
+                    }
+                    .disabled(!enabledBinding.wrappedValue)
+
+                    // 성경 키워드 검색 — 자리를 툴바 탭에서 여기로 옮겼다 (사용자 지시 2026-09-21).
+                    //
+                    // 화면 제목이 이미 「성경 (개역한글)」이라 「성경」을 다시 붙이지 않는다.
+                    //
+                    // **「이 팩 사용」이 꺼지면 함께 흐려진다** — 합성 게이트
+                    // (`KeyboardViewController.canSearchBible`)가 `disabledSnippetPacks`를 보므로
+                    // 팩이 꺼진 채로는 켜도 동작하지 않는다. **켤 수 있는데 안 도는 스위치는 거짓말이다.**
+                    //
+                    // 값 자체는 독립 `Bool`이라 팩을 껐다 켜도 **보존된다**(`bibleSearchEnabled`).
+                    //
+                    // ★ **설명을 한 줄로 줄였다** (사용자 지시 2026-09-22: "여기까지만 써라").
+                    //
+                    // 지운 두 문장이 담고 있던 것:
+                    // (가) 「주소를 치는 단축어와는 다른 기능이에요」 — 이름이 「구절 찾기」에서
+                    //      **「단어로 구절 찾기」**가 되면서 **이름 자체가 그 구분을 한다.**
+                    // (나) 「네 글자 이상 붙여 쓰면 띄어쓰기가 달라도」 — 전날 「거짓 약속」이라고
+                    //      좁힌 바로 그 문장이다. 지금 문구는 **띄어쓰기를 아예 언급하지 않는다** →
+                    //      약속하지 않으므로 거짓이 아니다. 대신 사용자가 「왜 내것은 안 되나」를
+                    //      물을 수 있고, 그 답은 `bible-space-insensitive-search.md`에 있다.
+                    //
+                    // 사용자 원문의 「단어을」은 **「단어를」로 바로잡아 썼다** — UI 문구다.
+                    Toggle(isOn: $settings.bibleSearchEnabled) {
+                        switchLabel(
+                            "단어로 구절 찾기",
+                            "「사랑」처럼 단어를 치면 그 단어가 든 구절을 툴바에서 찾아 줘요."
+                        )
+                    }
+                    .disabled(!enabledBinding.wrappedValue)
                 }
             } footer: {
-                if let note = pack.note { Text(note) }
+                // 스위치 하나의 설명이 아니라 **Section 전체의 상태 안내**다 — 그래서 여기 남는다.
+                if pack.id == SnippetPack.bible {
+                    if !enabledBinding.wrappedValue {
+                        Text("이 팩을 켜야 머리말 넣기와 단어로 구절 찾기도 쓸 수 있어요.")
+                    }
+                } else if let note = pack.note {
+                    // 성경이 아닌 팩은 스위치가 「이 팩 사용」 하나뿐이라 설명이 Section 것이다
+                    Text(note)
+                }
             }
 
             Section("설명") {
@@ -293,6 +343,18 @@ struct SnippetPackDetailView: View {
         .settingsFormWidth()
         .navigationTitle(pack.name)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// 스위치 한 행의 **제목 + 설명** — 설명이 어느 스위치 것인지 붙어 있어야 한다.
+    private func switchLabel(_ title: String, _ description: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+            if !description.isEmpty {
+                Text(description)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var enabledBinding: Binding<Bool> {

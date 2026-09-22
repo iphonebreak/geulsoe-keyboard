@@ -246,9 +246,21 @@ private struct SuggestionToolbar: View {
     var body: some View {
         let snippet = state.snippetSuggestion
         let words = state.wordSuggestions
-        // 배지가 있으면 ✕도 남겨 둔다 — 배지만 떠 있을 때 내릴 방법이 없으면 안 된다
-        let hasCandidates = snippet != nil || !words.isEmpty || state.pasteSuggestion != nil
-            || state.bibleMatchCount != nil
+        // ★ **배지는 여기 안 넣는다** — 배지만 떠 있을 때는 ✕가 없어야 한다 (사용자 결정 2026-09-21).
+        //
+        // 예전 주석은 *"배지만 떠 있을 때 내릴 방법이 없으면 안 된다"* 고 적었다. **전제가 틀렸다.**
+        // 도구 행을 그리는 조건(아래 `:300` 부근)은 `snippet == nil && words.isEmpty &&
+        // pasteSuggestion == nil` 뿐이고 **배지를 보지 않는다.** 그래서 배지 단독 상태에서는
+        // 한 줄에 `[도구 4개] [📖 N]`이 **함께** 그려진다 — 커서·클립보드·이모지가 이미 화면에 있다.
+        // 갇히지 않으므로 ✕가 필요 없고, 새 제스처도 필요 없다.
+        //
+        // 추천단어·채움글 칩·붙여넣기 칩의 ✕는 **그대로 남는다**(2026-09-03 사용자 요청) —
+        // 그때는 후보가 도구 행 자리를 차지하므로 내릴 길이 ✕뿐이다.
+        let hasCandidates = KeyboardMetrics.showsDismissButton(
+            hasSnippet: snippet != nil,
+            hasWords: !words.isEmpty,
+            hasPaste: state.pasteSuggestion != nil
+        )
         // **칩만 있을 때는 가운데 정렬한다** (사용자 요청 2026-09-11, 사장님 결정 5).
         //
         // 기준은 **닫기(✕)를 제외한 콘텐츠 영역의 가운데**다 — ✕는 오른쪽 끝에 그대로 두고
@@ -297,7 +309,7 @@ private struct SuggestionToolbar: View {
                         .buttonStyle(.plain)
                 }
             }
-            if snippet == nil && words.isEmpty && state.pasteSuggestion == nil {
+            if !hasCandidates {
                 if state.visibleTools.isEmpty {
                     Text("글쇠")
                         .font(.system(size: 15, weight: .semibold))
@@ -317,7 +329,11 @@ private struct SuggestionToolbar: View {
             } else if words.isEmpty {
                 Spacer()  // 칩만 있을 때는 내용 크기 유지
             }
-            if let count = state.bibleMatchCount, let onBibleBadgeTap {
+            // ★ **후보가 있을 때만** 여기서 그린다 (v1.1.0 — 사용자 지시 2026-09-21).
+            //
+            // 후보가 없을 때(= 도구 행이 뜰 때)의 배지는 **도구 행 안**에 있다(`toolButtons`).
+            // 이 조건을 빼면 같은 배지가 **두 번** 그려진다.
+            if hasCandidates, let count = state.bibleMatchCount, let onBibleBadgeTap {
                 bibleBadge(count: count, action: onBibleBadgeTap)
             }
             if hasCandidates, let onDismissSuggestions {
@@ -340,34 +356,140 @@ private struct SuggestionToolbar: View {
         .animation(.spring(duration: 0.28, bounce: 0.25), value: snippet?.title)
     }
 
-    /// 성경 검색 배지 — **오른쪽 끝 고정(✕ 왼쪽)**.
+    /// 성경 검색 배지 — 건수가 있을 때만 그린다. **자리는 두 가지다** (v1.1.0).
+    ///
+    /// | 상태 | 자리 |
+    /// |---|---|
+    /// | 추천단어·칩이 있다 | **오른쪽 끝 고정**(✕ 왼쪽). 도구 행이 없으니 순서 개념도 없다 |
+    /// | 배지만 뜬다(도구 행) | **도구 순서의 한 자리.** 사용자가 툴바 탭에서 끌어 옮긴다 |
+    ///
+    /// 기본 자리는 **이모지와 키보드 내리기 사이**다(`ToolbarTool.bibleSearch` 선언 자리).
+    /// 두 자리가 **같은 뷰**(이 함수)를 쓰므로 999+ 표기도 접근성 라벨도 갈릴 수 없다.
     ///
     /// ## 왜 오른쪽인가 (계획서 2-1, 양보 불가)
     ///
-    /// 왼쪽에 두면 배지가 떴다 사라질 때마다 **추천단어 전체가 매 타 85~94pt씩 옆으로 뛴다.**
-    /// 사용자는 방금 본 자리를 누르는데 그 사이에 다른 후보가 와 있어 **오삽입**이 된다.
-    /// 오른쪽 끝이면 배지가 나타나도 추천단어의 시작 자리가 그대로다.
+    /// 왼쪽에 두면 배지가 떴다 사라질 때마다 **추천단어 전체가 매 타 54~78pt씩 옆으로 뛴다**
+    /// (배지 폭 44.0~68.1pt + 간격 10pt). 오른쪽 끝이면 **1번 버튼의 왼쪽 모서리만** 그대로다 —
+    /// *"추천단어의 시작 자리가 그대로다"* 는 그 한 점에 대해서만 참이다.
+    ///
+    /// ## ★ 자리 예약은 되돌렸다 (2026-09-21 저녁 → 밤)
+    ///
+    /// 낮에 **배지 자리를 항상 비워 두는** 안을 넣었다. **사용자가 실기에서 보고 판정했다:**
+    ///
+    /// > 「호산ㄴ 까지 타이핑 하면 맨 오른쪽이 빈 여백으로 나오는데 … **맨 오른쪽이 비어보여서
+    /// >  이상하다** … 없을때에는 전에 처럼 여백을 없애라」
+    ///
+    /// 그래서 **배지가 없으면 아무것도 차지하지 않는다.** 추천단어는 배지가 뜰 때만 2개다.
+    ///
+    /// ## ★ 되살아난 위험 — 표는 남겨 둔다
+    ///
+    /// 배지가 뜨는 순간 추천단어 분배가 다시 계산된다.
+    ///
+    /// **★ 2026-09-21 정정 — 예전 표의 화면 폭이 틀렸다.** 「379pt(15 Pro)」로 적혀 있었는데
+    /// 379는 **패널 폭**(padding 뺀 값)이고 **화면 폭은 393pt**다. 그 값을 툴바 계산에 쓰고
+    /// padding을 **또** 뺐다(반론자1 A-4가 자기 값이었다고 정정). SE도 361이 아니라 **375pt**다.
+    /// 배지 폭은 텍스트 계측이라 그대로 맞다.
+    ///
+    /// **계산 과정 — 숫자만 적으면 다음 사람이 또 틀린다:**
+    ///
+    /// ```
+    /// 안쪽 폭  = 화면 폭 - padding(.horizontal, 10) × 2
+    /// 나눌 폭  = 안쪽 폭 - 요소 사이 spacing(10) 합 - ✕(30) - 배지 폭
+    /// 한 칸    = 나눌 폭 / 후보 수            (.frame(maxWidth: .infinity) 균등 분배)
+    /// ```
+    ///
+    /// **iPhone 15 Pro — 화면 393pt, 안쪽 373pt. 배지 없을 때 한 칸 104.3pt:**
+    ///
+    /// | 배지 | 폭 | 1번 중심 이동 | 2번 중심 이동 | 3번 자리 겹침 |
+    /// |---|---|---|---|---|
+    /// | `[📖 9]` | 44.0pt | +15.1pt | **+45.2pt** | 44.0pt = **42%** |
+    /// | `[📖 137]` | 60.1pt | +11.1 | +33.2 | 60.1pt = **58%** |
+    /// | `[📖 999+]` | 68.1pt | +9.1 | +27.2 | 68.1pt = **65%** |
+    ///
+    /// **iPhone SE — 화면 375pt, 안쪽 355pt. 한 칸 98.3pt:** 겹침 45% / 61% / **69%**.
+    ///
+    /// **3번 추천단어를 누르려는 사이 배지가 그 자리에 와서 성경 패널이 열릴 수 있다.**
+    ///
+    /// ## ★★ 도구 행 겹침 — **구조가 바뀌어 표를 다시 냈다** (2026-09-21 밤)
+    ///
+    /// 반론자1 A-5가 잰 「배지가 마지막 도구를 79~100% 덮는다」는 **배지가 도구 행 *바깥*에
+    /// 붙어 있던 때의 값**이다. 사용자가 실기에서 그것을 「답답함」으로 겪고 순서 편입을
+    /// 요청하면서 구조가 바뀌었다 — 이제 배지는 도구 행 **안의 한 칸**이다.
+    ///
+    /// **그래도 자리는 여전히 움직인다.** 0건이면 칸을 없애기로 했기 때문이다(아래).
+    /// 아래는 **기본 순서**(`◀ ▶ 클립 이모지 📖 내리기`)·15 Pro(393pt)·배지 `999+`에서
+    /// 다시 계산한 값이다.
+    ///
+    /// **전체 접근 ON — 도구 칸 66.6 → 51.0pt:**
+    ///
+    /// | 도구 | 중심 이동 | 옛 자리를 배지가 덮는 양 |
+    /// |---|---|---|
+    /// | ◀ | -7.8pt | 0% |
+    /// | ▶ | -23.4pt | 0% |
+    /// | 클립보드 | -39.1pt | 0% |
+    /// | **이모지** | **-54.7pt** | **79%** |
+    /// | 키보드 내리기 | +7.8pt | **8%** |
+    ///
+    /// **전체 접근 OFF — 66.2pt:** 이모지 -48.8pt·**57%**, 내리기 +9.8pt·11%.
+    ///
+    /// ## 무엇이 나아졌고 무엇이 남았나
+    ///
+    /// - **나아짐:** 맨 오른쪽 도구가 **100% → 8%**다. 예전에는 「키보드 내리기」를 누르려다
+    ///   성경 패널이 열렸다. 더 중요한 것은 **사용자가 자리를 옮길 수 있다**는 점이다 —
+    ///   위험한 이웃이 싫으면 📖를 다른 데로 끌면 된다. 오른쪽 고정에는 그 길이 없었다
+    /// - **남음:** 배지 **바로 앞** 도구가 79%(FA ON) 덮인다. 자리만 옮겨 갔지 사라지지 않았다.
+    ///   근본 원인은 **0건이면 칸을 없애는 것**이고, 그것은 사용자가 같은 날 추천단어 줄에서
+    ///   빈 칸을 직접 물린 결과다(`bible-badge-slot-revert.md`). **대가를 알고 고른 것이다**
+    ///
+    /// ★ **화면에서 확인하지 않았다 — 기하 계산뿐이다.** 되돌아갈 후보(0건에도 빈 칸 유지)는
+    /// `docs/design-reviews/bible-badge-tool-order.md`에 남겨 두었다.
+    ///
+    /// ## 추천단어 쪽(오른쪽 끝 고정)은 위 표가 그대로다
+    ///
+    /// 후보가 있을 때는 도구 행이 없으므로 배지가 여전히 오른쪽 끝이고,
+    /// 3번 추천단어 겹침 42~69%도 그대로다.
     private func bibleBadge(count: Int, action: @escaping () -> Void) -> some View {
-        // 표기 규칙은 `BibleCountText` 한 곳에 있다 — 패널의 「전체」 칩과 **같은 규칙**을 써야
-        // 둘이 다른 말을 하지 않는다(2026-09-21: 배지 999+ / 패널 전체(1000) 불일치를 닫았다).
-        let label = BibleCountText.label(count)
-        return Button(action: action) {
-            HStack(spacing: 3) {
-                Image(systemName: "book")
-                    .font(.system(size: 12, weight: .semibold))
-                Text(label)
-                    .font(.system(size: 13, weight: .semibold))
-                    // 숫자가 바뀔 때 폭이 흔들리지 않게 — 옆의 추천단어가 따라 흔들린다
-                    .monospacedDigit()
-            }
-            .foregroundStyle(theme.keyText)
-            .padding(.horizontal, 8)
-            .frame(height: 28)
-            .background(theme.functionKey, in: Capsule())
-            .contentShape(Capsule())
+        Button(action: action) {
+            badgeCapsule(label: BibleCountText.label(count))
+                .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("성경 구절 \(BibleCountText.spokenCount(count)), 검색 열기")
+        // ## ★ 낭독 문장은 **도구 이름에서 시작한다** (검증자 #12, 2026-09-22)
+        //
+        // 전에는 「성경 구절 9건, 검색 열기」였다. 그런데 설정에서 켜는 기능의 이름은
+        // **「단어로 구절 찾기」**다 — VoiceOver 사용자가 *자기가 켠 그것*과 화면의 이것을
+        // **같은 것으로 못 알아본다.** 그래서 이름을 **문자열로 박지 않고** 도구 정의에서 가져온다.
+        // 이름이 또 바뀌면 여기도 따라 바뀐다(이번에 이름이 두 번 바뀐 것이 그 근거다).
+        //
+        // ## 세 토막으로 끊은 이유
+        //
+        // 「단어로 구절 찾기, 9건, 목록 열기」 — **무엇 / 얼마나 / 누르면 무엇**이다.
+        // 「단어로 구절 찾기 9건」처럼 붙이면 *「단어로 구절 찾기」가 9건*으로 들려 뜻이 뒤집힌다.
+        // 쉼표가 그 오해를 끊는다.
+        //
+        // 「검색 열기」를 **「목록 열기」**로 바꿨다 — 이름에서 「검색」이 사라졌는데 동작 설명에만
+        // 남기면 **세 번째 용어**가 된다. 실제로 열리는 것도 구절 **목록**이다.
+        // 개수 표기(`spokenCount`)는 배지·패널 칩과 같은 규칙 그대로다.
+        .accessibilityLabel(
+            "\(ToolbarTool.bibleSearch.displayName), \(BibleCountText.spokenCount(count)), 목록 열기"
+        )
+    }
+
+    private func badgeCapsule(label: String) -> some View {
+        // 표기 규칙은 `BibleCountText` 한 곳에 있다 — 패널의 「전체」 칩과 **같은 규칙**을 써야
+        // 둘이 다른 말을 하지 않는다(2026-09-21: 배지 999+ / 패널 전체(1000) 불일치를 닫았다).
+        HStack(spacing: 3) {
+            Image(systemName: "book")
+                .font(.system(size: 12, weight: .semibold))
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                // 숫자가 바뀔 때 폭이 흔들리지 않게 — 옆의 추천단어가 따라 흔들린다
+                .monospacedDigit()
+        }
+        .foregroundStyle(theme.keyText)
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(theme.functionKey, in: Capsule())
     }
 
     /// 도구 행 — 후보가 없을 때의 기본 툴바 내용 (PDR toolbar-tools). 아이콘·라벨은 `ToolbarTool`이 정한다
@@ -375,13 +497,42 @@ private struct SuggestionToolbar: View {
     @ViewBuilder
     private var toolButtons: some View {
         ForEach(state.visibleTools, id: \.self) { tool in
-            toolButton(tool.symbolName, label: tool.displayName) {
-                switch tool {
-                case .cursorLeft: onCursorMove?(-1)
-                case .cursorRight: onCursorMove?(+1)
-                case .dismiss, .clipboard, .emoji: onToolTap?(tool)
+            if tool == .bibleSearch {
+                bibleBadgeCell
+            } else {
+                toolButton(tool.symbolName, label: tool.displayName) {
+                    switch tool {
+                    case .cursorLeft: onCursorMove?(-1)
+                    case .cursorRight: onCursorMove?(+1)
+                    case .dismiss, .clipboard, .emoji: onToolTap?(tool)
+                    case .bibleSearch: break   // 위 분기가 잡는다
+                    }
                 }
             }
+        }
+    }
+
+    /// 도구 행 **안**의 성경 배지 (v1.1.0).
+    ///
+    /// ## ★ 같은 뷰를 쓴다
+    ///
+    /// 오른쪽 끝 고정일 때와 **완전히 같은 `bibleBadge(count:action:)`** 이다.
+    /// 999+ 표기(`BibleCountText`)도 접근성 라벨도 한 곳에서 나오므로 두 자리가 다른 말을 할 수 없다.
+    ///
+    /// ## ★ 왜 다른 도구처럼 `maxWidth: .infinity` 칸을 안 쓰나
+    ///
+    /// 아이콘 도구는 20pt 글리프라 칸이 좁아져도 멀쩡하지만, 배지는 캡슐이라 **글자가 들어가야 한다**
+    /// (`999+`가 68.1pt). 6칸 균등 분배면 SE(375pt)에서 한 칸이 약 51pt라 캡슐이 잘린다.
+    /// 그래서 배지는 **제 크기를 먼저 가져가고**(`layoutPriority`) 남은 폭을 아이콘 다섯이 나눈다 —
+    /// 아이콘 쪽은 그래도 40pt대라 넉넉하다.
+    ///
+    /// ★ **SE에서 실제로 어떻게 보이는지는 확인하지 못했다**(실기·시뮬레이터 금지).
+    @ViewBuilder
+    private var bibleBadgeCell: some View {
+        if let count = state.bibleMatchCount, let onBibleBadgeTap {
+            bibleBadge(count: count, action: onBibleBadgeTap)
+                .frame(minHeight: 38)
+                .layoutPriority(1)
         }
     }
 
