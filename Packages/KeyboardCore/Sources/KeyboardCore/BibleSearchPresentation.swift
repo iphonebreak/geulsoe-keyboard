@@ -67,7 +67,8 @@ public struct BibleBookFilter: Equatable, Sendable, Identifiable {
                 return (lhs.book ?? 0) < (rhs.book ?? 0)
             }
 
-        return [BibleBookFilter(book: nil, name: "전체", count: matches.count)] + books
+        // 이름은 `TadakDomain`에서 읽는다 — **UITests가 같은 값을 술어로 쓴다**
+        return [BibleBookFilter(book: nil, name: BibleSearchText.allBooksName, count: matches.count)] + books
     }
 
     /// 접근성 **조절 가능한 요소**(위/아래 스와이프)가 옮겨 갈 이웃 책.

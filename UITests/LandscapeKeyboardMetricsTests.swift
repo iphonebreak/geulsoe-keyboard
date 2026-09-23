@@ -1,4 +1,5 @@
 import XCTest
+import TadakDomain
 
 /// 가로 방향 자판 치수 계측 하네스 (IP-2 계열).
 ///
@@ -113,8 +114,13 @@ final class LandscapeKeyboardMetricsTests: XCTestCase {
         for hop in 0..<maxHops {
             let keyboard = XCUIApplication(bundleIdentifier: "com.charging.tadak.keyboard")
             guard keyboard.exists else { break }
-            // 글쇠는 툴바에 "키보드 내리기"·"왼쪽으로 커서 이동" 같은 우리 도구를 갖고 있다.
-            if keyboard.buttons["키보드 내리기"].exists || keyboard.buttons["왼쪽으로 커서 이동"].exists {
+            // 글쇠는 툴바에 우리 도구를 갖고 있다 — 이름은 **도메인에서 읽는다.**
+            //
+            // ★ 예전에는 "왼쪽으로 커서 이동"을 박아 뒀는데 2026-09-22에 「좌측 커서 이동」으로
+            //   바뀌면서 **죽은 분기**가 됐다(「키보드 내리기」가 우연히 살아 있어 안 들켰다).
+            //   같은 종류의 고장이 `SnippetShortcutTypingTests`에서는 실제로 검증을 막았다.
+            if keyboard.buttons[ToolbarTool.dismiss.displayName].exists
+                || keyboard.buttons[ToolbarTool.cursorLeft.displayName].exists {
                 metrics["switch.hops"] = hop
                 metrics["switch.seen"] = seen
                 return true

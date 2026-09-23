@@ -471,7 +471,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func applySettingsLive() {
         reloadSettingsIfChanged()
-        rebuildSnippetMatcher()            // 내 문구 저장도 같은 알림을 쓴다
+        rebuildSnippetMatcher()            // 내 채움글 저장도 같은 알림을 쓴다
         rebuildSuggestionEngineIfNeeded()  // 학습 초기화 토큰
         updateHeight()
         refreshLayout()
@@ -1930,7 +1930,38 @@ private final class ClickableInputView: UIInputView, UIInputViewAudioFeedback {
             // 15차는 여기서 불투명 테마색을 칠했고, 그것이 검증자가 실측한 555pt 단색의 한 축이다.
             let paint: UIColor?
             if KeyboardViewController.transparentAboveContent {
+                // ★★★ **17라운드를 닫은 자리다 (2026-09-22). 여기를 고치려는 사람은 먼저 읽어라.**
+                //
+                // 2026-09-09~11에 10~16차로 일곱 번 연속 실패했고, 마지막 판정은
+                // 「16차도 실패, 1.0.1로 내리고 출시」였다. 그런데 **그 판정이 틀렸다.**
+                //
+                // ## 어떻게 알았나 — 마젠타 센티널 (2026-09-22 실기)
+                //
+                // 17라운드 내내 못 가른 것이 하나 있었다: **과대 구간(852pt)의 그 판이
+                // 우리가 칠한 것인가, 시스템 백드롭인가.** 눈으로는 26~150ms 사건의 투과
+                // 여부를 판별할 수 없어서 아무도 답하지 못했다.
+                //
+                // 그래서 이 줄을 `paint = .magenta` 하나로 바꿔 실기(iPhone 15 Pro)에 설치했다.
+                //
+                //   결과 ① 자홍색이 **보였다** → 이 분기가 그 555pt를 **칠하는 자리**다.
+                //          (같은 결과로 「SwiftUI `KeyboardRootView`의 배경이 새어 칠한다」는
+                //           가설이 죽었다 — 그렇다면 UIKit 자홍색이 뒤에 깔려 안 보였을 것이다)
+                //   결과 ② `paint = nil`인 빌드에서는 그 자리에 **뒤 글자가 흐릿하게 비쳤다.**
+                //          → 반투명 → **iOS 키보드 백드롭** → Gboard가 보여 주는 그 정상 등장이다.
+                //
+                // ## 결론 — 여기에 **칠할 것이 없다**
+                //
+                // 852pt 과대 구간 자체는 OS 공통이라 없앨 수 없다(글쇠·Gboard·네이버 셋 다
+                // 과대 목표가 정확히 「최종 +228pt」이고, 시작은 우리가 오히려 빠르다 — 실기 계측).
+                // 그 구간에 **아무 불투명 표면도 내놓지 않는 것**이 정답이고, 그러면 컴포지터가
+                // 그 자리에 시스템 백드롭을 그린다. 그것이 지금 상태다.
+                //
+                // ★ **그러므로 `nil` 말고 다른 것을 칠하지 마라.** 15차가 여기에 불투명 테마색을
+                // 칠했고 그것이 검증자가 실측한 555pt 단색의 한 축이었다. 되돌아가는 길이다.
+                //
+                // 근거 전문: docs/release/flicker-resolved-2026-09-22.md
                 paint = nil                                   // 진짜 투명 — 단색 금지
+
             } else {
                 paint = opaqueThemePaint                      // 15차 동작
             }

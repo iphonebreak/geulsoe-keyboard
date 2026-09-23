@@ -6,6 +6,7 @@ Tadak.xcodeproj/
 DerivedData/
 build/
 build-device/
+build-device-release/
 build-sim/
 *.xcresult/
 *.xcworkspace/xcuserdata/
@@ -69,3 +70,6 @@ ExportOptions.plist
 
 # macOS
 .DS_Store
+
+# 하네스 — Firebase 실행 게이트 센티널(로컬 전용, 작업 후 반드시 삭제)
+.claude/.firebase-blocked

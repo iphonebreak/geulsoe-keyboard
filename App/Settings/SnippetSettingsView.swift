@@ -2,9 +2,9 @@ import SwiftUI
 import TadakDomain
 import TadakData
 
-/// 채움글 설정 — 전체 on/off, 내장 팩 on/off, 내 문구 관리.
+/// 채움글 설정 — 전체 on/off, 내장 팩 on/off, 내 채움글 관리(추가·고치기·삭제).
 ///
-/// 내 문구는 App Group에 앱이 쓰고 키보드가 읽는다 (단방향 — 권한 불필요).
+/// 내 채움글은 App Group에 앱이 쓰고 키보드가 읽는다 (단방향 — 권한 불필요).
 /// 키보드는 표시될 때마다 매처를 다시 만들므로 다음 키보드 표시부터 반영된다.
 struct SnippetSettingsView: View {
 
@@ -12,6 +12,8 @@ struct SnippetSettingsView: View {
 
     @State private var userSnippets: [SnippetEntry] = []
     @State private var showsEditor = false
+    /// 고치는 중인 항목. nil이면 **추가**다 — 시트 하나가 두 모드를 다 맡는다.
+    @State private var editingEntry: EditingSnippet?
 
     private let repository = AppGroupSnippetRepository()
 
@@ -55,18 +57,39 @@ struct SnippetSettingsView: View {
                 // **id 는 정규화 단축어를 이어 붙인 것**이다. `\.trigger` 는 더 이상 없고,
                 // 단축어가 여럿이라 하나만 쓰면 서로 다른 항목이 같은 id 를 가질 수 있다.
                 ForEach(userSnippets, id: \.snippetListID) { entry in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(entry.title)
-                        Text("단축어: \(entry.triggers.joined(separator: ", "))")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                    // ★ **행을 눌러 고친다** (사장님 결정 2026-09-23).
+                    //
+                    // 전에는 추가와 삭제만 됐다 — 단축어 하나를 더하려면 **지우고 본문까지
+                    // 다시 쳐야** 했고, 단축어를 여럿 둘 수 있게 되면서 더 아쉬워졌다.
+                    //
+                    // ★ `Button`이라 **스와이프 삭제와 부딪히지 않는다** — `.onDelete`는 행의
+                    //   스와이프 제스처에 붙고 탭은 버튼이 먹는다. `.contentShape`로 빈 자리까지
+                    //   누를 수 있게 한다(제목이 짧을 때 오른쪽 여백이 죽은 자리가 되지 않게).
+                    Button {
+                        editingEntry = EditingSnippet(entry: entry)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.title)
+                                Text("단축어: \(entry.triggers.joined(separator: ", "))")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .accessibilityHint("고치기")
                 }
                 .onDelete(perform: deleteSnippets)
 
-                Button("문구 추가") { showsEditor = true }
+                Button("채움글 추가") { showsEditor = true }
             } header: {
-                Text("내 문구")
+                Text("내 채움글")
             } footer: {
                 Text("단축어를 치면 본문 전문이 후보로 떠요. 띄어쓰기는 달라도 돼요.\n겹치는 단축어가 있으면 그 문구를 바꿔요.")
             }
@@ -82,18 +105,34 @@ struct SnippetSettingsView: View {
             userSnippets = repository.entries().filter { seen.insert($0.snippetListID).inserted }
         }
         .sheet(isPresented: $showsEditor) {
-            SnippetEditorView { entry in
-                // **정규화 단축어가 하나라도 겹치는 기존 항목을 교체한다** — 한쪽만 겹쳐도
-                // 둘 다 남겨 두면 어느 쪽이 발동할지 사용자가 알 수 없다.
-                let incoming = Set(entry.triggers.map(SnippetEntry.normalizedTrigger))
-                userSnippets.removeAll { existing in
-                    existing.triggers.contains { incoming.contains(SnippetEntry.normalizedTrigger($0)) }
-                }
-                userSnippets.append(entry)
-                repository.save(userSnippets)
-                SettingsChangeNotifier.post()  // 떠 있는 키보드의 매처를 즉시 갱신
-            }
+            SnippetEditorView(editing: nil, onSave: save)
         }
+        // ★ **같은 시트를 고치기에도 쓴다** — 새로 만들지 않는다.
+        //   `item:` 형태라 고를 때마다 시트가 그 항목으로 새로 만들어진다
+        //   (`isPresented:`를 쓰면 `@State` 초기값이 첫 항목에 굳는다).
+        .sheet(item: $editingEntry) { editing in
+            SnippetEditorView(editing: editing.entry, onSave: save)
+        }
+    }
+
+    /// 추가·고치기가 **같은 경로로** 저장한다.
+    ///
+    /// ## ★ 덮어쓰기는 이미 여기 있었다
+    ///
+    /// *정규화 단축어가 하나라도 겹치는 기존 항목을 교체한다* — 한쪽만 겹쳐도 둘 다 남겨 두면
+    /// 어느 쪽이 발동할지 사용자가 알 수 없기 때문이다. **고치기가 그 규칙을 그대로 탄다** —
+    /// 단축어를 그대로 두고 본문만 바꾸면 자기 자신이 교체되고, 단축어를 전부 갈면
+    /// 새 항목이 된다(옛 것은 아래 `editing` 제거가 치운다).
+    ///
+    /// ★ 단축어 파싱은 **`SnippetEntry.parseTriggers` 한 곳**이다 — 새 파서를 쓰면
+    /// 중복 제거·정규화 규칙이 갈린다.
+    private func save(_ entry: SnippetEntry, editing original: SnippetEntry?) {
+        // ★ 규칙은 `SnippetEntry.applying(_:editing:to:)`에 있다 — **여기 두면 테스트가 못 닿는다.**
+        //   그래서 「고치면 자리가 맨 뒤로 튄다」를 아무도 못 잡았다(검증자 2026-09-23).
+        //   추가는 맨 뒤, 편집은 **제자리**다. 겹쳐 지워진 항목만큼의 인덱스 보정도 거기 있다.
+        userSnippets = SnippetEntry.applying(entry, editing: original, to: userSnippets)
+        repository.save(userSnippets)
+        SettingsChangeNotifier.post()  // 떠 있는 키보드의 매처를 즉시 갱신
     }
 
     private func packBinding(_ packID: String) -> Binding<Bool> {
@@ -126,14 +165,47 @@ struct SnippetSettingsView: View {
 ///
 /// **그래서 단축어 안에 쉼표를 넣을 수 없다.** 쉼표를 이스케이프하는 문법을 만들면 그걸 다시
 /// 설명해야 한다 — 채움글 단축어에 쉼표가 필요한 경우가 드물어 그 한계를 받아들였다.
+/// `.sheet(item:)`에 실을 **식별 가능한 포장**.
+///
+/// ★ `SnippetEntry`에 `Identifiable`을 붙이지 않는다 — id의 기준(`snippetListID`,
+/// 정규화 단축어를 이어 붙인 값)은 **이 화면의 목록 사정**이지 도메인 개념이 아니다.
+/// 도메인에 붙이면 다른 곳에서 그 id를 의미 있는 것으로 오해한다.
+private struct EditingSnippet: Identifiable {
+    let entry: SnippetEntry
+    var id: String { entry.snippetListID }
+}
+
 private struct SnippetEditorView: View {
 
-    let onSave: (SnippetEntry) -> Void
+    /// 고치는 중인 항목. nil이면 **추가**다.
+    let editing: SnippetEntry?
+
+    /// ★ **불러온 단축어에 쉼표가 있었는가** — 저장하면 **쪼개진다.**
+    ///
+    /// v1.0.1까지 편집기는 단축어 칸이 하나였고 쉼표를 막지 않았다
+    /// (`git log` 확인 2026-09-23). 그 시절 저장분의 `"가,나"`는 디코더가 **한 단축어로** 싣는데,
+    /// 지금 편집기는 쉼표를 구분자로 보므로 **열었다 저장만 해도 둘로 갈린다** —
+    /// 게다가 발동 범위가 넓어진다(`"가,나"` 하나가 `"가"`·`"나"` 둘이 되어 아무 데서나 뜬다).
+    ///
+    /// ★ **마이그레이션으로 조용히 바꾸지 않는다.** 사용자가 등록한 값을 우리가 해석해
+    /// 덮어쓰는 것이고 되돌릴 근거도 안 남는다. **알리고 사용자가 정한다** — 저장도 막지 않는다.
+    private var loadedCommaTrigger: Bool { editing?.hasCommaInTrigger ?? false }
+    let onSave: (SnippetEntry, SnippetEntry?) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @State private var triggerText = ""
-    @State private var title = ""
-    @State private var body_ = ""
+    @State private var triggerText: String
+    @State private var title: String
+    @State private var body_: String
+
+    /// ★ 불러올 때 **쉼표로 합치고**, 저장할 때 `SnippetEntry.parseTriggers`가 **쉼표로 나눈다** —
+    /// 왕복이 같은 규약을 탄다. 구분자를 여기서 새로 정하지 않는다.
+    init(editing: SnippetEntry?, onSave: @escaping (SnippetEntry, SnippetEntry?) -> Void) {
+        self.editing = editing
+        self.onSave = onSave
+        _triggerText = State(initialValue: editing?.triggers.joined(separator: ", ") ?? "")
+        _title = State(initialValue: editing?.title ?? "")
+        _body_ = State(initialValue: editing?.body ?? "")
+    }
 
     /// 키보드의 입력 꼬리 상한(48자)보다 긴 단축어는 절대 발동하지 않는 죽은 항목이 된다 —
     /// 여유를 두고 40자로 막는다 (리뷰 반영). **정규화 전 원문 기준**이다.
@@ -171,6 +243,11 @@ private struct SnippetEditorView: View {
                     if tooLong {
                         Text("단축어는 하나에 \(Self.triggerLimit)자 이하, \(Self.triggerCountLimit)개까지예요.")
                             .foregroundStyle(.red)
+                    } else if loadedCommaTrigger {
+                        // 문구를 짧게 둔다 — 무슨 일이 일어나는지와 무엇을 하면 되는지만.
+                        Text("이 단축어에 쉼표가 들어 있어요. 저장하면 쉼표를 기준으로 나뉘어요.\n"
+                             + "하나로 두려면 쉼표를 지우세요.")
+                            .foregroundStyle(.orange)
                     } else {
                         Text("쉼표(,)로 여러 개를 등록해요. 띄어쓰기는 달라도 돼요.")
                     }
@@ -181,7 +258,11 @@ private struct SnippetEditorView: View {
                 }
             }
             .settingsFormWidth()
-            .navigationTitle("문구 추가")
+            // ★ 추가와 고치기가 같은 시트를 쓰므로 **제목이 갈려야 한다.**
+            //   항상 「채움글 추가」면 고칠 때 틀린 말이 된다.
+            //   「고치기」는 이 화면의 다른 문구(「~어요」·「채움글 추가」)와 같은 결의 우리말이고,
+            //   「편집」·「수정」보다 짧아 좁은 제목 자리에 맞다.
+            .navigationTitle(editing == nil ? "채움글 추가" : "채움글 고치기")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -196,7 +277,7 @@ private struct SnippetEditorView: View {
                             // 제목을 비우면 **첫 단축어**가 제목이 된다
                             title: heading.isEmpty ? (triggers.first ?? "") : heading,
                             body: trimmedBody
-                        ))
+                        ), editing)
                         dismiss()
                     }
                     .disabled(parsedTriggers.isEmpty || trimmedBody.isEmpty || tooLong)
@@ -299,9 +380,14 @@ struct SnippetPackDetailView: View {
                     //      물을 수 있고, 그 답은 `bible-space-insensitive-search.md`에 있다.
                     //
                     // 사용자 원문의 「단어을」은 **「단어를」로 바로잡아 썼다** — UI 문구다.
+                    //
+                    // ★ **제목을 박지 않는다** (2026-09-22). 툴바 도구 목록의 이름과
+                    //   **같은 문자열이어야 한다** — 설정에서 켠 것과 툴바에 보이는 것이
+                    //   같은 기능임을 알아볼 수 있어야 하기 때문이다. 이름이 이미 두 번
+                    //   바뀌었고 그때마다 두 곳을 따로 고쳤다.
                     Toggle(isOn: $settings.bibleSearchEnabled) {
                         switchLabel(
-                            "단어로 구절 찾기",
+                            ToolbarTool.bibleSearch.displayName,
                             "「사랑」처럼 단어를 치면 그 단어가 든 구절을 툴바에서 찾아 줘요."
                         )
                     }
@@ -311,6 +397,12 @@ struct SnippetPackDetailView: View {
                 // 스위치 하나의 설명이 아니라 **Section 전체의 상태 안내**다 — 그래서 여기 남는다.
                 if pack.id == SnippetPack.bible {
                     if !enabledBinding.wrappedValue {
+                        // ★ 여기는 **문장 안**이라 상수로 빼지 않았다 (2026-09-22 판단).
+                        //   `"이 팩을 켜야 머리말 넣기와 \(ToolbarTool.bibleSearch.displayName)도…"`로
+                        //   쓰면 **조사가 이름을 따라가지 못한다** — 지금은 받침 없는 「기」로
+                        //   끝나 「도」가 맞지만, 이름이 받침으로 끝나면 문장이 깨진다.
+                        //   이름이 바뀌면 이 줄은 **사람이 읽고 고쳐야 한다.**
+                        //   대신 위 스위치 제목이 이름을 참조하므로 **둘이 어긋나면 화면에서 바로 보인다.**
                         Text("이 팩을 켜야 머리말 넣기와 단어로 구절 찾기도 쓸 수 있어요.")
                     }
                 } else if let note = pack.note {

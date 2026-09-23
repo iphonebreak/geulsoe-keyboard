@@ -156,6 +156,12 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: Tadak
+      # ★ 도구 이름을 **UITests가 계산해서** 쓰기 위해서다 (2026-09-22).
+      #
+      # 배지를 접근성 라벨로 찾는 술어가 문자열 박기였고, 이름이 두 번 바뀌는 동안
+      # UITests만 안 따라와 **형광펜 8조합을 못 쟀고 XCTAssertFalse 한 자리의 검사력이 0**이 됐다.
+      # `TadakDomain`은 의존성 0인 순수 Swift라 테스트 번들에 링크해도 딸려 오는 것이 없다.
+      - package: TadakDomain
 
 schemes:
   Tadak:

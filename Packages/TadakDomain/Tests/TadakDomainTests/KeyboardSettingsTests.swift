@@ -395,6 +395,59 @@ struct KeyboardSettingsTests {
         #expect("오른쪽으로".count == 5)
     }
 
+    /// ★ **6칸 상태 자체를 고정한다** (2026-09-22, 검증자 #2-5).
+    ///
+    /// 위 「4글자」 상한은 **도구가 6개일 때** 나온 값이다. 그 전제가 조용히 바뀌면
+    /// (7번째 도구가 들어오면) 상한도 틀려지는데 **아무도 못 잡는다** —
+    /// SE에서 안 잘린다는 것을 검증자가 **화면으로만** 확인했기 때문이다.
+    ///
+    /// 그래서 칸 수에서 **폭을 계산해** 상한을 다시 낸다. 스트립 식은
+    /// `ToolbarOrderPreview.cellWidth(forStripWidth:)`와 같다:
+    ///
+    /// ```
+    /// 셀 폭 = min(84, (스트립 폭 − 안쪽 여백 16 − 셀 간격 6×(n−1)) ÷ n)
+    /// SE(375pt)의 스트립 폭 ≈ 315pt  (Form 좌우 여백 20×2 + listRowInsets 10×2를 뺀 값)
+    /// ```
+    ///
+    /// 이름표는 `.caption2`(11pt)이고 한글은 거의 전각이라 **글자당 약 11pt**로 본다.
+    @Test("★ 6칸 전제가 유지되고, 그 폭에서 모든 이름이 들어간다")
+    func sixCellStripFitsEveryName() {
+        let toolCount = ToolbarTool.allCases.count
+        #expect(toolCount == 6, "도구 수가 바뀌었다 — 아래 폭 계산과 4글자 상한을 다시 내야 한다")
+
+        let stripWidth = 315.0          // SE(375pt)
+        let inset = 16.0, spacing = 6.0, maxCell = 84.0
+        let n = Double(toolCount)
+        let cell = min(maxCell, (stripWidth - inset - spacing * (n - 1)) / n)
+        // 6칸이면 약 44.8pt다. 값이 크게 달라지면 전제가 바뀐 것이다.
+        #expect(cell > 43 && cell < 46, "SE 6칸 셀 폭이 \(cell)pt다 — 전제가 바뀌었다")
+
+        let glyph = 11.0                // .caption2 한글 한 글자
+        let maxChunk = Int(cell / glyph)   // 44.8 / 11 = 4
+        #expect(maxChunk == 4, "이 폭에서 들어가는 글자 수가 \(maxChunk)로 바뀌었다")
+
+        for tool in ToolbarTool.allCases {
+            let longest = tool.displayName.split(separator: " ").map(\.count).max() ?? 0
+            #expect(
+                longest <= maxChunk,
+                "\(tool.displayName)의 최장 토막 \(longest)글자 ≈ \(Double(longest) * glyph)pt > 셀 \(cell)pt"
+            )
+        }
+    }
+
+    /// 5칸일 때는 더 넉넉하다 — **📖이 꺼진 사용자(기본값)는 잘릴 일이 없었다.**
+    /// 잘림의 원인이 「이름이 길어서」가 아니라 **「칸이 늘어서」**임을 숫자로 남긴다.
+    @Test("5칸이면 옛 이름도 들어갔다 — 잘림은 칸이 늘어서 생겼다")
+    func fiveCellStripWasRoomy() {
+        let cell5 = (315.0 - 16 - 6 * 4) / 5     // 55.0pt
+        #expect(cell5 > 54 && cell5 < 56)
+        // 옛 이름의 최장 토막 「오른쪽으로」 5글자 ≈ 55pt — 5칸에서는 아슬하게 들어갔다
+        #expect(Double("오른쪽으로".count) * 11.0 <= cell5)
+        // 6칸(44.8pt)에서는 들어가지 않는다 — 검증자가 화면에서 본 그 잘림이다
+        let cell6 = (315.0 - 16 - 6 * 5) / 6
+        #expect(Double("오른쪽으로".count) * 11.0 > cell6)
+    }
+
     @Test("도구 목록의 미지 값은 버리고 설정 전체는 살린다 — 구 cursor는 disabledTools에서도 둘로")
     func toolListsDecodeLeniently() throws {
         let json = #"{"disabledTools":["cursor","futureTool"],"toolOrder":["emoji","futureTool","dismiss"],"numberRowEnabled":true}"#

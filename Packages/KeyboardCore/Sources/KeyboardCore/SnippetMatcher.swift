@@ -106,12 +106,31 @@ public struct SnippetMatcher: Sendable {
 
         // 꼬리를 **한 번만** 뒤에서 앞으로 풀어 둔다 — 비공백 글자와 그 글자의 원문 인덱스.
         // 모든 단축어가 이 배열 하나를 공유한다.
+        //
+        // ## ★ 줄바꿈에서 **멈춘다** (사장님 결정 2026-09-23)
+        //
+        // 예전에는 개행도 `isWhitespace`라 **공백처럼 건너뛰었다.** 그래서
+        // 「우 리 집 주 소」가 먹는 것과 **같은 규칙으로 줄이 갈려도 붙었고**,
+        // 2~3자 짧은 단축어가 **엉뚱한 줄에서 발동**할 수 있었다.
+        //
+        // 개행 앞은 **다른 줄**이므로 같은 단축어의 일부가 아니다 — 거기서 끊는다.
+        // `isNewline`을 **먼저** 본다: 개행은 `isWhitespace`이기도 해서 순서를 바꾸면
+        // 그냥 건너뛰어 버린다(`\n`·`\r`·`\r\n` 전부 `isNewline`이 잡는다).
+        //
+        // ★ **`SnippetEntry.normalizedTrigger`는 건드리지 않았다.** 그 함수는 설정의
+        //   중복 판정과 여기의 발동이 공유하는 단일 출처이고, 등록된 단축어에 개행이 들어갈
+        //   일은 없다 — 고칠 자리는 **꼬리를 되짚는 여기**다.
+        //
+        // ★ 지울 길이 불변식은 그대로다. `start`는 여전히 **마지막으로 맞은 글자의 원문 인덱스**라
+        //   개행 뒤에서만 잡히고, 잘라낸 원문이 줄을 넘지 않는다.
         let characters = Array(tail)
         var reversed: [(character: Character, index: Int)] = []
         reversed.reserveCapacity(characters.count)
-        for index in stride(from: characters.count - 1, through: 0, by: -1)
-        where !characters[index].isWhitespace {
-            reversed.append((characters[index], index))
+        for index in stride(from: characters.count - 1, through: 0, by: -1) {
+            let character = characters[index]
+            if character.isNewline { break }        // 줄 경계 — 그 앞은 다른 줄이다
+            if character.isWhitespace { continue }  // 같은 줄 안의 공백만 건너뛴다
+            reversed.append((character, index))
         }
 
         // `needles` 는 정규화 길이 내림차순이라 **첫 매치가 곧 최선**이다.

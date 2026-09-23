@@ -68,7 +68,14 @@ struct ToolbarTab: View {
     ///
     /// **이걸로 두 사용자가 같아진다.** 지금까지 VoiceOver 사용자만
     /// `accessibilityValue`로 이유를 알고 있었고 **시각 사용자는 몰랐다**(푸터 줄이 사라져서).
-    /// 이제 눌렀을 때 양쪽 다 같은 문장을 받는다 — 같은 상수에서 나오므로 갈릴 수 없다.
+    ///
+    /// ★ **「같은 상수」가 아니라 「같은 말의 두 표기」다** (2026-09-22 정정).
+    /// 예전 주석은 *"같은 상수에서 나오므로 갈릴 수 없다"*고 적었는데 **상수는 둘**이다 —
+    /// 화면용 `bibleSwitchHint`(「채움글 > 성경에서…」)와
+    /// 낭독용 `bibleSwitchHintSpoken`(「채움글, 성경에서…」). 차이는 **구두점뿐**이고,
+    /// `>`를 읽히지 않으려고 일부러 나눈 것이다. 둘이 한 파일에 나란히 있어
+    /// **뜻이 갈리면 눈에 띈다** — 그것이 이 배치의 보장이다.
+    /// 그런데 `showToast`가 화면용 하나를 양쪽에 쓰고 있었다(검증자 지적). 지금은 갈라서 준다.
     @ViewBuilder
     private var toastView: some View {
         if let toast {
@@ -91,11 +98,18 @@ struct ToolbarTab: View {
     /// `ToolbarOrderPreview.move`와 **같은 값**이라 같은 화면에서 감각이 어긋나지 않는다.
     private static let toastAnimation: Animation = .spring(response: 0.28, dampingFraction: 0.85)
 
-    private func showToast(_ text: String) {
+    /// - Parameters:
+    ///   - text: **화면에 그릴** 문구.
+    ///   - spoken: **낭독할** 문구. 같은 말이되 구두점이 다르다 —
+    ///     VoiceOver는 `>`를 「보다 큼」으로 읽거나 건너뛰므로 낭독용은 쉼표로 끊는다.
+    ///
+    /// ★ 예전에는 `text` 하나를 화면과 공지에 **그대로** 썼다(2026-09-22 검증자 지적).
+    /// 낭독용 상수가 바로 옆에 있는데 쓰이지 않아 **VoiceOver가 `>`를 읽고 있었다.**
+    private func showToast(_ text: String, spoken: String) {
         toastToken &+= 1
         withAnimation(Self.toastAnimation) { toast = text }
         // VoiceOver가 꺼져 있으면 아무 일도 하지 않는다
-        AccessibilityNotification.Announcement(text).post()
+        AccessibilityNotification.Announcement(spoken).post()
     }
 
     private func autoDismissToast() async {
@@ -114,7 +128,10 @@ struct ToolbarTab: View {
                 // **두 모드 다** 알린다. 평소 모드가 더 헷갈리기 때문이다(그때는 탭이 실제로
                 // 다른 도구를 켜고 끈다). 도구를 가려 문구를 나누지 않는다 —
                 // 나뉘는 날 `tool`을 받아 갈래를 만든다.
-                showToast(ToolbarOrderPreview.bibleSwitchHint)
+                showToast(
+                    ToolbarOrderPreview.bibleSwitchHint,
+                    spoken: ToolbarOrderPreview.bibleSwitchHintSpoken
+                )
             }
                 .listRowInsets(EdgeInsets(top: 14, leading: 10, bottom: 14, trailing: 10))
                 .listRowBackground(Color(.secondarySystemGroupedBackground))

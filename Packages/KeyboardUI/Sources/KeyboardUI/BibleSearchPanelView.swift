@@ -1,5 +1,6 @@
 import SwiftUI
 import KeyboardCore
+import TadakDomain
 
 /// 성경 검색 패널(화면 2) — 자판 영역을 대체한다.
 ///
@@ -77,7 +78,7 @@ struct BibleSearchPanelView: View {
             bookFilterBar
             Divider().overlay(theme.keyText.opacity(0.15))
             resultList(rowMinHeight: rowMinHeight)
-            PanelBarButton(theme: theme, label: "자판으로 돌아가기", action: onClose) {
+            PanelBarButton(theme: theme, label: BibleSearchText.backToKeyboardLabel, action: onClose) {
                 Text("돌아가기")
                     .font(.system(size: 14, weight: .medium))
             }
@@ -137,7 +138,7 @@ struct BibleSearchPanelView: View {
         .frame(height: 34)
         .padding(.top, 4)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("책 고르기")
+        .accessibilityLabel(BibleSearchText.bookFilterLabel)
         .accessibilityValue(spokenFilterValue)
         .accessibilityHint("위아래로 쓸어서 책을 바꿔요")
         .accessibilityAdjustableAction { direction in
