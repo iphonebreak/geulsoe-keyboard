@@ -1155,29 +1155,34 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: - 클립보드 기록 패널 (PDR clipboard-history)
 
     /// 도구 열기 = 현재 클립보드 1회 읽기 ("도구를 열었을 때만 읽는다" 조항의 원형).
-    /// 기록이 켜져 있으면 저장분 전체를, 꺼져 있으면 현재 내용만 세션 목록으로 보여준다
-    /// (저장 없음). secure 필드에서는 읽지도 기록하지도 않고 저장분만 보여준다.
+    /// 기록이 켜져 있으면 현재 내용을 기록한 뒤 저장분 전체를 보여준다. **꺼져 있으면 읽지도
+    /// 보여주지도 않는다** — 빈 패널에 「기록이 꺼져 있어요」 안내만 뜬다(2026-09-27 사장님 지적).
+    /// (옛 설계는 꺼져 있을 때 현재 내용을 세션 목록 1개로 보여줬다 — 저장은 안 했지만 기록과
+    /// 똑같이 보여 「껐는데 왜 뜨지」 오해를 샀다. 그 붙여넣기 길은 붙여넣기 칩이 대신한다.)
+    /// secure 필드에서는 읽지도 기록하지도 않고 저장분만 보여준다.
     /// 같은 changeCount는 프로브와 동일하게 다시 기록하지 않는다 — 사용자가 ✕로 지운 현재
     /// 클립보드가 재오픈마다 되살아나지 않게 (리뷰 반영). changeCount는 읽기 **전에** 취한다.
+    /// 판정 표는 `ClipboardPanelContent`(KeyboardCore — `swift test`가 닿는다).
     private func openClipboardPanel() {
         guard let viewState, hasFullAccess else { return }
-        var entries: [String] = []
         let pasteboard = UIPasteboard.general
         let secure = textDocumentProxy.isSecureTextEntry == true
-        if clipboardHistoryEnabledNow() {
-            let changeCount = pasteboard.changeCount
-            if !secure, changeCount != Self.recordedPasteboardChangeCount,
-               pasteboard.hasStrings, let current = pasteboard.string {
-                recordClipboardHistory(current)
-                Self.recordedPasteboardChangeCount = changeCount
-            }
-            entries = clipboardHistoryRepository.load().entries
-        } else if !secure, pasteboard.hasStrings, let current = pasteboard.string {
-            var session = ClipboardHistory()
-            session.record(current)
-            entries = session.entries
+        let historyEnabled = clipboardHistoryEnabledNow()
+        var stored: [String] = []
+        // `changeCount`·`hasStrings`는 내용을 가져오지 않는다 — 실제 읽기는 `string` 한 번뿐이고,
+        // 기록이 꺼져 있으면 `readsPasteboard`가 거짓이라 거기까지 가지 않는다.
+        let changeCount = pasteboard.changeCount
+        if ClipboardPanelContent.readsPasteboard(
+            historyEnabled: historyEnabled,
+            isSecureTextEntry: secure,
+            alreadyRecorded: changeCount == Self.recordedPasteboardChangeCount
+        ), pasteboard.hasStrings, let text = pasteboard.string {
+            recordClipboardHistory(text)
+            Self.recordedPasteboardChangeCount = changeCount
         }
-        viewState.clipboardEntries = entries
+        if historyEnabled { stored = clipboardHistoryRepository.load().entries }
+        viewState.clipboardEntries = ClipboardPanelContent.entries(
+            historyEnabled: historyEnabled, stored: stored)
         if viewState.showsEmojiPanel { viewState.showsEmojiPanel = false }
         viewState.showsClipboardPanel = true
     }
