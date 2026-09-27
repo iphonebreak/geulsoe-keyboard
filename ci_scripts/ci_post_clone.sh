@@ -99,6 +99,40 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# 3-1. 빌드 번호 — Xcode Cloud가 `CI_BUILD_NUMBER`로 알려 준다 (v1.2.0 ⑧)
+#
+# `project.yml`의 `CURRENT_PROJECT_VERSION`은 로컬 고정값이다. 그대로 두면 같은 버전을 두 번
+# 아카이브할 때 번호가 겹친다(`docs/release/submission-state.md` 「빌드 번호 자동화」).
+# 위 3단계와 같은 모양으로 CI에서만 채운다 — **xcodegen이 읽기 전**이어야 반영된다.
+# 로컬에는 `CI_BUILD_NUMBER`가 없어 이 분기를 타지 않는다.
+#
+# 이 값은 최상위 `settings.base` 한 곳에만 있고 앱·익스텐션 타깃은 덮어쓰지 않는다 —
+# 두 타깃의 `Info.plist`가 같은 `$(CURRENT_PROJECT_VERSION)`을 읽으므로 한 번 바꾸면 둘 다 바뀐다.
+#
+# 3단계와 다른 점 둘 — 번호가 틀리면 조용히 넘어가는 것이 더 나쁘기 때문이다:
+#   - 숫자가 아니면 실패시킨다(`CFBundleVersion`에 들어갈 값이다).
+#   - 치환 뒤 되읽어 실제로 바뀌었는지 확인한다. `project.yml`의 표기가 바뀌어 패턴이 안 맞으면
+#     옛 번호로 아카이브돼 업로드에서야 충돌이 드러난다.
+# ---------------------------------------------------------------------------
+if [ -n "${CI_BUILD_NUMBER:-}" ]; then
+    case "$CI_BUILD_NUMBER" in
+        *[!0-9]*)
+            echo "실패: CI_BUILD_NUMBER가 숫자가 아니다: $CI_BUILD_NUMBER" >&2
+            exit 1
+            ;;
+    esac
+    echo "CURRENT_PROJECT_VERSION: CI_BUILD_NUMBER($CI_BUILD_NUMBER)로 채운다"
+    /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$CI_BUILD_NUMBER\"/" project.yml
+    if ! /usr/bin/grep -q "CURRENT_PROJECT_VERSION: \"$CI_BUILD_NUMBER\"" project.yml; then
+        echo "실패: project.yml의 CURRENT_PROJECT_VERSION을 바꾸지 못했다 — 표기가 바뀌었는지 확인하라." >&2
+        exit 1
+    fi
+    grep -n "CURRENT_PROJECT_VERSION\|MARKETING_VERSION" project.yml || true
+else
+    echo "CURRENT_PROJECT_VERSION: CI_BUILD_NUMBER가 없다 — project.yml 값 그대로 쓴다(로컬 실행)"
+fi
+
+# ---------------------------------------------------------------------------
 # 4. XcodeGen 설치
 #
 # `sudo`를 쓸 수 없으므로 Homebrew를 그대로 쓴다(Xcode Cloud 이미지에 이미 있다).

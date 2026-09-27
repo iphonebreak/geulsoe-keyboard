@@ -149,6 +149,17 @@ targets:
     platform: iOS
     sources:
       - path: UITests
+      # ★ 테마 목록 SSOT를 **리소스로만** 복사한다 (v1.2.0 ⑩-4).
+      #
+      # 형광펜 8조합 시험(`testHighlightAcrossThemes`)이 테마 이름을 하드코딩해, `Themes.json`에
+      # 5번째 테마를 넣으면 **조용히 커버리지에서 빠졌다**(늘어나는 경우는 아무도 모른다 —
+      # `docs/release/verify-v110-8combo-final.md` H). CLAUDE.md의 「새 테마 = JSON 항목 추가,
+      # 코드 변경 없음」과 충돌한다. 그래서 시험이 이 파일을 읽어 그 수만큼 돈다.
+      #
+      # **TadakData를 링크하지 않는다** — 그러면 `bible.tdb`까지 테스트 번들로 끌려온다.
+      # 파일 하나만 복사하고, 디코딩은 이미 링크한 `TadakDomain.ThemeSpec`(앱과 같은 타입)으로 한다.
+      - path: Packages/TadakData/Sources/TadakData/Resources/Themes.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.charging.tadak.uitests

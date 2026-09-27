@@ -47,7 +47,7 @@ final class GlassThemeDeviceTests: XCTestCase {
 
     // MARK: - ★ 형광펜 8조합 (검증자 차단 #6, 2026-09-22)
 
-    /// 테마 **4종 × 라이트/다크 = 8조합**에서 구절 패널을 열어 **형광펜이 칠해진 화면**을 남긴다.
+    /// **`Themes.json`의 테마 전부 × 라이트/다크**(지금 4종 = 8조합)에서 구절 패널을 열어 **형광펜이 칠해진 화면**을 남긴다.
     /// `-only-testing:TadakUITests/GlassThemeDeviceTests/testHighlightAcrossThemes`
     ///
     /// ## ★ 왜 App Group plist를 밖에서 못 바꾸나 — 검증자가 두 번 실패했다
@@ -74,7 +74,15 @@ final class GlassThemeDeviceTests: XCTestCase {
     ///
     /// `metrics`에는 **테마 이름과 도달 여부만** 넣는다 — 입력란 내용·문서 문맥은 넣지 않는다.
     func testHighlightAcrossThemes() throws {
-        let themes = ["시스템", "퓨어 라이트", "퓨어 다크", "미드나이트"]
+        // ★ 테마 목록은 **`Themes.json`에서 읽는다** — 하드코딩하지 않는다 (v1.2.0 ⑩-4).
+        //   옛 코드는 `["시스템","퓨어 라이트","퓨어 다크","미드나이트"]`를 박아 두어, 새 테마를 JSON에
+        //   추가하면 **조용히 빠졌다**. 이제 테마가 늘면 조합도 자동으로 는다(4종 → 8조합, 5종 → 10조합).
+        let themes = Self.bundledThemeNames()
+        guard !themes.isEmpty else {
+            XCTFail("테스트 번들에서 Themes.json을 못 읽었다 — project.yml의 TadakUITests 리소스를 확인하라")
+            return
+        }
+        metrics["highlight.themes"] = themes
         let modes = ["라이트", "다크"]
         var reached: [String] = []
 
@@ -378,6 +386,18 @@ final class GlassThemeDeviceTests: XCTestCase {
         }
     }
 
+    /// `Themes.json`(테스트 번들에 **리소스로만** 복사 — `project.yml` TadakUITests 참조)의 표시 이름, 파일 순서대로.
+    ///
+    /// 디코딩은 앱과 **같은 타입**(`TadakDomain.ThemeSpec`)으로 한다 — 키 이름을 여기서 따로 적지 않는다.
+    /// 읽지 못하면 빈 배열이고, 호출자가 실패시킨다(빈 목록으로 0조합을 돌고 초록이 되는 일을 막는다).
+    static func bundledThemeNames() -> [String] {
+        guard let url = Bundle(for: GlassThemeDeviceTests.self).url(forResource: "Themes", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let specs = try? JSONDecoder().decode([ThemeSpec].self, from: data)
+        else { return [] }
+        return specs.map(\.displayName)
+    }
+
     // MARK: - 단계
 
     /// 설정 화면 탭에서 모드·테마를 고른다. **좌표 탭** — iOS 26.1 실기에서 TabView 전환 뒤에도 접근성 계층이
@@ -447,7 +467,9 @@ final class GlassThemeDeviceTests: XCTestCase {
 
         // 키보드가 새 팔레트를 읽을 시간 (위 주석)
         Thread.sleep(forTimeInterval: 0.8)
-        openTab("자판", fallback: CGPoint(x: 73, y: 800))
+        // 탭 라벨은 「키보드」다(`App/RootView.swift` — v1.0.1에서 「자판」→「키보드」로 바뀌었다).
+        // 옛 이름으로 찾으면 매번 좌표로 물러났다(v1.2.0 ⑩-1) — `metrics["tab.키보드"] == "label"`이어야 한다
+        openTab("키보드", fallback: CGPoint(x: 73, y: 800))
         Thread.sleep(forTimeInterval: 0.8)
 
         if !modeOK { XCTFail("모드 「\(mode)」가 선택되지 않았다") }
