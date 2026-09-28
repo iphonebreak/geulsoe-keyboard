@@ -131,3 +131,39 @@ struct EmojiHistorySettingTests {
         #expect(!decoded.emojiHistoryEnabled && decoded.emojiHistoryResetToken == 5)
     }
 }
+
+@Suite("KeyboardSettings — 이모지 기록 스위치 규칙")
+struct EmojiHistorySwitchTests {
+
+    private func settings(enabled: Bool, token: Int) -> KeyboardSettings {
+        var settings = KeyboardSettings.default
+        settings.emojiHistoryEnabled = enabled
+        settings.emojiHistoryResetToken = token
+        return settings
+    }
+
+    @Test("켬 → 끔이면 토큰 +1", arguments: [0, 7])
+    func turningOffBumpsToken(token: Int) {
+        var value = settings(enabled: true, token: token)
+        value.setEmojiHistoryEnabled(false)
+        #expect(!value.emojiHistoryEnabled)
+        #expect(value.emojiHistoryResetToken == token + 1)
+    }
+
+    @Test("그 외에는 토큰 그대로 — 켬 → 켬 · 끔 → 끔 · 끔 → 켬", arguments: [(true, true), (false, false), (false, true)])
+    func otherTransitionsKeepToken(from: Bool, to: Bool) {
+        var value = settings(enabled: from, token: 3)
+        value.setEmojiHistoryEnabled(to)
+        #expect(value.emojiHistoryEnabled == to)
+        #expect(value.emojiHistoryResetToken == 3)
+    }
+
+    @Test("끄고 곧바로 켜도(키보드가 안 떴어도) 옛 목록은 버려진다 — 스위치 규칙 + 맞추기 규칙")
+    func offThenOnDiscardsOldHistory() {
+        var value = settings(enabled: true, token: 2)
+        let stored = EmojiHistory(entries: ["😀", "👍"], resetToken: 2)
+        value.setEmojiHistoryEnabled(false)
+        value.setEmojiHistoryEnabled(true)
+        #expect(stored.reconciled(enabled: value.emojiHistoryEnabled, resetToken: value.emojiHistoryResetToken).entries.isEmpty)
+    }
+}

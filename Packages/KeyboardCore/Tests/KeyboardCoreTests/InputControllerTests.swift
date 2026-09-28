@@ -854,6 +854,28 @@ struct InputControllerKeypadTests {
         #expect(output.text == "가1ㄱ")
     }
 
+    /// ★ 검증자 비차단 지적(2026-09-28): 확정을 **들어갈 때가 아니라 나올 때**로 미루는 변형이 위 (4)를 통과했다 —
+    /// 조합 글자는 이미 문서에 들어가 있어 문서만 보면 차이가 없고, 키패드에서 글자를 치면 `handleCharacter`가
+    /// 그때 확정해 버리기 때문이다. **글자 대신 ⌫**를 누르면 드러난다: 키패드의 ⌫는 조합 상태를 보지 않고 문서에서
+    /// 한 글자를 지우므로(`handleBackspace` 비한글 경로), 확정이 안 된 채면 **지운 「가」가 조합 상태에 남아 꼬리에
+    /// 계속 잡힌다** — 문서는 비었는데 꼬리는 「가」다. 그 꼬리로 채움글 칩이 뜨면 탭이 문서를 훼손한다.
+    @Test("조합 중 「123」 → ⌫ — 문서와 꼬리가 함께 비고, 돌아와 친 글자와 어긋나지 않는다", arguments: SymbolKeyboardStyle.allCases)
+    func backspaceRightAfterEntry(style: SymbolKeyboardStyle) {
+        let output = RecordingOutput()
+        let controller = InputController(output: output)
+        controller.symbolKeyboardStyle = style
+        controller.handle(.character("r"))
+        controller.handle(.character("k"))          // 가 (조합 중)
+        controller.handle(.symbols)
+        controller.handle(.backspace)
+        #expect(output.text == "")
+        #expect(controller.textTail == "", "확정이 진입 때 일어났으면 꼬리도 비어 있다")
+        controller.handle(.symbols)                 // ABC
+        controller.handle(.character("r"))
+        #expect(output.text == "ㄱ")
+        #expect(controller.textTail == output.text, "꼬리가 문서와 같아야 한다")
+    }
+
     @Test("(5) 천지인 미확정 ㆍ도 쿼티형과 같은 경로로 리셋된다")
     func cheonjiinPendingDotResets() {
         func run(_ style: SymbolKeyboardStyle) -> String {
@@ -906,24 +928,46 @@ struct InputControllerKeypadTests {
         #expect(controller.mode == .symbols)
     }
 
-    /// ★ 길게 누르기 기호는 **쿼티형 `symbols`에 고정**이다(PDR 1절, 수용 기준 4) —
-    /// 두 스타일을 실제로 넣어 123 → ABC 왕복한 뒤의 문자 자판을 대조한다.
-    @Test("문자 키의 길게 누르기(alternate)는 두 스타일에서 전부 같다", arguments: [HangulLayout.dubeolsik, .danmoeum])
-    func letterAlternatesIgnoreStyle(hangul: HangulLayout) {
-        func alternates(_ style: SymbolKeyboardStyle, english: Bool) -> [[KeyEvent?]] {
+    /// ★ 길게 누르기 기호는 **쿼티형 `symbols`에 고정**이다(PDR 1절, 수용 기준 4).
+    ///
+    /// **두 스타일끼리 비교하지 않는다** (검증자 비차단 지적 2026-09-28) — `layout(for:)`는 스타일을 입력으로
+    /// 받지 않아 두 결과는 **구조상 항상 같다**(파생을 키패드 쪽으로 돌려도 둘 다 똑같이 틀려 통과했다).
+    /// 대신 스타일마다 123 → ABC 왕복 뒤 문자 자판의 기호를 **쿼티형 기호 자판에서 나와야 할 기대값**과 비교하고,
+    /// 그 기대값이 **키패드 기호 1페이지에서 파생했을 때와 다르다**는 것부터 확인한다(검사가 무력하지 않다는 전제).
+    @Test("문자 키 길게 누르기는 두 스타일 모두 쿼티형 기호 자판에서 온다", arguments: [
+        (HangulLayout.dubeolsik, false, [
+            ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+            ["-", "/", ":", ";", "(", ")", "₩", "&", "@"],
+            [".", ",", "?", "!", "'", "\"", nil]
+        ] as [[String?]]),
+        (.danmoeum, false, [
+            ["[", "]", "{", "}", "#", "%", "^", "*"],
+            ["-", "/", ":", ";", "(", ")", "₩", "&"],
+            [".", ",", "?", "!", "'", "@"]
+        ]),
+        (.dubeolsik, true, [          // 영어(쿼티) — 두벌식과 자리가 같다
+            ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+            ["-", "/", ":", ";", "(", ")", "₩", "&", "@"],
+            [".", ",", "?", "!", "'", "\"", nil]
+        ])
+    ])
+    func letterAlternatesComeFromQwertySymbols(hangul: HangulLayout, english: Bool, expected: [[String?]]) {
+        // 전제 — 키패드 기호 1페이지에서 파생했다면 첫 행이 `~ ♡ ☆ …`로 시작한다. 기대값과 달라야 이 테스트가 이를 가른다
+        let keypadFirstRow = LayoutDefinition.keypadSymbolPages[0].rows[0].map(\.label)
+        #expect(keypadFirstRow.first != expected[0].first ?? nil)
+
+        for style in SymbolKeyboardStyle.allCases {
             let controller = InputController(output: RecordingOutput())
             controller.symbolKeyboardStyle = style
             if english { controller.handle(.toggleLanguage) }
             controller.handle(.symbols)
             controller.handle(.symbols)
-            return LayoutDefinition.layout(for: controller.mode, hangulLayout: hangul, longPressSymbols: true)
-                .rows.map { $0.map(\.alternate) }
+            let layout = LayoutDefinition.layout(for: controller.mode, hangulLayout: hangul, longPressSymbols: true)
+            let rows = layout.rows.prefix(3).map { row in
+                row.filter { !$0.isFunctionKey && $0.event != .spacer }.map(\.alternateLabel)
+            }
+            #expect(Array(rows) == expected, "\(style) — 스타일과 무관하게 쿼티형 기호 자판에서 온다")
         }
-        for english in [false, true] {
-            #expect(alternates(.keypad, english: english) == alternates(.qwerty, english: english))
-        }
-        #expect(LayoutDefinition.longPressSymbolRows[0] == ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
-                "파생 원본은 여전히 쿼티형 기호 자판")
     }
 
     // MARK: 대표 입력 탭 수 (PDR 2-4절 — 사장님·반론자2 요청)

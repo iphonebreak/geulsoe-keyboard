@@ -93,3 +93,18 @@ public protocol EmojiHistoryRepository: Sendable {
     func save(_ history: EmojiHistory) -> Bool
     func clear()
 }
+
+public extension KeyboardSettings {
+
+    /// 「최근 사용 이모지 기억」 스위치 — **끌 때 초기화 토큰을 올린다.**
+    ///
+    /// 기록은 키보드 전용 컨테이너에 있어 설정 앱이 못 지운다. 토큰이 「지워라」의 유일한 신호다 —
+    /// 끄고 다시 켜는 사이 키보드가 한 번도 안 떴어도 토큰이 달라 `EmojiHistory.reconciled`가 옛 목록을 버린다.
+    /// 이 규칙은 원래 설정 화면의 `Binding` 안에 있어 `swift test`가 닿지 않았다(검증자 비차단 지적 2026-09-28) —
+    /// 규칙을 여기로 옮기고 화면은 이 함수를 부르기만 한다.
+    /// - 켬 → 끔: 토큰 +1 · 그 외(켬 → 켬, 끔 → 끔, 끔 → 켬): 토큰 그대로
+    mutating func setEmojiHistoryEnabled(_ enabled: Bool) {
+        if emojiHistoryEnabled, !enabled { emojiHistoryResetToken += 1 }
+        emojiHistoryEnabled = enabled
+    }
+}

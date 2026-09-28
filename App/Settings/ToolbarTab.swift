@@ -378,16 +378,12 @@ struct ToolbarTab: View {
         }
     }
 
-    /// 끌 때 **초기화 토큰을 올린다** — 이모지 기록은 키보드 전용 컨테이너에 있어 이 앱이 저장소를 직접 비울 수 없다.
-    /// 끄고 다시 켜는 사이 키보드가 한 번도 안 떴어도, 토큰이 달라 키보드가 옛 목록을 버린다
-    /// (`EmojiHistory.reconciled` — 학습 단어의 `learningResetToken`과 같은 신호).
+    /// 끌 때 **초기화 토큰을 올린다** — 규칙은 도메인 `KeyboardSettings.setEmojiHistoryEnabled`에 있다
+    /// (여기 두면 `swift test`가 닿지 않는다). 이모지 기록은 키보드 전용 컨테이너에 있어 이 앱이 직접 비울 수 없다.
     private var emojiHistoryBinding: Binding<Bool> {
         Binding(
             get: { settings.emojiHistoryEnabled },
-            set: { enabled in
-                if settings.emojiHistoryEnabled, !enabled { settings.emojiHistoryResetToken += 1 }
-                settings.emojiHistoryEnabled = enabled
-            }
+            set: { settings.setEmojiHistoryEnabled($0) }
         )
     }
 

@@ -9,6 +9,7 @@ struct OnboardingView: View {
     let onFinish: () -> Void
 
     @State private var page = 0
+    private static let pageCount = 3
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,8 +18,15 @@ struct OnboardingView: View {
                 installPage.tag(1)
                 privacyPage.tag(2)
             }
-            .tabViewStyle(.page)
-            .indexViewStyle(.page(backgroundDisplayMode: .always))
+            // ★ 시스템 페이지 점을 끈다 (v1.2.0 ⑨-A — 반론자 O-1 잔여분).
+            //   `TabView(.page)`의 점은 **페이지 바깥에서 위에 얹혀** 접근성 글자 크기(AX3 이상)에서
+            //   본문 마지막 줄을 덮었다. 패딩·`safeAreaInset`은 둘 다 효과가 없었다(`OnboardingPage` 주석).
+            //   점을 끄고 **TabView 아래(버튼 줄 위)에 직접 그린다** — 페이지 영역 밖이라 구조상 겹칠 수 없다.
+            .tabViewStyle(.page(indexDisplayMode: .never))
+
+            OnboardingPageIndicator(page: $page, count: Self.pageCount)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
 
             Button {
                 if page < 2 {
@@ -154,8 +162,8 @@ private struct OnboardingPage: View {
             content
         }
         .scrollBounceBehavior(.basedOnSize)
-        // ⚠ **남은 결함 — 페이지 점이 본문 글자를 덮는다(AX3 이상).** 이 스크롤이 고친 것은
-        // "내용에 닿을 수 없다"(카드·버튼이 사라진다)는 쪽이고, 겹침은 **따로 남았다.**
+        // ✅ **페이지 점이 본문 글자를 덮던 결함(AX3 이상)은 v1.2.0 ⑨-A에서 닫았다** — 시스템 점을 끄고
+        // `OnboardingPageIndicator`를 TabView 아래에 그린다(`OnboardingView.body`). 아래는 그 전의 시도 기록이다.
         //
         // **두 가지를 시도해 둘 다 실패했다**(AX5 캡처로 확인):
         //   · `content` 에 `.padding(.bottom, 36)` — 패딩은 스크롤 **내용 끝**에만 붙는다.
@@ -163,9 +171,8 @@ private struct OnboardingPage: View {
         //   · `ScrollView` 에 `.safeAreaInset(edge: .bottom)` — 점은 `TabView(.page)` 가
         //     **페이지 바깥에서 위에 얹는** 것이라 페이지의 안전 영역과 무관하다. 그대로 겹쳤다.
         //
-        // 남은 길은 `.tabViewStyle(.page(indexDisplayMode: .never))` 로 점을 끄고 하단 버튼 줄에
-        // **우리가 직접 그리는 것**인데, 그건 `OnboardingView` 의 크롬 구조를 바꾸는 일이라
-        // 세 쪽 전부에 걸린다. **범위 밖이라 손대지 않았다** — 사장님 판단을 받는다.
+        // 남은 길이 `.tabViewStyle(.page(indexDisplayMode: .never))` 로 점을 끄고 버튼 줄 위에
+        // **우리가 직접 그리는 것**이었고, v1.2.0 ⑨-A에서 그렇게 했다(`OnboardingPageIndicator`).
     }
 
     private var content: some View {
@@ -268,4 +275,40 @@ private struct OnboardingMarkView: View {
 
 #Preview {
     OnboardingView {}
+}
+
+
+/// 온보딩 페이지 표시 — 시스템 페이지 점을 대신한다 (v1.2.0 ⑨-A).
+///
+/// **TabView 바깥(버튼 줄 위)에 있어서 페이지 본문과 겹칠 수 없다** — 시스템 점은 페이지 위에 얹혀
+/// 접근성 글자 크기에서 마지막 줄을 덮었다. 점을 끈 대가로 위치 정보가 사라지지 않게 같은 모양(작은 점 3개,
+/// 지금 쪽은 진하게)으로 그린다. 크기는 글자 크기와 무관하게 고정이다 — 점이 커져 다시 공간을 먹지 않게.
+///
+/// 접근성: 시스템 페이지 컨트롤과 같게 **조절 가능한 요소**다 — 「3쪽 중 2쪽」을 읽고 위아래 쓸기로 쪽을 넘긴다
+/// (시스템 점을 끄면서 VoiceOver 사용자가 잃던 조작을 되살린다).
+private struct OnboardingPageIndicator: View {
+
+    @Binding var page: Int
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<count, id: \.self) { index in
+                Circle()
+                    .fill(index == page ? Color.primary : Color.secondary.opacity(0.35))
+                    .frame(width: 7, height: 7)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: page)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("페이지")
+        .accessibilityValue("\(count)쪽 중 \(page + 1)쪽")
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: if page < count - 1 { withAnimation { page += 1 } }
+            case .decrement: if page > 0 { withAnimation { page -= 1 } }
+            @unknown default: break
+            }
+        }
+    }
 }
