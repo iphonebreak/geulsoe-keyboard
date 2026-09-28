@@ -49,7 +49,14 @@ struct KeyCapView: View {
 
     /// 표면·미리보기에 보이는 라벨 — 대체 입력이 무장되면 그 라벨로 바뀌어 "지금 떼면 이게 들어간다"를 알린다
     private var displayLabel: String {
-        alternateArmed ? (key.alternateLabel ?? label) : label
+        alternateArmed ? (alternateText ?? label) : label
+    }
+
+    /// 길게 누르기 표시 문구 — 문자 키는 `alternateLabel`(그 문자), 문자 이벤트가 아닌 대체 입력
+    /// (키패드형 페이지 키의 「이전」)은 `alternateHint`. 문자 키는 힌트 필드를 비워 두므로 기존 표시 그대로다
+    /// (PDR `number-symbol-keypad.md` 6절).
+    private var alternateText: String? {
+        key.alternateHint ?? key.alternateLabel
     }
 
     var body: some View {
@@ -68,7 +75,7 @@ struct KeyCapView: View {
             .overlay(alignment: .topTrailing) {
                 // 길게 누르기 힌트 (문장부호 키의 ","·".com") — 무장되면 라벨 자체가 바뀌므로 숨긴다.
                 // 뷰를 넣고 빼지 않고 투명도만 바꾼다 (누르는 도중 구조 변경 금지 — face 주석 참조)
-                if let hint = key.alternateLabel {
+                if let hint = alternateText {
                     // 힌트 크기는 라벨 크기에 비례 (기본 22 → 10, 천지인 28 → 13)
                     Text(hint)
                         .font(.system(size: key.labelSize.map { CGFloat($0) * 0.45 } ?? 10, weight: .medium))
@@ -277,6 +284,8 @@ struct KeyCapView: View {
         case .symbols: label == "ABC" ? "문자 자판" : "기호"
         case .symbolsAlternate: label == "123" ? "기호 첫 페이지" : "기호 더보기"
         case .advance: "이동"
+        case .keypadPageNext: "다음 페이지"
+        case .keypadPagePrevious: "이전 페이지"
         case .character: label
         case .spacer: ""
         }

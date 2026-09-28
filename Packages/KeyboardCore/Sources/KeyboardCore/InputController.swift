@@ -60,6 +60,9 @@ public final class InputController {
 
     /// 스페이스 두 번 → ". " 치환. 조립 지점이 설정으로 갱신한다.
     public var doubleSpacePeriod = true
+    /// 숫자·기호 자판 모양 — 「123」이 어느 자판으로 들어갈지만 정한다. 조립 지점이 설정으로 갱신한다
+    /// (PDR `number-symbol-keypad.md` 4-2절). 네 자판의 「123」 키는 그대로 `.symbols`를 낸다.
+    public var symbolKeyboardStyle: SymbolKeyboardStyle = .qwerty
     /// 더블스페이스 인정 시간. 고정값 — 시스템 키보드 체감에 맞췄다.
     private let doubleSpaceTimeout: TimeInterval = 0.35
     /// 마지막 키가 스페이스였을 때 그 시각. 다른 입력이 끼면 nil.
@@ -168,12 +171,16 @@ public final class InputController {
             shift = .off
         case .symbols:
             commitComposition()
-            if mode.isSymbols {
+            // ★ 키패드형도 복귀 조건에 넣는다 — `isSymbols`(쿼티형 두 페이지)만 보면 키패드의 「ABC」가
+            //   else로 빠져 **키패드를 `letterMode`에 적고 쿼티형 기호로** 가 버린다(반론자1 급소⑥-2).
+            //   `isSymbols`의 뜻은 넓히지 않는다 — 쿼티형 경로도 그 술어를 지난다.
+            if mode.isSymbols || mode.isKeypadPad {
                 // 기호 자판(어느 페이지든)에서 누르면 들어오기 전 문자 모드로 돌아간다
                 mode = letterMode
             } else {
                 letterMode = mode
-                mode = .symbols
+                // 들어갈 모드만 설정으로 고른다 — 조합 확정·천지인 리셋은 위 `commitComposition()` 한 곳이 맡는다
+                mode = symbolKeyboardStyle == .keypad ? .keypadPad(page: 0) : .symbols
             }
             shift = .off
         case .symbolsAlternate:
@@ -181,6 +188,14 @@ public final class InputController {
             // 123 ↔ #+= 페이지 전환 — 문자 모드에서는 무의미하므로 무시
             if mode.isSymbols {
                 mode = (mode == .symbolsAlternate) ? .symbols : .symbolsAlternate
+            }
+        case .keypadPageNext, .keypadPagePrevious:
+            commitComposition()
+            // 키패드형 한 키 순환 — 탭 = 다음(마지막 → 처음), 길게 = 이전(처음 → 마지막). 다른 모드에서는 무시
+            if case .keypadPad(let page) = mode {
+                let count = LayoutDefinition.keypadPageCount
+                let step = event == .keypadPageNext ? 1 : -1
+                mode = .keypadPad(page: ((page + step) % count + count) % count)
             }
         case .advance:
             // 천지인 이동(→) — 공백 없이 조합만 확정한다 (실측 스펙)
@@ -247,7 +262,7 @@ public final class InputController {
         switch mode {
         case .hangul: handleHangulKey(key)
         case .english: handleEnglishKey(key)
-        case .symbols, .symbolsAlternate, .numberPad:
+        case .symbols, .symbolsAlternate, .numberPad, .keypadPad:
             commitComposition()
             output.insertText(key)
             appendToTail(key)

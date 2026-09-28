@@ -38,6 +38,10 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 문자 키를 길게 눌러 기호 입력 (Gboard 배열 — 두벌식·단모음·쿼티, 천지인·기호 제외, PDR long-press-symbols).
     /// 기본 켬. 끄면 키 귀퉁이 힌트도 함께 사라진다.
     public var longPressSymbolsEnabled: Bool
+    /// 숫자·기호 자판 모양 (v1.2.0, PDR `number-symbol-keypad.md`). **기본 쿼티형** — 기존 사용자는 그대로다.
+    /// 키패드형이면 「123」이 숫자 페이지(3×4 + `. , - /`)로 들어가고 기호 3페이지까지 한 키로 순환한다.
+    /// 문자 키 길게 누르기 기호는 **스타일과 무관하게** 쿼티형 기호 자판에서 파생된다.
+    public var symbolKeyboardStyle: SymbolKeyboardStyle
 
     // MARK: 툴바
 
@@ -208,6 +212,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         doubleSpacePeriod: Bool = true,
         numberRowEnabled: Bool = false,
         longPressSymbolsEnabled: Bool = true,
+        symbolKeyboardStyle: SymbolKeyboardStyle = .qwerty,
         suggestionsEnabled: Bool = true,
         verificationCodeSuggestionsEnabled: Bool = true,
         pasteSuggestionEnabled: Bool = true,
@@ -250,6 +255,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.doubleSpacePeriod = doubleSpacePeriod
         self.numberRowEnabled = numberRowEnabled
         self.longPressSymbolsEnabled = longPressSymbolsEnabled
+        self.symbolKeyboardStyle = symbolKeyboardStyle
         self.suggestionsEnabled = suggestionsEnabled
         self.verificationCodeSuggestionsEnabled = verificationCodeSuggestionsEnabled
         self.pasteSuggestionEnabled = pasteSuggestionEnabled
@@ -305,6 +311,8 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         doubleSpacePeriod = try container.decodeIfPresent(Bool.self, forKey: .doubleSpacePeriod) ?? base.doubleSpacePeriod
         numberRowEnabled = try container.decodeIfPresent(Bool.self, forKey: .numberRowEnabled) ?? base.numberRowEnabled
         longPressSymbolsEnabled = try container.decodeIfPresent(Bool.self, forKey: .longPressSymbolsEnabled) ?? base.longPressSymbolsEnabled
+        // 모르는 값(다음 버전 저장분)은 기본값으로 — 설정 전체가 디코딩 실패로 날아가면 안 된다
+        symbolKeyboardStyle = (try? container.decodeIfPresent(SymbolKeyboardStyle.self, forKey: .symbolKeyboardStyle)) ?? base.symbolKeyboardStyle
         suggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .suggestionsEnabled) ?? base.suggestionsEnabled
         verificationCodeSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .verificationCodeSuggestionsEnabled) ?? base.verificationCodeSuggestionsEnabled
         pasteSuggestionEnabled = try container.decodeIfPresent(Bool.self, forKey: .pasteSuggestionEnabled) ?? base.pasteSuggestionEnabled
@@ -524,6 +532,24 @@ public enum ToolbarTool: String, Codable, CaseIterable, Sendable {
 
 public enum Appearance: String, Codable, CaseIterable, Sendable {
     case system, light, dark
+}
+
+/// 숫자·기호 자판 모양 (PDR `number-symbol-keypad.md`, 사장님 결정 — 설정에서 고른다).
+///
+/// | | 「123」을 누르면 | 페이지 |
+/// |---|---|---|
+/// | `qwerty` 쿼티형(기본) | 숫자 줄 + 기호 5행 | 123 ↔ #+= 두 페이지 |
+/// | `keypad` 키패드형 | 3×4 숫자 + `. , - /` 열 | 숫자 1 + 기호 3 = 4페이지, 한 키로 순환(탭 다음·길게 이전) |
+public enum SymbolKeyboardStyle: String, Codable, CaseIterable, Sendable {
+    case qwerty, keypad
+
+    /// 설정 화면에 보이는 이름
+    public var displayName: String {
+        switch self {
+        case .qwerty: "쿼티형"
+        case .keypad: "키패드형"
+        }
+    }
 }
 
 /// 날짜·시간 채움글의 출력 형식 (PDR `date-snippet-pack.md` 4-1절, 사장님 결정).

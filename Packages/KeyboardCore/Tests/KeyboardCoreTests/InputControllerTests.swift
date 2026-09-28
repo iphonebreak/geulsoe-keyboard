@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import HangulEngine
+import TadakDomain
 @testable import KeyboardCore
 
 /// 문서에 가해진 조작을 그대로 기록하는 fake.
@@ -776,5 +777,187 @@ struct InputControllerMultiCharacterKeyTests {
         #expect(output.text == "가.com@")
         controller.handle(.character(","))
         #expect(output.text == "가.com@,")
+    }
+}
+
+// MARK: - 키패드형 숫자·기호 자판 (v1.2.0 ⑥, PDR `docs/design-reviews/number-symbol-keypad.md` 5·8절)
+
+/// 모드 전환·복귀가 사는 자리가 여기다 — HangulEngine은 `KeyEvent`·`InputMode`를 모른다(PDR 5절 정정).
+@MainActor
+@Suite("InputController — 키패드형 자판")
+struct InputControllerKeypadTests {
+
+    private func keypadController(
+        source: JamoSource = DubeolsikSource(), clock: (() -> TimeInterval)? = nil
+    ) -> (RecordingOutput, InputController) {
+        let output = RecordingOutput()
+        let controller = clock.map { InputController(output: output, hangulSource: source, clock: $0) }
+            ?? InputController(output: output, hangulSource: source)
+        controller.symbolKeyboardStyle = .keypad
+        return (output, controller)
+    }
+
+    @Test("기본은 쿼티형 — 「123」은 지금처럼 기호 자판으로 간다 (수용 기준 1)")
+    func defaultStaysQwerty() {
+        let controller = InputController(output: RecordingOutput())
+        #expect(controller.symbolKeyboardStyle == .qwerty)
+        controller.handle(.symbols)
+        #expect(controller.mode == .symbols)
+    }
+
+    @Test("(1) 키패드형이면 「123」이 숫자 페이지로 들어간다")
+    func entersNumberPage() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        #expect(controller.mode == .keypadPad(page: 0))
+    }
+
+    @Test("(2) 페이지 키 — 탭은 다음(0→1→2→3→0), 길게는 이전(0→3→2)")
+    func pagesCycle() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        var seen: [InputMode] = []
+        for _ in 0..<4 {
+            controller.handle(.keypadPageNext)
+            seen.append(controller.mode)
+        }
+        #expect(seen == [.keypadPad(page: 1), .keypadPad(page: 2), .keypadPad(page: 3), .keypadPad(page: 0)])
+        controller.handle(.keypadPagePrevious)
+        #expect(controller.mode == .keypadPad(page: 3), "처음에서 이전 = 마지막")
+        controller.handle(.keypadPagePrevious)
+        #expect(controller.mode == .keypadPad(page: 2))
+    }
+
+    @Test("(3) 어느 페이지에서든 「ABC」는 들어오기 전 문자 모드로 돌아간다 (수용 기준 5)", arguments: [0, 1, 2, 3])
+    func abcReturnsFromEveryPage(page: Int) {
+        let (_, controller) = keypadController()
+        controller.handle(.toggleLanguage)          // 영어에서 들어간다
+        controller.handle(.symbols)
+        for _ in 0..<page { controller.handle(.keypadPageNext) }
+        #expect(controller.mode == .keypadPad(page: page))
+        controller.handle(.symbols)                 // ABC
+        #expect(controller.mode == .english, "키패드에서도 문자 자판으로 돌아간다 — 쿼티형 기호로 새지 않는다")
+        controller.handle(.symbols)                 // 다시 123
+        #expect(controller.mode == .keypadPad(page: 0), "다시 들어가면 숫자 페이지부터")
+    }
+
+    @Test("(4) 조합 중 「123」은 조합을 확정하고, 돌아와 친 글자와 섞이지 않는다 (수용 기준 6)")
+    func entryCommitsComposition() {
+        let (output, controller) = keypadController()
+        controller.handle(.character("r"))
+        controller.handle(.character("k"))          // 가 (조합 중)
+        controller.handle(.symbols)
+        #expect(output.text == "가")
+        controller.handle(.character("1"))          // 숫자는 오토마타를 거치지 않는다
+        controller.handle(.symbols)                 // ABC
+        controller.handle(.character("r"))          // ㄱ — 새 글자
+        #expect(output.text == "가1ㄱ")
+    }
+
+    @Test("(5) 천지인 미확정 ㆍ도 쿼티형과 같은 경로로 리셋된다")
+    func cheonjiinPendingDotResets() {
+        func run(_ style: SymbolKeyboardStyle) -> String {
+            let output = RecordingOutput()
+            var now: TimeInterval = 0
+            let controller = InputController(output: output, hangulSource: CheonjiinSource(timeout: 0.8),
+                                             clock: { now })
+            controller.symbolKeyboardStyle = style
+            for key in ["ㄱ", "ㆍ"] { now += 0.1; controller.handle(.character(key)) }   // ㄱ + 미확정 ㆍ
+            controller.handle(.symbols)
+            controller.handle(.symbols)             // ABC
+            now += 0.1
+            controller.handle(.character("ㅣ"))      // 남은 ㆍ와 합쳐져 ㅏ(가)가 되면 안 된다
+            return output.text
+        }
+        let keypad = run(.keypad)
+        #expect(keypad == run(.qwerty), "진입 시 확정은 `.symbols` 처리 한 곳 — 두 스타일이 같다")
+        #expect(!keypad.hasSuffix("가"))
+    }
+
+    @Test("페이지 키 이벤트는 키패드 밖에서는 무시된다")
+    func pageEventsIgnoredElsewhere() {
+        let (_, controller) = keypadController()
+        controller.handle(.keypadPageNext)
+        #expect(controller.mode == .hangul)
+        let qwerty = InputController(output: RecordingOutput())
+        qwerty.handle(.symbols)
+        qwerty.handle(.keypadPagePrevious)
+        #expect(qwerty.mode == .symbols, "쿼티형 기호 자판은 `.symbolsAlternate`만 탄다")
+    }
+
+    @Test("숫자 전용 입력란을 거쳐 나오면 키패드가 아니라 문자 모드로 돌아간다")
+    func numberPadFieldRestoresLetterMode() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        controller.setNumberPad(.plain)
+        #expect(controller.mode == .numberPad(.plain))
+        controller.setNumberPad(nil)
+        #expect(controller.mode == .hangul, "복귀 목적지는 키패드에 오염되지 않는다")
+    }
+
+    @Test("설정을 쿼티형으로 바꿔도 키패드 안에서 ABC로 나올 수 있다")
+    func styleChangeWhileInsideKeypad() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        controller.symbolKeyboardStyle = .qwerty
+        controller.handle(.symbols)
+        #expect(controller.mode == .hangul)
+        controller.handle(.symbols)
+        #expect(controller.mode == .symbols)
+    }
+
+    /// ★ 길게 누르기 기호는 **쿼티형 `symbols`에 고정**이다(PDR 1절, 수용 기준 4) —
+    /// 두 스타일을 실제로 넣어 123 → ABC 왕복한 뒤의 문자 자판을 대조한다.
+    @Test("문자 키의 길게 누르기(alternate)는 두 스타일에서 전부 같다", arguments: [HangulLayout.dubeolsik, .danmoeum])
+    func letterAlternatesIgnoreStyle(hangul: HangulLayout) {
+        func alternates(_ style: SymbolKeyboardStyle, english: Bool) -> [[KeyEvent?]] {
+            let controller = InputController(output: RecordingOutput())
+            controller.symbolKeyboardStyle = style
+            if english { controller.handle(.toggleLanguage) }
+            controller.handle(.symbols)
+            controller.handle(.symbols)
+            return LayoutDefinition.layout(for: controller.mode, hangulLayout: hangul, longPressSymbols: true)
+                .rows.map { $0.map(\.alternate) }
+        }
+        for english in [false, true] {
+            #expect(alternates(.keypad, english: english) == alternates(.qwerty, english: english))
+        }
+        #expect(LayoutDefinition.longPressSymbolRows[0] == ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+                "파생 원본은 여전히 쿼티형 기호 자판")
+    }
+
+    // MARK: 대표 입력 탭 수 (PDR 2-4절 — 사장님·반론자2 요청)
+
+    /// 문자 자판에서 시작해 `text`를 친다. 지금 떠 있는 페이지에 글자가 없으면 페이지 키를 **탭(다음)**으로
+    /// 넘긴다 — 사람이 하듯. 스페이스는 공유 5행에서 바로 친다. 반환: (총 탭 수, 페이지 넘김 수).
+    private func type(_ text: String) -> (taps: Int, pageTurns: Int, output: String) {
+        let (output, controller) = keypadController()
+        var taps = 0, turns = 0
+        controller.handle(.symbols); taps += 1
+        for character in text {
+            let event: KeyEvent = character == " " ? .space : .character(String(character))
+            var guardCount = 0
+            while !LayoutDefinition.layout(for: controller.mode, hangulLayout: .dubeolsik)
+                .rows.flatMap({ $0 }).contains(where: { $0.event == event }) {
+                controller.handle(.keypadPageNext); taps += 1; turns += 1
+                guardCount += 1
+                if guardCount > 4 { return (-1, -1, output.text) }   // 어느 페이지에도 없다
+            }
+            controller.handle(event); taps += 1
+        }
+        return (taps, turns, output.text)
+    }
+
+    @Test("대표 입력 — 탭 수와 페이지 넘김이 설계서 2-4절 표와 같다", arguments: [
+        ("12.5", 5, 0),
+        ("010-1234", 9, 0),
+        ("2026. 9. 27.", 13, 0),
+        ("(~♡", 5, 1)
+    ])
+    func representativeInputs(text: String, taps: Int, pageTurns: Int) {
+        let result = type(text)
+        #expect(result.output == text)
+        #expect(result.taps == taps)
+        #expect(result.pageTurns == pageTurns)
     }
 }

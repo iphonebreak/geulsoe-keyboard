@@ -63,6 +63,20 @@ struct KeyboardTab: View {
                 }
             }
 
+            // 숫자·기호 자판 모양 (v1.2.0 ⑥, PDR `number-symbol-keypad.md` 11절 7단계 — 두 줄 요약).
+            // 기본은 쿼티형이라 기존 사용자는 그대로다. 요약은 **고른 쪽**만 보여 준다 —
+            // 키패드형의 「길게 누르면 이전」은 자판 위 힌트(◀)와 함께 여기서도 한 번 말한다(PDR 7절, 반론자2).
+            Picker("숫자·기호 자판", selection: $settings.symbolKeyboardStyle) {
+                ForEach(SymbolKeyboardStyle.allCases, id: \.self) { style in
+                    Text(style.displayName).tag(style)
+                }
+            }
+            Text(settings.symbolKeyboardStyle == .keypad
+                 ? "큰 숫자 3×4에 . , - / 가 함께 있어요. 페이지 키를 누르면 기호로 넘어가고, 길게 누르면 이전 페이지로 가요."
+                 : "숫자와 기호가 한 화면에 있어요. #+= 키로 두 번째 기호 페이지를 열어요.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
             if settings.activeHangulLayout == .cheonjiin {
                 timeoutSlider(
                     "같은 키 연타 인정 시간",

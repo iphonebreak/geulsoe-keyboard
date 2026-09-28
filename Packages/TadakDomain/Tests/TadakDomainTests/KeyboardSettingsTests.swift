@@ -653,3 +653,36 @@ struct SnippetTriggerParsingTests {
         #expect(SnippetEntry.parseTriggers("가, 나, 다, 라") == ["가", "나", "다", "라"])
     }
 }
+
+/// 숫자·기호 자판 모양 (v1.2.0 ⑥, PDR `docs/design-reviews/number-symbol-keypad.md` 11절 5단계)
+@Suite("KeyboardSettings — 숫자·기호 자판 모양")
+struct SymbolKeyboardStyleSettingTests {
+
+    @Test("기본은 쿼티형이고, 구 저장분(키 없음)도 쿼티형 — 기존 사용자는 그대로")
+    func defaultsToQwerty() throws {
+        #expect(KeyboardSettings.default.symbolKeyboardStyle == .qwerty)
+        let legacy = try JSONDecoder().decode(KeyboardSettings.self, from: Data("{}".utf8))
+        #expect(legacy.symbolKeyboardStyle == .qwerty)
+    }
+
+    @Test("고른 모양은 저장·복원된다", arguments: SymbolKeyboardStyle.allCases)
+    func roundTrip(style: SymbolKeyboardStyle) throws {
+        var settings = KeyboardSettings.default
+        settings.symbolKeyboardStyle = style
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.symbolKeyboardStyle == style)
+    }
+
+    @Test("모르는 값이 와도 설정 전체를 잃지 않는다")
+    func unknownFallsBack() throws {
+        let json = #"{"symbolKeyboardStyle": "future", "numberRowEnabled": true}"#
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: Data(json.utf8))
+        #expect(decoded.symbolKeyboardStyle == .qwerty)
+        #expect(decoded.numberRowEnabled == true)
+    }
+
+    @Test("설정 화면 이름")
+    func displayNames() {
+        #expect(SymbolKeyboardStyle.allCases.map(\.displayName) == ["쿼티형", "키패드형"])
+    }
+}

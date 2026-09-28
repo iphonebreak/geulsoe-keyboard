@@ -175,6 +175,8 @@ final class KeyboardViewController: UIInputViewController {
             startsInHangul: true
         )
         controller.doubleSpacePeriod = settings.doubleSpacePeriod
+        // 「123」이 들어갈 자판(쿼티형/키패드형) — 컨트롤러는 들어갈 모드만 고른다(PDR number-symbol-keypad 4-2절)
+        controller.symbolKeyboardStyle = settings.symbolKeyboardStyle
         inputController = controller
 
         let state = KeyboardViewState(
@@ -1621,6 +1623,8 @@ final class KeyboardViewController: UIInputViewController {
                 inputController.setHangulSource(Self.makeHangulSource(for: latest))
             }
             inputController.doubleSpacePeriod = latest.doubleSpacePeriod
+            // 키패드 안에 있는 동안 쿼티형으로 바꿔도 「ABC」로 나올 수 있다 — 다음 「123」부터 새 모양
+            inputController.symbolKeyboardStyle = latest.symbolKeyboardStyle
             applyAutoCapitalizationPolicy()
             refreshLayout()  // 배열(자판·숫자 줄) + 시프트(자동 대문자 정책 변화)
         }
