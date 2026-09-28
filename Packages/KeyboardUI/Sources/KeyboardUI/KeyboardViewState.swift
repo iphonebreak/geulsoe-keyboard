@@ -37,8 +37,10 @@ public final class KeyboardViewState {
     public var visibleTools: [ToolbarTool]
     /// 자판 대신 이모지 그리드를 보여줄지.
     public var showsEmojiPanel: Bool
-    /// 이모지 그리드의 최근 사용 행 — 세션 메모리 (조립 지점 관리).
+    /// 이모지 그리드의 최근 사용 — 조립 지점이 **키보드 전용 컨테이너**에서 읽어 넣는다(v1.2.0 ⑤).
     public var recentEmojis: [String]
+    /// 설정 「최근 사용 이모지 기억」 — 꺼져 있으면 최근 탭이 빈 이유를 다르게 말한다.
+    public var recentEmojisEnabled: Bool
     /// 자판 대신 클립보드 기록 패널을 보여줄지.
     public var showsClipboardPanel: Bool
     /// 클립보드 기록 (최근순) — 조립 지점이 App Group에서 읽어 넣는다.
@@ -77,6 +79,7 @@ public final class KeyboardViewState {
         visibleTools: [ToolbarTool] = [],
         showsEmojiPanel: Bool = false,
         recentEmojis: [String] = [],
+        recentEmojisEnabled: Bool = true,
         showsClipboardPanel: Bool = false,
         clipboardEntries: [String] = [],
         clipboardHistoryEnabled: Bool = true,
@@ -99,6 +102,7 @@ public final class KeyboardViewState {
         self.visibleTools = visibleTools
         self.showsEmojiPanel = showsEmojiPanel
         self.recentEmojis = recentEmojis
+        self.recentEmojisEnabled = recentEmojisEnabled
         self.showsClipboardPanel = showsClipboardPanel
         self.clipboardEntries = clipboardEntries
         self.clipboardHistoryEnabled = clipboardHistoryEnabled

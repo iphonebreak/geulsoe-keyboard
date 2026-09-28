@@ -351,6 +351,18 @@ struct ToolbarTab: View {
                 Button("초기화", role: .destructive) { resetLearnedWords() }
             }
 
+            // 이모지 「최근 사용」 기억 (v1.2.0 ⑤, PDR `emoji-recent-persist.md`) — 토글 하나, 끄면 지운다.
+            // ★ 문구는 **「다음에 키보드가 뜰 때」**다 — 기록은 키보드 전용 컨테이너에 있어 이 앱이 직접 못 지운다.
+            //   끄면 초기화 토큰을 올리고, 키보드가 다음에 뜰 때 스스로 비운다(PDR 3-3절 — 정직한 문구).
+            Toggle(isOn: emojiHistoryBinding) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("최근 사용 이모지 기억")
+                    Text("최근에 쓴 이모지 16개를 키보드 안에만 기억해요. 끄면 다음에 키보드가 뜰 때 지워져요.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             NavigationLink {
                 SnippetSettingsView(settings: $settings)
             } label: {
@@ -364,6 +376,19 @@ struct ToolbarTab: View {
         } footer: {
             Text("학습은 기기 안에서만 해요.")
         }
+    }
+
+    /// 끌 때 **초기화 토큰을 올린다** — 이모지 기록은 키보드 전용 컨테이너에 있어 이 앱이 저장소를 직접 비울 수 없다.
+    /// 끄고 다시 켜는 사이 키보드가 한 번도 안 떴어도, 토큰이 달라 키보드가 옛 목록을 버린다
+    /// (`EmojiHistory.reconciled` — 학습 단어의 `learningResetToken`과 같은 신호).
+    private var emojiHistoryBinding: Binding<Bool> {
+        Binding(
+            get: { settings.emojiHistoryEnabled },
+            set: { enabled in
+                if settings.emojiHistoryEnabled, !enabled { settings.emojiHistoryResetToken += 1 }
+                settings.emojiHistoryEnabled = enabled
+            }
+        )
     }
 
     /// 저장소를 비우는 것만으로는 부족하다 — 살아 있는 익스텐션이 세션 메모리로 옛 단어를

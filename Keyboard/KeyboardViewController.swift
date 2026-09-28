@@ -126,6 +126,11 @@ final class KeyboardViewController: UIInputViewController {
     /// 클립보드 기록 — 키보드가 쓰는 App Group 데이터 (FA 필요, PDR clipboard-history).
     /// 메모리에 들고 있지 않고 필요할 때 읽는다 — 설정 앱이 끄기/지우기로 비운 것을 놓치지 않게.
     private let clipboardHistoryRepository: ClipboardHistoryRepository = AppGroupClipboardHistoryRepository()
+    /// 이모지 「최근 사용」 — **키보드 전용 컨테이너**(App Group 아님, 전체 접근 무관, v1.2.0 ⑤).
+    /// ★ 실기에서 재시작 뒤 값이 남지 않는 것으로 밝혀지면 **이 한 줄만** `InMemoryEmojiHistoryRepository.shared`로
+    ///   바꾼다(PDR `emoji-recent-persist.md` 6-3절 후퇴안 — 판정·테스트는 그대로 쓴다).
+    ///   확인 절차: `docs/release/v1.2.0-emoji-recent-device-check.md`
+    private let emojiHistoryRepository: EmojiHistoryRepository = KeyboardOwnEmojiHistoryRepository()
     /// 기록에 넣은 마지막 클립보드 changeCount — 등장마다 읽어도 같은 복사를 두 번 읽지 않는다.
     ///
     /// **위 `consumedPasteboardChangeCount`와 같은 이유로 타입에 둔다** (2026-09-15).
@@ -318,6 +323,8 @@ final class KeyboardViewController: UIInputViewController {
         }
         clearSystemContainerBackground()
         reloadSettingsIfChanged()
+        // 이모지 최근 사용 — 저장소에서 다시 읽고, 설정 앱이 껐으면 여기서 비운다(설정이 그대로여도 매번)
+        refreshEmojiHistory()
         // 설정이 그대로여도 사용자 문구는 설정 앱에서 바뀌었을 수 있다 — 항상 다시 만든다
         rebuildSnippetMatcher()
         rebuildSuggestionEngineIfNeeded()
@@ -1161,17 +1168,41 @@ final class KeyboardViewController: UIInputViewController {
     private func handleEmojiTap(_ emoji: String) {
         playToolbarHaptic()
         inputController?.insertProvidedText(emoji)
-        recentEmojis.removeAll { $0 == emoji }
-        recentEmojis.insert(emoji, at: 0)
-        if recentEmojis.count > 16 { recentEmojis.removeLast(recentEmojis.count - 16) }
-        viewState?.recentEmojis = recentEmojis
+        // ★ 기록은 **쓰기 직전에 설정을 다시 읽어** 판정한다(학습 단어의 토큰 재확인과 같은 방어) —
+        //   아이패드 병렬 사용 중 설정 앱이 껐다면 옛 목록을 되살리지 않는다(PDR 3-2절).
+        //   secure 입력란은 **입력은 그대로, 기록만** 건너뛴다 — v1.2.0에 새로 생긴 규칙(PDR 5절).
+        //   판정은 도메인 `EmojiHistory.afterTap`에 있다(`swift test`로 고정).
+        let latest = settingsRepository.load()
+        if let updated = EmojiHistory.afterTap(
+            emoji,
+            stored: emojiHistoryRepository.load(),
+            enabled: latest.emojiHistoryEnabled,
+            resetToken: latest.emojiHistoryResetToken,
+            isSecureTextEntry: textDocumentProxy.isSecureTextEntry == true
+        ) {
+            emojiHistoryRepository.save(updated)
+            viewState?.recentEmojis = updated.entries
+        }
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
         updateSuggestionBar(userEdited: true)
     }
 
-    /// 이모지 최근 사용 — 세션 메모리만 (App Group 저장은 실사용 확인 후, PDR).
-    private var recentEmojis: [String] = []
+    /// 이모지 「최근 사용」을 설정과 맞춰 싣는다 — 등장마다·설정이 바뀔 때.
+    ///
+    /// **저장소가 정본이고 뷰 상태는 매번 다시 읽는 복사본이다**(PDR 4절 — 옛 인스턴스 변수는 VC가 새로 만들어질
+    /// 때마다 비었다). 설정 앱은 이 컨테이너를 못 지우므로, 꺼져 있거나 초기화 토큰이 바뀌었으면 **여기서 비운다** —
+    /// 그래서 「끄면 삭제」는 **키보드가 다음에 뜰 때** 일어난다(PDR 3-3절의 정직한 문구).
+    private func refreshEmojiHistory() {
+        let stored = emojiHistoryRepository.load()
+        let current = stored.reconciled(
+            enabled: settings.emojiHistoryEnabled, resetToken: settings.emojiHistoryResetToken)
+        if current != stored { emojiHistoryRepository.save(current) }
+        if viewState?.recentEmojis != current.entries { viewState?.recentEmojis = current.entries }
+        if viewState?.recentEmojisEnabled != settings.emojiHistoryEnabled {
+            viewState?.recentEmojisEnabled = settings.emojiHistoryEnabled
+        }
+    }
 
     // MARK: - 클립보드 기록 패널 (PDR clipboard-history)
 
@@ -1625,6 +1656,8 @@ final class KeyboardViewController: UIInputViewController {
             inputController.doubleSpacePeriod = latest.doubleSpacePeriod
             // 키패드 안에 있는 동안 쿼티형으로 바꿔도 「ABC」로 나올 수 있다 — 다음 「123」부터 새 모양
             inputController.symbolKeyboardStyle = latest.symbolKeyboardStyle
+            // 떠 있는 키보드에서 이모지 기록을 끄면(아이패드 병렬 사용) 즉시 비운다
+            refreshEmojiHistory()
             applyAutoCapitalizationPolicy()
             refreshLayout()  // 배열(자판·숫자 줄) + 시프트(자동 대문자 정책 변화)
         }

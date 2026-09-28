@@ -196,6 +196,7 @@ public struct KeyboardRootView: View {
             } else if state.showsEmojiPanel, let onEmojiTap, let onToolTap {
                 EmojiGridView(
                     recentEmojis: state.recentEmojis,
+                    recentEmojisEnabled: state.recentEmojisEnabled,
                     theme: theme,
                     onEmojiTap: onEmojiTap,
                     onBackspace: { onEvent(.backspace) },

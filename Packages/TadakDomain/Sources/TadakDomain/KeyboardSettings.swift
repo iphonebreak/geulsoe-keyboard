@@ -68,6 +68,12 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 성경 채움글 삽입 시 머리말을 앞에 넣을지 (기본 켬). 설정 앱 성경 팩 상세의 스위치 (2026-09-07).
     /// 머리말은 사용자가 친 단축어 원문 그대로다 — `창세기 1장 1절`을 쳤으면 `[창세기 1장 1절] ` (2026-09-14).
     public var bibleSnippetPrefixEnabled: Bool
+    /// 이모지 「최근 사용」을 기억할지 (기본 켬, v1.2.0 ⑤ — PDR `emoji-recent-persist.md`).
+    /// 기록은 **키보드 전용 컨테이너**에 있어 앱이 직접 못 지운다 — 끌 때 `emojiHistoryResetToken`을 올리면
+    /// 키보드가 다음에 뜰 때(또는 다음 이모지 탭 때) 스스로 비운다.
+    public var emojiHistoryEnabled: Bool
+    /// 이모지 기록 초기화 신호 — `learningResetToken`과 같은 방식. 끄면 +1.
+    public var emojiHistoryResetToken: Int
     /// 끈 내장 채움글 팩 id 목록 (`"bible"`, `"anthem"`). 옵트아웃이라 새 팩은 기본 켬.
     public var disabledSnippetPacks: [String]
     /// 날짜·시간 채움글 팩의 출력 형식 (v1.2.0, PDR `date-snippet-pack.md` 4절). 기본 **규범형**.
@@ -224,6 +230,8 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         // 새 설치, 그리고 이 필드가 생기기 전(Phase 6 이전)의 저장분이다.
         clipboardHistoryEnabled: Bool = false,
         learningResetToken: Int = 0,
+        emojiHistoryEnabled: Bool = true,
+        emojiHistoryResetToken: Int = 0,
         snippetsEnabled: Bool = true,
         bibleSnippetPrefixEnabled: Bool = true,
         disabledSnippetPacks: [String] = [],
@@ -261,6 +269,8 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.pasteSuggestionEnabled = pasteSuggestionEnabled
         self.clipboardHistoryEnabled = clipboardHistoryEnabled
         self.learningResetToken = learningResetToken
+        self.emojiHistoryEnabled = emojiHistoryEnabled
+        self.emojiHistoryResetToken = emojiHistoryResetToken
         self.snippetsEnabled = snippetsEnabled
         self.bibleSnippetPrefixEnabled = bibleSnippetPrefixEnabled
         self.disabledSnippetPacks = disabledSnippetPacks
@@ -318,6 +328,8 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         pasteSuggestionEnabled = try container.decodeIfPresent(Bool.self, forKey: .pasteSuggestionEnabled) ?? base.pasteSuggestionEnabled
         clipboardHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .clipboardHistoryEnabled) ?? base.clipboardHistoryEnabled
         learningResetToken = try container.decodeIfPresent(Int.self, forKey: .learningResetToken) ?? base.learningResetToken
+        emojiHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .emojiHistoryEnabled) ?? base.emojiHistoryEnabled
+        emojiHistoryResetToken = try container.decodeIfPresent(Int.self, forKey: .emojiHistoryResetToken) ?? base.emojiHistoryResetToken
         snippetsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snippetsEnabled) ?? base.snippetsEnabled
         bibleSnippetPrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .bibleSnippetPrefixEnabled) ?? base.bibleSnippetPrefixEnabled
         disabledSnippetPacks = try container.decodeIfPresent([String].self, forKey: .disabledSnippetPacks) ?? base.disabledSnippetPacks
