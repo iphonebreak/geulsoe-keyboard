@@ -377,6 +377,140 @@ struct DateSnippetHolidayTests {
     func allHolidays(tail: String, expected: String) {
         #expect(Fixture.body(tail, at: Fixture.date(2026, 9, 27)) == expected)
     }
+
+    /// 「이번」·「이번년도」는 「올해」와 같은 뜻이다 — 양력·음력 공휴일 모두(사장님 결정 2026-09-28)
+    @Test("이번 · 이번년도 = 올해", arguments: [
+        ("이번 광복절 날짜", "이번 광복절 날짜"),
+        ("이번년도 성탄절 날짜", "이번년도 성탄절 날짜"),
+        ("메모 이번 년도 한글날날짜", "이번 년도 한글날날짜")
+    ])
+    func thisYearAliases(tail: String, trigger: String) throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 28)).suggestion(forTail: tail))
+        #expect(suggestion.trigger == trigger, "접두까지 지운다")
+        #expect(suggestion.title.hasSuffix("· 지남") || suggestion.title.hasSuffix("· 올해"))
+    }
+}
+
+// MARK: - 음력 두 명절 — 설날·추석 (v1.2.0 개정, 사장님 결정 2026-09-28)
+
+/// 값은 **한국 음력**(`.dangi`)으로 만든 정적 표에서 온다. 중국 음력과 갈리는 세 칸을 한국 값으로 고정한다 —
+/// 표를 `.chinese`로 잘못 만들면 여기서 운다.
+@Suite("날짜 채움글 — 설날·추석(한국 음력 정적 표)")
+struct DateSnippetLunarHolidayTests {
+
+    @Test("한국·중국 음력이 갈리는 세 칸은 한국 값", arguments: [
+        (2027, 1, "설날 날짜", "2027. 2. 7."),     // 중국 2. 6.
+        (2028, 1, "설날 날짜", "2028. 1. 27."),    // 중국 1. 26.
+        (2040, 8, "추석 날짜", "2040. 9. 21.")     // 중국 9. 20.
+    ])
+    func koreanNotChinese(year: Int, month: Int, tail: String, expected: String) {
+        #expect(Fixture.body(tail, at: Fixture.date(year, month, 1)) == expected)
+    }
+
+    @Test("지금(2026. 9. 28.)에서 내년 설날은 한국 값 2027. 2. 7.")
+    func nextSeollalFromToday() throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 28)).suggestion(forTail: "내년 설날 날짜"))
+        #expect(suggestion.body == "2027. 2. 7.")
+        #expect(suggestion.title == "내년 설날 날짜")
+    }
+
+    @Test("2026 — 설날 2. 17. · 추석 9. 25.(둘 다 지남)", arguments: [
+        ("설날 날짜", "2026. 2. 17.", "설날 날짜 · 지남"),
+        ("추석 날짜", "2026. 9. 25.", "추석 날짜 · 지남"),
+        ("구정 날짜", "2026. 2. 17.", "구정 날짜 · 지남")
+    ])
+    func year2026(tail: String, body: String, title: String) throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 28)).suggestion(forTail: tail))
+        #expect(suggestion.body == body, "지나도 올해 값 그대로다")
+        #expect(suggestion.title == title)
+    }
+
+    @Test("추석 전날·당일(아침)·다음날", arguments: [
+        (24, 10, "· 올해"),
+        (25, 0, "· 오늘"),
+        (26, 10, "· 지남")
+    ])
+    func chuseokStatus(day: Int, hour: Int, status: String) throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, day, hour, 1)).suggestion(forTail: "추석 날짜"))
+        #expect(suggestion.body == "2026. 9. 25.")
+        #expect(suggestion.title.hasSuffix(status))
+    }
+
+    @Test("접두 — 올해 · 이번 · 이번년도 · 내년, 띄어쓰기 무시", arguments: [
+        ("올해 추석 날짜", "2026. 9. 25.", "올해 추석 날짜"),
+        ("이번 추석 날짜", "2026. 9. 25.", "이번 추석 날짜"),
+        ("이번년도 추석 날짜", "2026. 9. 25.", "이번년도 추석 날짜"),
+        ("오늘 이번년도추석날짜", "2026. 9. 25.", "이번년도추석날짜"),
+        ("이번 구정 날짜", "2026. 2. 17.", "이번 구정 날짜"),
+        ("내년 추석 날짜", "2027. 9. 15.", "내년 추석 날짜"),
+        ("내년구정날짜", "2027. 2. 7.", "내년구정날짜")
+    ])
+    func prefixes(tail: String, body: String, trigger: String) throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 28)).suggestion(forTail: tail))
+        #expect(suggestion.body == body)
+        #expect(suggestion.trigger == trigger, "접두까지 지운다")
+    }
+
+    @Test("표 끝 2050 — 설날 1. 23. · 추석 9. 30.", arguments: [
+        ("설날 날짜", "2050. 1. 23."),
+        ("추석 날짜", "2050. 9. 30.")
+    ])
+    func lastYear(tail: String, expected: String) {
+        #expect(Fixture.body(tail, at: Fixture.date(2050, 6, 1)) == expected)
+    }
+
+    @Test("표 밖(2051~ · 2025)은 칩을 띄우지 않는다", arguments: [
+        (2051, "설날 날짜"),
+        (2051, "추석 날짜"),
+        (2050, "내년 설날 날짜"),
+        (2050, "내년 추석 날짜"),
+        (2025, "추석 날짜")
+    ])
+    func outOfTable(year: Int, tail: String) {
+        #expect(Fixture.parser(Fixture.date(year, 6, 1)).suggestion(forTail: tail) == nil)
+    }
+
+    @Test("형식 설정·VoiceOver는 기존 날짜 경로 그대로")
+    func sameOutputPath() throws {
+        let now = Fixture.date(2026, 9, 28)
+        #expect(Fixture.body("추석 날짜", at: now, style: .common) == "2026.09.25")
+        #expect(Fixture.body("추석 날짜", at: now, style: .korean) == "2026년 9월 25일")
+        let suggestion = try #require(Fixture.parser(now).suggestion(forTail: "추석 날짜"))
+        #expect(suggestion.kind == .dateOnly)
+        #expect(suggestion.computedAt == now)
+        #expect(suggestion.accessibilityLabel == "채움글 추석 날짜, 지남, 2026년 9월 25일 붙여넣기")
+    }
+
+    @Test("표는 2026~2050이 빠짐없이 오름차순이다 — 조회가 연도 - 2026을 인덱스로 쓴다")
+    func tableIsContiguous() {
+        #expect(LunarHolidayTable.rows.map(\.year) == Array(LunarHolidayTable.firstYear...LunarHolidayTable.lastYear))
+        #expect(LunarHolidayTable.firstYear == 2026 && LunarHolidayTable.lastYear == 2050)
+    }
+
+    /// 표 50칸을 호스트의 한국 음력(`.dangi`, macOS 26+)으로 되짚는다 — 그 날이 정말 음력 1/1·8/15(윤달 아님)인가.
+    /// 설날·추석은 한 양력 해에 한 번뿐이라 이것으로 충분하다. 생성 스크립트 `--check`와 같은 것을 `swift test`마다 본다
+    @Test("표 50칸 = 한국 음력(.dangi) 1/1 · 8/15")
+    func tableMatchesDangi() throws {
+        guard #available(macOS 26, iOS 26, *) else { return }
+        var dangi = Calendar(identifier: .dangi)
+        dangi.timeZone = Fixture.seoul
+        for row in LunarHolidayTable.rows {
+            for (name, cell, lunarMonth, lunarDay) in [("설날", row.seollal, 1, 1), ("추석", row.chuseok, 8, 15)] {
+                let date = Fixture.date(row.year, cell.month, cell.day, 12)
+                let lunar = dangi.dateComponents([.month, .day, .isLeapMonth], from: date)
+                #expect(lunar.month == lunarMonth && lunar.day == lunarDay && lunar.isLeapMonth == false,
+                        "\(row.year) \(name) \(cell.month). \(cell.day). = 음력 \(lunar.month ?? 0)/\(lunar.day ?? 0)")
+            }
+        }
+    }
+
+    @Test("다른 음력 명절·끝말 없는 말은 받지 않는다", arguments: [
+        "정월대보름 날짜", "부처님오신날 날짜", "단오 날짜", "칠석 날짜",
+        "추석", "설날", "추석 인사"
+    ])
+    func rejects(tail: String) {
+        #expect(Fixture.parser(Fixture.date(2026, 9, 28)).suggestion(forTail: tail) == nil)
+    }
 }
 
 // MARK: - 3-3 · 숫자 패턴 (수용 기준 2)

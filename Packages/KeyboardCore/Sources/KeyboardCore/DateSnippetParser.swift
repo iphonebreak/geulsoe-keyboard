@@ -3,14 +3,15 @@ import TadakDomain
 
 /// 날짜·시간 채움글 — 꼬리가 「…날짜」·「…시간」·「…시각」으로 끝나면 **그 순간** 값을 계산한다.
 ///
-/// PDR `docs/design-reviews/date-snippet-pack.md`(양력 전용 확정판). `BibleReferenceParser`와 같은 자리의
-/// 순수 로직이다 — 저장소도, 미리 계산해 둔 값도 없다(1절 「적중 순간 계산」).
+/// PDR `docs/design-reviews/date-snippet-pack.md`(양력 확정판 + 0-2절 설날·추석 개정). `BibleReferenceParser`와
+/// 같은 자리의 순수 로직이다 — 저장소도, 미리 계산해 둔 값도 없다(1절 「적중 순간 계산」). 예외는 음력 두 명절뿐이고
+/// 그것도 **양력 월·일 정적 표**(`LunarHolidayTable`, 생성물)를 읽을 뿐 계산은 여전히 적중한 순간에 한다.
 ///
 /// ## 세 갈래 (3절)
 ///
 /// | 갈래 | 예 | 종류 |
 /// |---|---|---|
-/// | (가) 닫힌 어휘 | `오늘 날짜` · `이번주 월요일 날짜` · `분기말 날짜` · `광복절 날짜` · `내년 성탄절 날짜` | 날짜 |
+/// | (가) 닫힌 어휘 | `오늘 날짜` · `이번주 월요일 날짜` · `분기말 날짜` · `광복절 날짜` · `내년 성탄절 날짜` · `추석 날짜` | 날짜 |
 /// | (나) 숫자 패턴 | `3일 후 날짜` · `두 달 뒤 날짜` · `사흘 후 날짜` · `10개월 전 날짜` | 날짜 |
 /// | (다) 현재 시간 | `지금 시간` · `현재 시각` / `지금 날짜 시간` | 시간 / 날짜+시간 |
 ///
@@ -153,11 +154,22 @@ public struct DateSnippetParser: Sendable {
             return lastDay(year, (month - 1) / 3 * 3 + 3).map { ($0, match.title) }
         case .holiday(let holidayMonth, let holidayDay, let nextYear):
             guard let holiday = day(year + (nextYear ? 1 : 0), holidayMonth, holidayDay) else { return nil }
-            // 올해 값 그대로 + **제목에만** 상태(5절). 판정은 일 단위 — 당일 아침에도 「오늘」
-            guard !nextYear else { return (holiday, match.title) }
-            let status = calendar.isDate(now, inSameDayAs: holiday) ? "오늘" : (now > holiday ? "지남" : "올해")
-            return (holiday, "\(match.title) · \(status)")
+            return holidayResult(holiday, title: match.title, nextYear: nextYear, now: now)
+        case .lunarHoliday(let lunar, let nextYear):
+            // 양력 월·일은 한국 음력 정적 표에서 — 표 밖의 해(2051~)는 칩을 띄우지 않는다(0-2절)
+            guard let (holidayMonth, holidayDay) = LunarHolidayTable.monthDay(lunar, year: year + (nextYear ? 1 : 0)),
+                  let holiday = day(year + (nextYear ? 1 : 0), holidayMonth, holidayDay)
+            else { return nil }
+            return holidayResult(holiday, title: match.title, nextYear: nextYear, now: now)
         }
+    }
+
+    /// 공휴일 공통 — 올해 값 그대로 + **제목에만** 상태(5절). 판정은 일 단위 — 당일 아침에도 「오늘」.
+    /// 양력 8종과 설날·추석이 같은 규칙을 쓴다.
+    private func holidayResult(_ holiday: Date, title: String, nextYear: Bool, now: Date) -> (Date, String) {
+        guard !nextYear else { return (holiday, title) }
+        let status = calendar.isDate(now, inSameDayAs: holiday) ? "오늘" : (now > holiday ? "지남" : "올해")
+        return (holiday, "\(title) · \(status)")
     }
 
     private func day(_ year: Int, _ month: Int, _ day: Int) -> Date? {
@@ -173,7 +185,7 @@ public struct DateSnippetParser: Sendable {
 
     // MARK: - 꼬리 → 뜻
 
-    /// 풀어 볼 꼬리 길이(비공백 글자 수). 가장 긴 단축어가 9자(`999개월이전날짜`)이고
+    /// 풀어 볼 꼬리 길이(비공백 글자 수). 가장 긴 단축어가 10자(`이번년도어린이날날짜`)이고
     /// 그 앞 한 글자(경계 검사)까지 보면 충분하다.
     static let window = 14
 
@@ -184,7 +196,11 @@ public struct DateSnippetParser: Sendable {
         case weekday(week: Int, dayIndex: Int)
         case monthFirst, monthLast, yearLast, quarterEnd
         case holiday(month: Int, day: Int, nextYear: Bool)
+        case lunarHoliday(LunarHoliday, nextYear: Bool)
     }
+
+    /// 음력 두 명절 — 설날(음력 1/1)·추석(음력 8/15). 나머지 음력 명절은 넣지 않는다(사장님 결정 2026-09-28)
+    enum LunarHoliday: Sendable { case seollal, chuseok }
 
     struct Match: Sendable {
         let meaning: Meaning
@@ -241,16 +257,26 @@ public struct DateSnippetParser: Sendable {
                                   "\(prefix) \(day)요일 날짜"))
             }
         }
-        // 양력 공휴일 8종(3-2절) — 대체·임시공휴일은 넣지 않는다(매년 정부 발표로 바뀐다)
-        let holidays: [(String, Int, Int)] = [
-            ("신정", 1, 1), ("삼일절", 3, 1), ("어린이날", 5, 5), ("현충일", 6, 6),
-            ("광복절", 8, 15), ("개천절", 10, 3), ("한글날", 10, 9), ("성탄절", 12, 25)
+        // 공휴일 — 양력 8종(3-2절) + 음력 설날·추석(0-2절). 대체·임시공휴일은 넣지 않는다(매년 정부 발표로 바뀐다).
+        // 「이번」·「이번년도」는 「올해」와 같은 뜻이다(사장님 결정 2026-09-28 — 양력·음력 모두)
+        let holidays: [(name: String, meaning: (_ nextYear: Bool) -> Meaning)] = [
+            ("신정", { .holiday(month: 1, day: 1, nextYear: $0) }),
+            ("삼일절", { .holiday(month: 3, day: 1, nextYear: $0) }),
+            ("어린이날", { .holiday(month: 5, day: 5, nextYear: $0) }),
+            ("현충일", { .holiday(month: 6, day: 6, nextYear: $0) }),
+            ("광복절", { .holiday(month: 8, day: 15, nextYear: $0) }),
+            ("개천절", { .holiday(month: 10, day: 3, nextYear: $0) }),
+            ("한글날", { .holiday(month: 10, day: 9, nextYear: $0) }),
+            ("성탄절", { .holiday(month: 12, day: 25, nextYear: $0) }),
+            ("설날", { .lunarHoliday(.seollal, nextYear: $0) }),
+            ("구정", { .lunarHoliday(.seollal, nextYear: $0) }),
+            ("추석", { .lunarHoliday(.chuseok, nextYear: $0) })
         ]
-        for (name, month, day) in holidays {
-            let thisYear = Meaning.holiday(month: month, day: day, nextYear: false)
-            words.append(Word(name, thisYear, "\(name) 날짜"))
-            words.append(Word("올해\(name)", thisYear, "\(name) 날짜"))
-            words.append(Word("내년\(name)", .holiday(month: month, day: day, nextYear: true), "내년 \(name) 날짜"))
+        for (name, meaning) in holidays {
+            for prefix in ["", "올해", "이번", "이번년도"] {
+                words.append(Word("\(prefix)\(name)", meaning(false), "\(name) 날짜"))
+            }
+            words.append(Word("내년\(name)", meaning(true), "내년 \(name) 날짜"))
         }
         return words.sorted { $0.key.count > $1.key.count }
     }()
@@ -363,6 +389,15 @@ public struct DateSnippetParser: Sendable {
     private static func precededBy(_ slice: ArraySlice<Character>, count: Int, in set: Set<Character>) -> Bool {
         let position = slice.endIndex - count - 1
         return position >= slice.startIndex && set.contains(slice[position])
+    }
+}
+
+extension LunarHolidayTable {
+    /// 그 해 설날·추석의 양력 (월, 일). 표 밖의 해면 nil — 표는 연도 오름차순으로 빠짐없이 이어진다(테스트가 고정)
+    static func monthDay(_ holiday: DateSnippetParser.LunarHoliday, year: Int) -> (month: Int, day: Int)? {
+        guard (firstYear...lastYear).contains(year) else { return nil }
+        let row = rows[year - firstYear]
+        return holiday == .seollal ? row.seollal : row.chuseok
     }
 }
 
