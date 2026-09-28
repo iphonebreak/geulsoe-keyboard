@@ -147,20 +147,54 @@ struct DateSnippetCalendarTests {
         #expect(calendar.timeZone == TimeZone.autoupdatingCurrent)
     }
 
-    @Test("불교력·일본력으로 세면 2569·8년인 순간도 2026. 9. 27.로 찍힌다", arguments: [
-        (Calendar.Identifier.buddhist, 2569),
-        (.japanese, 8)
+    /// ★ **호스트 달력에 기대지 않는다** (검증자 비차단 지적, 2026-09-28).
+    ///
+    /// 옛 테스트는 기본 달력으로 만든 파서만 보고 「2026이 찍힌다」를 확인했다. 그런데 테스트를 도는 Mac이
+    /// 그레고리력이면 `Calendar.current`를 쓰는 변형도 **똑같이 2026을 찍어 통과한다** — 불교력·일본력 기기의
+    /// 함정을 잡지 못했다.
+    ///
+    /// 그래서 **달력을 주입한다.** 불교력·일본력·그레고리력을 각각 넣고 **그 달력의 연도가 찍히는지** 본다 —
+    /// 계산·출력이 주입한 달력 하나만 쓴다는 것을 호스트와 무관하게 증명한다. 어딘가 `Calendar.current`가
+    /// 끼면 호스트가 무엇이든 셋 중 적어도 둘이 운다. 제품이 주입하는 달력이 그레고리력인 것은
+    /// 위 `productCalendar`와 조립 지점(`KeyboardViewController.dateSnippetCalendar = makeCalendar()`)이 맡는다.
+    @Test("주입한 달력의 연도가 찍힌다 — 불교력 2569 · 일본력 8 · 그레고리력 2026", arguments: [
+        (Calendar.Identifier.buddhist, "2569. 9. 27."),
+        (.japanese, "8. 9. 27."),
+        (.gregorian, "2026. 9. 27.")
     ])
-    func nonGregorianDevice(identifier: Calendar.Identifier, deviceYear: Int) {
+    func followsInjectedCalendar(identifier: Calendar.Identifier, expected: String) {
         let now = Fixture.date(2026, 9, 27)
-        // 함정이 실제로 있다는 것부터 — 기기 달력으로 연도를 뽑으면 이 숫자가 나온다
-        var device = Calendar(identifier: identifier)
-        device.timeZone = Fixture.seoul
-        #expect(device.component(.year, from: now) == deviceYear)
-        // 파서는 기본 달력(그레고리력)으로 계산·출력한다
-        let parser = DateSnippetParser(style: .formal, now: { now })
-        #expect(parser.suggestion(forTail: "오늘 날짜")?.body.hasPrefix("2026. ") == true)
-        #expect(Fixture.body("오늘 날짜", at: now) == "2026. 9. 27.")
+        var injected = Calendar(identifier: identifier)
+        injected.timeZone = Fixture.seoul
+        let parser = DateSnippetParser(style: .formal, calendar: injected, now: { now })
+        #expect(parser.suggestion(forTail: "오늘 날짜")?.body == expected)
+        #expect(DateSnippetFormatter.format(now, kind: .dateOnly, style: .formal, calendar: injected) == expected)
+    }
+
+    /// 시간대도 같은 원리 — 같은 순간을 서울(+9)·키리티마티(+14)·호놀룰루(−10) 달력에 넣으면 날짜가 갈린다.
+    /// `Calendar.current`(호스트 시간대)를 쓰는 변형이면 셋이 같은 날짜를 찍어 운다.
+    @Test("주입한 달력의 시간대를 따른다 — 같은 순간이 시간대마다 다른 날짜")
+    func followsInjectedTimeZone() {
+        let instant = Fixture.date(2026, 9, 27, 12, 0)     // 서울 정오 = UTC 03:00
+        func today(_ zone: String) -> String? {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: zone)!
+            return DateSnippetParser(style: .formal, calendar: calendar, now: { instant })
+                .suggestion(forTail: "오늘 날짜")?.body
+        }
+        #expect(today("Asia/Seoul") == "2026. 9. 27.")
+        #expect(today("Pacific/Kiritimati") == "2026. 9. 27.")   // UTC+14 → 17:00
+        #expect(today("Pacific/Honolulu") == "2026. 9. 26.")     // UTC−10 → 전날 17:00
+    }
+
+    @Test("기기 달력 함정이 실제로 있다 — 불교력·일본력으로 세면 2569·8년")
+    func deviceCalendarTrapExists() {
+        let now = Fixture.date(2026, 9, 27)
+        for (identifier, year) in [(Calendar.Identifier.buddhist, 2569), (.japanese, 8)] {
+            var device = Calendar(identifier: identifier)
+            device.timeZone = Fixture.seoul
+            #expect(device.component(.year, from: now) == year)
+        }
     }
 }
 
