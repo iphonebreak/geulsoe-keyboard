@@ -78,7 +78,8 @@ struct SnippetIntroScenario: Equatable, Sendable {
     }
 
     let id: String
-    /// 타이핑 전부터 입력란에 있는 글자 — 「3일 후 날짜」의 `3`(숫자는 기호 자판에서 치므로 그 전환은 보이지 않는다)
+    /// 타이핑 전부터 입력란에 있는 글자. 지금 쓰는 시나리오는 없다 — 「3일 후 날짜」 시절 `3`을 여기 두었다가
+    /// 「사흘 후 날짜」로 바꾸며 비웠다(한글 자판이 보이는 채로 숫자가 들어가 어색했다)
     var startText = ""
     let typingSteps: [SnippetIntroScript.TypingStep]
     let typingCamera: SnippetIntroScene.Camera
@@ -121,18 +122,19 @@ struct SnippetIntroScenario: Equatable, Sendable {
         typingCamera: .overview,
         reaction: .chip(title: "오늘 날짜", body: SnippetIntroDateDemo.today))
 
-    /// 3일 후 날짜 — 숫자 패턴이 된다는 것을 보여 준다. `3`은 처음부터 있다(`startText`)
+    /// 사흘 후 날짜 — 숫자 계산(날 수)이 된다는 것을 보여 준다. 「3일 후 날짜」였을 때는 `3`이 한글 자판이 보이는 채로
+    /// 들어가 어색했다 — 한글 수(하루~열흘·보름·일주일) 지원도 함께 보여 준다(v1.2.0 출시 전 마무리 ④). 결과는 같다.
+    /// 「샇」은 ㅎ이 받침으로 붙었다가 ㅡ에서 떨어지는 실제 조합 단계다. 15타(⇧ 포함).
     static let threeDaysLater = SnippetIntroScenario(
         id: "threeDaysLater",
-        startText: "3",
         typingSteps: [
-            Step("ㅇ", "3ㅇ"), Step("ㅣ", "3이"), Step("ㄹ", "3일"), Step(" ", "3일 "),
-            Step("ㅎ", "3일 ㅎ"), Step("ㅜ", "3일 후"), Step(" ", "3일 후 "),
-            Step("ㄴ", "3일 후 ㄴ"), Step("ㅏ", "3일 후 나"), Step("ㄹ", "3일 후 날"),
-            Step("shift", "3일 후 날", shiftedAfter: true), Step("ㅉ", "3일 후 날ㅉ"), Step("ㅏ", "3일 후 날짜")
+            Step("ㅅ", "ㅅ"), Step("ㅏ", "사"), Step("ㅎ", "샇"), Step("ㅡ", "사흐"), Step("ㄹ", "사흘"),
+            Step(" ", "사흘 "), Step("ㅎ", "사흘 ㅎ"), Step("ㅜ", "사흘 후"), Step(" ", "사흘 후 "),
+            Step("ㄴ", "사흘 후 ㄴ"), Step("ㅏ", "사흘 후 나"), Step("ㄹ", "사흘 후 날"),
+            Step("shift", "사흘 후 날", shiftedAfter: true), Step("ㅉ", "사흘 후 날ㅉ"), Step("ㅏ", "사흘 후 날짜")
         ],
         typingCamera: .overview,
-        reaction: .chip(title: "3일 후 날짜", body: SnippetIntroDateDemo.threeDaysLater))
+        reaction: .chip(title: "사흘 후 날짜", body: SnippetIntroDateDemo.threeDaysLater))
 
     /// 지금 시간
     static let now = SnippetIntroScenario(
@@ -173,7 +175,7 @@ enum SnippetIntroBibleDemo {
     static let words = ["사랑해", "사랑하는"]
     /// mirror: KeyboardUI/BibleSearchPanelView.swift `chipLabel` — 「이름(건수)」
     static let filters = ["전체(517)", "아가(54)", "시편(40)", "요한복음(39)"]
-    /// mirror: `BibleSearchRow.reference(includingBook: true)` · `BibleVersePreview.window` (40자 창 + …)
+    /// mirror: `BibleSearchRow.reference(includingBook: true)` · `BibleVersePreview.window` (28자 창 + … — `windowLength = 28`)
     static let rows: [(reference: String, preview: String)] = [
         ("요일 4:10", "사랑은 여기 있으니 우리가 하나님을 사랑한 것이 아…"),
         ("고전 13:4", "사랑은 오래 참고 사랑은 온유하며 투기하는 자가 되…"),

@@ -100,6 +100,17 @@ struct KeyCapView: View {
             .gesture(pressGesture)
             .accessibilityLabel(accessibilityName)
             .accessibilityAddTraits(.isKeyboardKey)
+            // ★ 길게 누르기의 VoiceOver 대체 — 로터 「동작」에서 고른다(v1.2.0 출시 전 마무리 ②).
+            //   **접근성 수식어만 더한다** — 액션 목록은 그려지는 뷰가 아니라서 누르는 도중 표면 구조가 바뀌지 않는다
+            //   (작업 원칙). 어느 키에 붙이는지는 `KeyCapAccessibility.alternateAction` 주석(범위와 근거).
+            .accessibilityActions {
+                if let action = KeyCapAccessibility.alternateAction(for: key) {
+                    Button(action.name) {
+                        onPress?()
+                        onEvent(action.event)
+                    }
+                }
+            }
     }
 
     /// 키 표면 — 심볼이 있으면 아이콘, 없으면 라벨. 리턴 키의 한글 라벨(검색·보내기)은 살짝 작게.
@@ -288,6 +299,46 @@ struct KeyCapView: View {
         case .keypadPagePrevious: "이전 페이지"
         case .character: label
         case .spacer: ""
+        }
+    }
+}
+
+
+/// 키캡의 VoiceOver 대체 동작 — 길게 누르기(`Key.alternate`)를 **로터 「동작」**으로 연다.
+///
+/// 길게 누르기는 450ms 무장 제스처라 VoiceOver 사용자가 쓰기 어렵다(「두 번 탭 후 누르고 있기」가 통과하는지도
+/// 실기 미확인). 그래서 키패드형 페이지 키의 「이전 페이지」가 VoiceOver에서 **닿지 않았다**.
+///
+/// ## 범위 — 어느 키에 붙이나
+///
+/// | 키 | 붙이나 | 근거 |
+/// |---|---|---|
+/// | 키패드 **페이지 키**(`keypadPagePrevious`) | **붙인다** | 「이전」은 이 키 말고 갈 길이 없다(다음으로 세 번 돌 수는 있다) |
+/// | 스페이스 옆 **문장부호 키**(`punct` — `,`·`.com`·`#`) | **붙인다** | 한 자판에 **하나뿐**이고, 문자 자판을 떠나지 않고 `,`를 얻는 유일한 길이다 |
+/// | 문자 키의 **길게 누르기 기호**(`[`·`#`·`@` … 26개 남짓) | **붙이지 않는다** | 전부 「123」 기호 자판에 있다(길게 누르기는 지름길일 뿐). 붙이면 VoiceOver가 **글자 키에 초점이 갈 때마다** 「동작 사용 가능」을 덧붙여 읽어 타이핑 흐름이 시끄러워진다 |
+///
+/// 판정은 여기 한 곳이다 — `KeyCapAccessibilityTests`가 고정한다.
+enum KeyCapAccessibility {
+
+    struct AlternateAction: Equatable {
+        /// 로터에 보이는 이름
+        let name: String
+        let event: KeyEvent
+    }
+
+    static func alternateAction(for key: LayoutDefinition.Key) -> AlternateAction? {
+        guard let alternate = key.alternate else { return nil }
+        switch alternate {
+        case .keypadPagePrevious:
+            return AlternateAction(name: "이전 페이지", event: alternate)
+        case .keypadPageNext:
+            return AlternateAction(name: "다음 페이지", event: alternate)
+        case .character(let text):
+            // 문자 키 기호는 제외 — 위 표. 문장부호 키 하나만.
+            guard key.id == "punct" else { return nil }
+            return AlternateAction(name: "\(text) 입력", event: alternate)
+        default:
+            return nil
         }
     }
 }

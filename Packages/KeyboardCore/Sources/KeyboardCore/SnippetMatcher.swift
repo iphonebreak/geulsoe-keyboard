@@ -17,13 +17,18 @@ public struct SnippetSuggestion: Equatable, Sendable {
     public let computedAt: Date?
     /// 날짜 채움글의 종류 — 탭 시점 신선도 판정의 단위(분/일)를 정한다. 문구·성경은 nil.
     public let kind: DateSnippetKind?
+    /// ★ VoiceOver가 읽을 **값** — 날짜 칩만 가진다(v1.2.0 출시 전 마무리 ①). `body`와 같은 순간·같은 값을
+    /// **한글형**(`2026년 9월 27일`·`오후 9시 54분`)으로 한 번 더 만든 것이다. 규범형 `2026. 9. 27.`을 그대로 읽히면
+    /// 구두점 읽기가 사용자의 VoiceOver 구두점 설정에 달려 있다(Apple 문서는 `accessibilitySpeechPunctuation`
+    /// 같은 조절 수단만 적고 숫자·마침표를 어떻게 읽는지는 적지 않는다 — Context7 확인). 한글형은 구두점이 없다.
+    public let spokenValue: String?
 
     /// 문서 끝에서 지울 문자 수 — **꼬리 원문 기준**이다(정규화 길이가 아니다).
     public var triggerLength: Int { trigger.count }
 
     public init(
         trigger: String, title: String, body: String, prefix: String? = nil,
-        computedAt: Date? = nil, kind: DateSnippetKind? = nil
+        computedAt: Date? = nil, kind: DateSnippetKind? = nil, spokenValue: String? = nil
     ) {
         self.trigger = trigger
         self.title = title
@@ -31,6 +36,19 @@ public struct SnippetSuggestion: Equatable, Sendable {
         self.prefix = prefix
         self.computedAt = computedAt
         self.kind = kind
+        self.spokenValue = spokenValue
+    }
+
+    /// 칩의 VoiceOver 라벨.
+    ///
+    /// - 문구·성경 칩(`spokenValue == nil`): **기존 규칙 그대로** — 「채움글 <제목> 붙여넣기」.
+    /// - 날짜 칩: 날짜는 **값이 핵심**이라 값을 넣는다 — 「채움글 오늘 날짜, 2026년 9월 27일 붙여넣기」.
+    ///   공휴일 상태(`· 올해`·`· 지남`·`· 오늘`)도 쉼표로 끊어 함께 읽는다 — 「광복절 날짜, 지남, 2026년 8월 15일」.
+    ///   (가운뎃점 `·`은 읽기가 설정에 따라 달라 쉼표로 바꾼다.)
+    public var accessibilityLabel: String {
+        guard let spokenValue else { return "채움글 \(title) 붙여넣기" }
+        let spokenTitle = title.replacingOccurrences(of: " · ", with: ", ")
+        return "채움글 \(spokenTitle), \(spokenValue) 붙여넣기"
     }
 
     /// ★ 탭하는 순간 **표시 단위가 바뀌었는가** — 바뀌었으면 넣지 않고 칩을 갱신한다
@@ -53,7 +71,7 @@ public struct SnippetSuggestion: Equatable, Sendable {
     public func hasSameContent(as other: SnippetSuggestion?) -> Bool {
         guard let other else { return false }
         return trigger == other.trigger && title == other.title && body == other.body
-            && prefix == other.prefix && kind == other.kind
+            && prefix == other.prefix && kind == other.kind && spokenValue == other.spokenValue
     }
 
     /// 실제로 문서에 들어가는 텍스트

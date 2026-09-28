@@ -665,7 +665,8 @@ private struct SnippetChip: View {
             .background(theme.characterKey, in: Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("채움글 \(suggestion.title) 붙여넣기")
+        // 문구·성경은 「채움글 <제목> 붙여넣기」 그대로, 날짜 칩은 넣을 값까지 읽는다(`SnippetSuggestion.accessibilityLabel`)
+        .accessibilityLabel(suggestion.accessibilityLabel)
     }
 
     private var previewLine: String {

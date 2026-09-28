@@ -118,7 +118,9 @@ public struct DateSnippetParser: Sendable {
             title: title,
             body: DateSnippetFormatter.format(date, kind: match.kind, style: style, calendar: calendar),
             computedAt: now,
-            kind: match.kind)
+            kind: match.kind,
+            // VoiceOver용 — 같은 값을 **한글형**으로(출력 지점은 여전히 `DateSnippetFormatter` 하나다)
+            spokenValue: DateSnippetFormatter.format(date, kind: match.kind, style: .korean, calendar: calendar))
     }
 
     // MARK: - 뜻 → 값

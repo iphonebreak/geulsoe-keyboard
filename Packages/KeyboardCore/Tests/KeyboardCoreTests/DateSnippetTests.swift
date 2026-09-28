@@ -187,6 +187,29 @@ struct DateSnippetCalendarTests {
         #expect(today("Pacific/Honolulu") == "2026. 9. 26.")     // UTC−10 → 전날 17:00
     }
 
+    /// ★ 검증자 지적 M2c(2026-09-28) — 「오늘 날짜」는 순간을 그대로 찍어서 **공휴일 계산의 연·월 추출**
+    /// (`evaluate`의 `dateComponents`)이 `Calendar.current`로 바뀌어도 잡지 못했다. 공휴일은 **추출한 연도로 날짜를
+    /// 다시 만든다** — 불교력 기기에서 서기 2569년 8월 15일이 되는 변형이 그 자리다. 두 달력을 주입해 호스트와 무관하게 운다.
+    @Test("공휴일도 주입한 달력의 연도로 만든다 — 불교력 광복절 2569. 8. 15. · 그레고리력 2026. 8. 15.", arguments: [
+        (Calendar.Identifier.buddhist, "2569. 8. 15."),
+        (.gregorian, "2026. 8. 15.")
+    ])
+    func holidayFollowsInjectedCalendar(identifier: Calendar.Identifier, expected: String) {
+        var injected = Calendar(identifier: identifier)
+        injected.timeZone = Fixture.seoul
+        let now = Fixture.date(2026, 9, 27)
+        #expect(DateSnippetParser(style: .formal, calendar: injected, now: { now })
+            .suggestion(forTail: "광복절 날짜")?.body == expected)
+    }
+
+    /// 제품 달력은 **기기 달력·로캘을 물려받지 않는다** — `Calendar.current`를 복사해 설정만 바꾸는 변형은
+    /// 그레고리력 Mac에서 식별자 검사를 통과하지만 로캘(`ko_KR` 등, 달력 선호가 실리는 곳)을 끌고 온다.
+    /// 식별자로 만든 달력의 로캘은 빈 값이다(2026-09-28 실측) — 호스트와 무관하게 가른다.
+    @Test("제품 달력은 기기 로캘을 물려받지 않는다")
+    func productCalendarIsNotDeviceCopy() {
+        #expect(DateSnippetParser.makeCalendar().locale?.identifier ?? "" == "")
+    }
+
     @Test("기기 달력 함정이 실제로 있다 — 불교력·일본력으로 세면 2569·8년")
     func deviceCalendarTrapExists() {
         let now = Fixture.date(2026, 9, 27)
@@ -549,5 +572,41 @@ struct DateSnippetMatcherTests {
         #expect(controller.insertSnippet(suggestion))
         #expect(output.text == "약속 2026. 9. 27.")
         #expect(!controller.insertSnippet(suggestion), "같은 칩 두 번째 탭은 꼬리 정합 검사가 막는다")
+    }
+}
+
+// MARK: - VoiceOver — 날짜 칩은 넣을 값을 읽는다 (v1.2.0 출시 전 마무리 ①)
+
+@Suite("날짜 채움글 — 칩 VoiceOver 라벨")
+struct DateSnippetAccessibilityTests {
+
+    @Test("날짜·시간 칩은 값을 한글형으로 읽는다 — 설정한 출력 형식과 무관", arguments: [
+        ("오늘 날짜", DateSnippetStyle.formal, "채움글 오늘 날짜, 2026년 9월 27일 붙여넣기"),
+        ("오늘 날짜", .common, "채움글 오늘 날짜, 2026년 9월 27일 붙여넣기"),
+        ("지금 시간", .formal, "채움글 지금 시간, 오후 9시 54분 붙여넣기"),
+        ("지금 날짜 시간", .formal, "채움글 지금 날짜 시간, 2026년 9월 27일 오후 9시 54분 붙여넣기"),
+        ("사흘 후 날짜", .formal, "채움글 사흘 후 날짜, 2026년 9월 30일 붙여넣기")
+    ])
+    func readsValue(tail: String, style: DateSnippetStyle, expected: String) throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 27, 21, 54), style: style).suggestion(forTail: tail))
+        #expect(suggestion.accessibilityLabel == expected)
+    }
+
+    @Test("공휴일 상태도 읽는다 — 가운뎃점은 쉼표로", arguments: [
+        (14, "채움글 광복절 날짜, 올해, 2026년 8월 15일 붙여넣기"),
+        (15, "채움글 광복절 날짜, 오늘, 2026년 8월 15일 붙여넣기"),
+        (16, "채움글 광복절 날짜, 지남, 2026년 8월 15일 붙여넣기")
+    ])
+    func readsHolidayStatus(day: Int, expected: String) throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 8, day)).suggestion(forTail: "광복절 날짜"))
+        #expect(suggestion.accessibilityLabel == expected)
+    }
+
+    @Test("문구·성경 칩은 기존 라벨 그대로 — 「채움글 <제목> 붙여넣기」")
+    func otherChipsUnchanged() {
+        let greeting = SnippetSuggestion(trigger: "생일축하", title: "생일 축하", body: "생일 진심으로…")
+        #expect(greeting.accessibilityLabel == "채움글 생일 축하 붙여넣기")
+        let bible = SnippetSuggestion(trigger: "창 1:1", title: "창세기 1:1", body: "태초에…", prefix: "[창 1:1] ")
+        #expect(bible.accessibilityLabel == "채움글 창세기 1:1 붙여넣기")
     }
 }
