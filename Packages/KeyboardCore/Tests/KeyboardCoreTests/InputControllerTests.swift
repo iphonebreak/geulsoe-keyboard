@@ -970,32 +970,181 @@ struct InputControllerKeypadTests {
         }
     }
 
+    // MARK: 문자 복귀 라벨 — 돌아갈 문자 모드 (2026-09-28 개정)
+
+    @Test("letterMode — 한글에서 들어오면 한글, 영어에서 들어오면 영어, 복귀 목적지 그대로", arguments: [false, true])
+    func letterModeIsExposed(english: Bool) {
+        let (_, controller) = keypadController()
+        if english { controller.handle(.toggleLanguage) }
+        controller.handle(.symbols)
+        let expected: InputMode = english ? .english : .hangul
+        #expect(controller.letterMode == expected)
+        let layout = LayoutDefinition.layout(for: controller.mode, hangulLayout: .dubeolsik,
+                                             letterMode: controller.letterMode)
+        #expect(layout.rows.flatMap { $0 }.first { $0.event == .symbols }?.label == (english ? "ABC" : "가"))
+        controller.handle(.keypadPageNext)
+        #expect(controller.letterMode == expected, "페이지를 넘겨도 그대로")
+        controller.handle(.symbols)
+        #expect(controller.mode == expected)
+    }
+
+    // MARK: .,-/ 연타 키 (2026-09-28 개정)
+
+    private static let cycle: KeyEvent = .multiTap([".", ",", "-", "/"])
+
+    /// 숫자 페이지에 들어가 `12`를 친 상태 — 시계는 손으로 넘긴다
+    private func multiTapSetup() -> (RecordingOutput, InputController, (TimeInterval) -> Void) {
+        var now: TimeInterval = 100
+        let (output, controller) = keypadController(clock: { now })
+        controller.handle(.symbols)
+        controller.handle(.character("1"))
+        controller.handle(.character("2"))
+        return (output, controller, { now += $0 })
+    }
+
+    @Test("연타 — . → , → - → / → . 순환, 꼬리는 문서와 늘 같다")
+    func multiTapCycles() {
+        let (output, controller, advance) = multiTapSetup()
+        var seen: [String] = []
+        for _ in 0..<5 {
+            advance(0.3)
+            controller.handle(Self.cycle)
+            seen.append(output.text)
+            #expect(controller.textTail == output.text, "꼬리 정합 — 마지막 글자를 바꾼다")
+        }
+        #expect(seen == ["12.", "12,", "12-", "12/", "12."])
+        #expect(output.operations.suffix(2) == [.delete(1), .insert(".")], "교체는 ⌫ 1 + 삽입")
+    }
+
+    @Test("연타 — 제한 시간(0.8초)을 넘기면 새 「.」부터")
+    func multiTapTimesOut() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        advance(0.8)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12,", "경계값 0.8초는 연타로 본다")
+        advance(0.81)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12,.")
+        #expect(controller.textTail == output.text)
+    }
+
+    @Test("연타 — 다른 키가 끼면 끊긴다", arguments: [
+        KeyEvent.character("3"), .space, .backspace, .keypadPageNext
+    ])
+    func multiTapBreaksOnOtherKey(other: KeyEvent) {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        advance(0.1)
+        controller.handle(other)
+        if other == .keypadPageNext { controller.handle(.keypadPagePrevious) }   // 숫자 페이지로 되돌아온다
+        let before = output.text
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == before + ".", "\(other) 뒤에는 새로 「.」")
+        #expect(controller.textTail == output.text)
+    }
+
+    @Test("연타 뒤 ⌫ — 바뀐 글자 하나만 지워지고 꼬리도 같이")
+    func multiTapThenBackspace() {
+        let (output, controller, advance) = multiTapSetup()
+        for _ in 0..<3 { advance(0.2); controller.handle(Self.cycle) }   // 12-
+        controller.handle(.backspace)
+        #expect(output.text == "12")
+        #expect(controller.textTail == "12")
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12.", "⌫가 연타를 끊었다")
+    }
+
+    @Test("연타 — 모드 전환(ABC)으로 끊긴다")
+    func multiTapBreaksOnModeSwitch() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        controller.handle(.symbols)                 // 문자 자판으로
+        controller.handle(.symbols)                 // 다시 숫자 페이지
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..")
+    }
+
+    /// 메아리만 봐준다(사장님 결정 2026-09-28) — 호스트가 우리 ⌫+삽입에 반응해 보내는 textDidChange가
+    /// 연타를 끊으면 세 번째 탭이 새 「.」가 된다. 문서 꼬리가 방금 넣은 연타 글자로 끝나면 이어 간다.
+    @Test("sync ① 메아리(문서가 연타 글자로 끝남) 뒤 재탭 → 순환 계속")
+    func multiTapSurvivesEchoSync() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        advance(0.2)
+        controller.handle(Self.cycle)               // 12,
+        controller.syncWithDocument(documentTail: output.text)
+        advance(0.2)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12-")
+        #expect(controller.textTail == output.text)
+    }
+
+    @Test("sync ② nil(커서 도구) 뒤 → 새 「.」")
+    func multiTapBreaksOnNilSync() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        controller.syncWithDocument()
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..")
+    }
+
+    @Test("sync ③ 다른 꼬리(커서가 딴 데로) 뒤 → 새 「.」")
+    func multiTapBreaksOnOtherTailSync() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        controller.syncWithDocument(documentTail: "12")   // 커서가 「.」 앞으로 갔다
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.operations.last == .insert("."))
+        #expect(!output.operations.suffix(2).contains(.delete(1)), "다른 글자를 지우지 않는다")
+    }
+
     // MARK: 대표 입력 탭 수 (PDR 2-4절 — 사장님·반론자2 요청)
 
     /// 문자 자판에서 시작해 `text`를 친다. 지금 떠 있는 페이지에 글자가 없으면 페이지 키를 **탭(다음)**으로
-    /// 넘긴다 — 사람이 하듯. 스페이스는 공유 5행에서 바로 친다. 반환: (총 탭 수, 페이지 넘김 수).
+    /// 넘긴다 — 사람이 하듯. 스페이스는 숫자 페이지 4행에서 바로 친다. 숫자 페이지의 `. , - /`는 **연타 키**다 —
+    /// 그 글자가 나올 때까지 연달아 누른다(0.1초 간격, 제한 시간 안). 반환: (총 탭 수, 페이지 넘김 수).
     private func type(_ text: String) -> (taps: Int, pageTurns: Int, output: String) {
-        let (output, controller) = keypadController()
+        var now: TimeInterval = 0
+        let (output, controller) = keypadController(clock: { now })
         var taps = 0, turns = 0
-        controller.handle(.symbols); taps += 1
+        func tap(_ event: KeyEvent) { now += 0.1; controller.handle(event); taps += 1 }
+        tap(.symbols)
         for character in text {
             let event: KeyEvent = character == " " ? .space : .character(String(character))
             var guardCount = 0
-            while !LayoutDefinition.layout(for: controller.mode, hangulLayout: .dubeolsik)
-                .rows.flatMap({ $0 }).contains(where: { $0.event == event }) {
-                controller.handle(.keypadPageNext); taps += 1; turns += 1
+            while true {
+                let keys = LayoutDefinition.layout(for: controller.mode, hangulLayout: .dubeolsik).rows.flatMap { $0 }
+                if keys.contains(where: { $0.event == event }) {
+                    tap(event)
+                    break
+                }
+                if let cycle = keys.lazy.compactMap({ key -> [String]? in
+                    if case .multiTap(let characters) = key.event { return characters }
+                    return nil
+                }).first, let index = cycle.firstIndex(of: String(character)) {
+                    for _ in 0...index { tap(.multiTap(cycle)) }
+                    break
+                }
+                tap(.keypadPageNext); turns += 1
                 guardCount += 1
                 if guardCount > 4 { return (-1, -1, output.text) }   // 어느 페이지에도 없다
             }
-            controller.handle(event); taps += 1
         }
         return (taps, turns, output.text)
     }
 
-    @Test("대표 입력 — 탭 수와 페이지 넘김이 설계서 2-4절 표와 같다", arguments: [
+    /// 2026-09-28 개정(연타 키): `-`가 연타 3번이라 「010-1234」가 9 → 11탭이 됐다. `.`는 여전히 1탭이다
+    @Test("대표 입력 — 탭 수와 페이지 넘김이 설계서 표와 같다", arguments: [
         ("12.5", 5, 0),
-        ("010-1234", 9, 0),
+        ("010-1234", 11, 0),
         ("2026. 9. 27.", 13, 0),
+        ("12/3", 8, 0),
         ("(~♡", 5, 1)
     ])
     func representativeInputs(text: String, taps: Int, pageTurns: Int) {

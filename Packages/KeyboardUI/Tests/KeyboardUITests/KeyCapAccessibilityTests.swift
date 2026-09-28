@@ -44,3 +44,38 @@ struct KeyCapAccessibilityTests {
             .allSatisfy { KeyCapAccessibility.alternateAction(for: $0) == nil })
     }
 }
+
+/// VoiceOver가 읽는 키 이름·힌트 — `KeyCapAccessibility.name(for:label:)`(키패드 개정 2026-09-28)
+@Suite("키캡 — VoiceOver 이름과 힌트")
+struct KeyCapAccessibilityNameTests {
+
+    private func keys(_ layout: LayoutDefinition) -> [LayoutDefinition.Key] { layout.rows.flatMap { $0 } }
+
+    @Test(".,-/ 연타 키 — 기호 이름으로 읽고, 힌트로 연타를 알린다")
+    func multiTapKey() throws {
+        let layout = LayoutDefinition.layout(for: .keypadPad(page: 0), hangulLayout: .dubeolsik)
+        let key = try #require(keys(layout).first { if case .multiTap = $0.event { true } else { false } })
+        #expect(KeyCapAccessibility.name(for: key, label: key.label) == "마침표 쉼표 하이픈 슬래시")
+        let hint = try #require(KeyCapAccessibility.hint(for: key))
+        #expect(hint.contains("다음 기호"))
+    }
+
+    @Test("문자 복귀 키 — 「가」도 「ABC」도 「문자 자판」, 「123」은 「기호」", arguments: [
+        (InputMode.keypadPad(page: 0), InputMode.hangul, "문자 자판"),
+        (.keypadPad(page: 2), .english, "문자 자판"),
+        (.symbols, .hangul, "문자 자판"),
+        (.hangul, .hangul, "기호")
+    ])
+    func letterReturnKey(mode: InputMode, letterMode: InputMode, name: String) throws {
+        let layout = LayoutDefinition.layout(for: mode, hangulLayout: .dubeolsik, letterMode: letterMode)
+        let key = try #require(keys(layout).first { $0.event == .symbols })
+        #expect(KeyCapAccessibility.name(for: key, label: key.label) == name)
+    }
+
+    @Test("다른 키는 힌트가 없다 — 숫자·페이지·⌫·⏎")
+    func noHintElsewhere() {
+        let layout = LayoutDefinition.layout(for: .keypadPad(page: 0), hangulLayout: .dubeolsik)
+        let others = keys(layout).filter { if case .multiTap = $0.event { false } else { true } }
+        #expect(others.allSatisfy { KeyCapAccessibility.hint(for: $0) == nil })
+    }
+}

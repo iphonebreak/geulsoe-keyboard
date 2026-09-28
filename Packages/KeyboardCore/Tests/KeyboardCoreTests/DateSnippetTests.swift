@@ -574,6 +574,25 @@ struct DateSnippetNowTests {
         #expect(suggestion.body == "2026. 9. 27. 21:54")
         #expect(suggestion.kind == .dateAndTime)
     }
+
+    /// 별칭 4종(사장님 결정 2026-09-28) — 「지금 날짜 시간」과 같은 동작. 단축어 원문은 앞말까지 전부 지운다
+    @Test("날짜+시간 별칭 — 현재·오늘 날짜 시간/시각", arguments: [
+        "현재 날짜 시간", "현재 날짜 시각", "오늘 날짜 시간", "오늘 날짜 시각"
+    ])
+    func dateAndTimeAliases(tail: String) throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 27, 21, 54)).suggestion(forTail: "메모 " + tail))
+        #expect(suggestion.body == "2026. 9. 27. 21:54")
+        #expect(suggestion.kind == .dateAndTime)
+        #expect(suggestion.trigger == tail, "「오늘」·「현재」까지 지운다 — 「시간」만 바꾸지 않는다")
+        #expect(suggestion.title == tail)
+    }
+
+    @Test("「오늘 날짜」는 여전히 날짜만 — 긴 단축어가 이겨도 짧은 쪽은 그대로")
+    func todayDateStaysDateOnly() throws {
+        let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 27, 21, 54)).suggestion(forTail: "오늘 날짜"))
+        #expect(suggestion.body == "2026. 9. 27.")
+        #expect(suggestion.kind == .dateOnly)
+    }
 }
 
 // MARK: - 칩 모양 · 단축어 원문

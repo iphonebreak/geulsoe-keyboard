@@ -452,7 +452,8 @@ final class KeyboardViewController: UIInputViewController {
             numberRow: settings.numberRowEnabled,
             inputModeSwitchKey: viewState.needsInputModeSwitchKey,  // 지구본 불필요 시 하단 행 재배치
             punctuation: fieldPunctuation,                          // 입력란 종류별 문장부호 키
-            longPressSymbols: settings.longPressSymbolsEnabled)     // 문자 키 길게 → 기호 (설정)
+            longPressSymbols: settings.longPressSymbolsEnabled,     // 문자 키 길게 → 기호 (설정)
+            letterMode: inputController.letterMode)                 // 키패드 문자 복귀 키 「가」/「ABC」
         if viewState.layout != layout {
             // 자판이 바뀌면 **기준 열 수가 바뀔 수 있다**(두벌식 10 ↔ 천지인 4 ↔ 숫자 패드 3).
             // 높이는 그 열 수에서 나오므로 여기서 다시 걸지 않으면 이전 자판의 높이가 남는다.

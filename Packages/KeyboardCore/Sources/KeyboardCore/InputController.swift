@@ -21,8 +21,10 @@ public final class InputController {
 
     public private(set) var mode: InputMode
     public private(set) var shift: ShiftState = .off
-    /// 기호 자판에 들어오기 직전의 문자 모드 — 기호에서 나갈 때 여기로 돌아간다
-    private var letterMode: InputMode = .hangul
+    /// 기호 자판에 들어오기 직전의 문자 모드 — 기호에서 나갈 때 여기로 돌아간다.
+    /// **읽기 전용 공개**(키패드 개정 2026-09-28): 조립 지점이 키패드 문자 복귀 키 라벨(「가」/「ABC」)을
+    /// 여기서 정한다(`LayoutDefinition.layout(... letterMode:)`). 기호·키패드·숫자 패드에 있을 때만 뜻이 있다
+    public private(set) var letterMode: InputMode = .hangul
 
     private let output: TextOutput
     private var automaton = HangulAutomaton()
@@ -67,6 +69,15 @@ public final class InputController {
     private let doubleSpaceTimeout: TimeInterval = 0.35
     /// 마지막 키가 스페이스였을 때 그 시각. 다른 입력이 끼면 nil.
     private var lastSpaceTimestamp: TimeInterval?
+
+    /// 연타 키(`KeyEvent.multiTap` — 키패드 숫자 페이지의 `.,-/`) 인정 시간. **설정이 아닌 상수**다 —
+    /// 천지인 연타 기본값(`KeyboardSettings.cheonjiinTimeout` 0.8초)과 같은 감각으로 맞췄다. 천지인 설정을 따라가게
+    /// 묶지 않은 이유: 그 슬라이더는 천지인일 때만 보이고, 이 키는 자판 종류와 무관하게 키패드형에만 있다.
+    private let multiTapTimeout: TimeInterval = 0.8
+    /// 진행 중인 연타 — 그 키의 글자 목록, **지금 문서에 들어가 있는 글자**의 순번, 마지막 탭 시각.
+    /// 끊기는 조건: 시간 초과 · 다른 이벤트 · 조합 확정 경로(툴바 도구·후보·붙여넣기) · 모드/입력란 변경 ·
+    /// sync(단, **메아리**는 봐준다 — `syncWithDocument` 주석). 끊긴 뒤에는 첫 글자부터 새로 넣는다.
+    private var multiTapState: (characters: [String], index: Int, time: TimeInterval)?
 
     /// 자동 대문자 규칙 — 조립 지점이 입력란 `autocapitalizationType`과 설정을 합쳐 넣는다
     /// (PDR auto-capitalization). 영어 모드에서만 동작하고, 바뀌면 즉시 다시 판정한다.
@@ -113,7 +124,7 @@ public final class InputController {
 
     /// 활성 자판 변경 시 조립 지점이 호출한다. 진행 중인 조합은 확정된다.
     public func setHangulSource(_ source: JamoSource) {
-        commitComposition()
+        commitComposition()   // 연타도 여기서 끊긴다
         hangulSource = source
     }
 
@@ -122,6 +133,7 @@ public final class InputController {
     /// 숫자 전용 입력란 진입/이탈. `kind`가 있으면 숫자 패드 모드로, nil이면 들어오기 전
     /// 문자 모드로 돌아간다 (이미 문자 모드면 그대로). 조합은 확정된다.
     public func setNumberPad(_ kind: NumberPadKind?) {
+        multiTapState = nil
         if let kind {
             guard mode != .numberPad(kind) else { return }
             commitComposition()
@@ -138,6 +150,7 @@ public final class InputController {
     /// 입력란이 ASCII(이메일·URL 등)를 요구하면 영어로 시작한다. 숫자 패드 중에는 복귀 목적지만
     /// 바꾼다. 사용자는 이후 한영 키로 자유롭게 바꿀 수 있다.
     public func setStartsInEnglish(_ english: Bool) {
+        multiTapState = nil   // 입력란 특성이 바뀌었다 — 다른 입력란이다
         let target: InputMode = english ? .english : .hangul
         if mode.isNumberPad {
             letterMode = target
@@ -154,6 +167,8 @@ public final class InputController {
     public func handle(_ event: KeyEvent) {
         // 스페이스가 아닌 모든 이벤트는 더블스페이스 연쇄를 끊는다
         if case .space = event {} else { lastSpaceTimestamp = nil }
+        // 연타 키가 아닌 모든 이벤트는 연타를 끊는다(모드 전환·페이지 넘김·⌫ 포함)
+        if case .multiTap = event {} else { multiTapState = nil }
         switch event {
         case .character(let key): handleCharacter(key)
         case .backspace: handleBackspace()
@@ -202,6 +217,8 @@ public final class InputController {
             commitComposition()
         case .spacer:
             break  // 스페이서 — 배열 정렬용, 입력 없음
+        case .multiTap(let characters):
+            handleMultiTap(characters)
         }
         // 시프트 탭은 사용자의 결정이라 다시 판정하지 않는다 — 판정하면 방금 끈 시프트가 도로 켜진다
         if event != .shift { updateAutoCapitalization() }
@@ -220,6 +237,14 @@ public final class InputController {
     ///   유지한다. 문서에서 가져온 꼬리 끝 단어는 사용자가 이 키보드로 친 것이 아닐 수 있어
     ///   다음 구분자까지 학습을 막는다.
     public func syncWithDocument(documentTail: String? = nil) {
+        // 연타는 **메아리만** 봐준다(사장님 결정 2026-09-28) — 연타 두 번째부터는 ⌫ 1 + 삽입이라, 우리 ⌫에 반응해
+        // textDidChange를 보내는 호스트(아래 주석)에서 끊으면 세 번째 탭이 새 「.」가 된다. 문서가 **방금 넣은 연타
+        // 글자로 끝나면** 우리 편집의 메아리로 보고 이어 간다(조합 글자 메아리 규칙과 같은 모양). nil(커서 도구)이나
+        // 다른 끝이면 끊는다. 알려진 부작용: 0.8초 안에 손으로 커서를 **같은 기호 바로 뒤**로 옮기면 그 기호가 바뀐다.
+        let keptMultiTap = multiTapState.flatMap { state in
+            documentTail?.hasSuffix(state.characters[state.index]) == true ? state : nil
+        }
+        defer { multiTapState = keptMultiTap }
         let composing = automaton.composingText + hangulSource.pendingText
         if let documentTail, !composing.isEmpty, documentTail.hasSuffix(composing) {
             // 문서 = 확정 + 우리 조합 그대로. 상태는 살리고 확정 꼬리만 문서 기준으로 보정한다
@@ -388,6 +413,31 @@ public final class InputController {
         runCommittedCount = committed.count
     }
 
+    /// 연타 키 — 첫 탭은 첫 글자를 넣고, 제한 시간 안에 **같은 키**를 다시 누르면 방금 넣은 글자를 다음 글자로
+    /// 바꾼다(`. → , → - → / → .`). 교체는 더블스페이스 마침표와 같은 모양 — ⌫ 1 + 삽입, 꼬리도 마지막 글자를
+    /// 같이 바꿔 **문서와 어긋나지 않는다**. 꼬리가 그 글자로 끝나지 않으면(어긋났으면) 교체하지 않고 새로 넣는다.
+    private func handleMultiTap(_ characters: [String]) {
+        guard let first = characters.first else { return }
+        suppressesNextWordCommit = false
+        let now = clock()
+        if let state = multiTapState, state.characters == characters, now - state.time <= multiTapTimeout,
+           committedTail.hasSuffix(state.characters[state.index]) {
+            let current = state.characters[state.index]
+            let nextIndex = (state.index + 1) % characters.count
+            let next = characters[nextIndex]
+            output.deleteBackward(current.count)
+            output.insertText(next)
+            committedTail.removeLast(min(current.count, committedTail.count))
+            appendToTail(next)
+            multiTapState = (characters, nextIndex, now)
+            return
+        }
+        commitComposition()   // 연타 상태도 여기서 비워진다 — 새 상태는 아래에서 선다
+        output.insertText(first)
+        appendToTail(first)
+        multiTapState = (characters, 0, now)
+    }
+
     private func handleSpace() {
         // 천지인: 조합 중 스페이스는 이동(확정만, 공백 없음) — Apple 10키. 배열에서 →(이동) 키를 뺀 대신이다
         // (2026-09-07). 이동 뒤의 공백은 첫 공백이라 더블스페이스 마침표 연쇄에 넣지 않는다.
@@ -468,6 +518,8 @@ public final class InputController {
     /// 툴바 도구(이모지 패널 등)를 열 때 조립 지점이 호출한다 — 천지인 규칙
     /// "툴바 도구 사용 시 반드시 리셋"의 공개 진입점 (리뷰 반영).
     public func commitComposition() {
+        // 툴바 도구·후보·붙여넣기가 여기를 지난다 — 그 사이에 문서가 바뀌므로 연타도 끊는다
+        multiTapState = nil
         // 조합 글자(pending 포함)는 이미 문서에 들어가 있다 — 상태만 확정으로 바꾼다.
         // pending 점은 그대로 리터럴로 남는다 (PDR 결정).
         appendToTail(automaton.composingText + hangulSource.pendingText)

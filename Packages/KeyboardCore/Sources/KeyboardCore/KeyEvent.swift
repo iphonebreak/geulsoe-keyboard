@@ -24,6 +24,10 @@ public enum KeyEvent: Equatable, Sendable {
     case keypadPageNext
     /// 키패드형 페이지 넘김 — 이전. 같은 페이지 키를 **길게** 누르면 나간다(`Key.alternate`)
     case keypadPagePrevious
+    /// 연타 순환 키 — 키패드형 숫자 페이지의 `.,-/`(삼성 3×4 선례, 키패드 개정 2026-09-28). 탭 = 첫 글자.
+    /// **같은 키를 제한 시간 안에 다시 누르면** 방금 넣은 글자를 다음 글자로 바꾼다(마지막 다음은 처음).
+    /// 시간·끊김 규칙은 `InputController`(`multiTapTimeout`)가 정한다 — 키캡은 이 이벤트만 낸다
+    case multiTap([String])
     /// 빈 자리(스페이서) — 아무 동작 없음. 행 폭을 맞춰 글자 열을 가운데 정렬할 때 쓴다
     /// (단모음 3행). UI는 키 표면을 그리지 않는다.
     case spacer

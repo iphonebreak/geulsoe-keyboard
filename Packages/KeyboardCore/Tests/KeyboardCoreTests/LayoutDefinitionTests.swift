@@ -420,57 +420,126 @@ struct KeypadLayoutTests {
                                 numberRow: numberRow, inputModeSwitchKey: globe)
     }
 
-    /// 한 행을 표처럼 읽는다 — 문자 키는 그 문자, 페이지 키 `▶`, ⌫ `⌫`, 빈칸 `_`
+    /// 한 행을 표처럼 읽는다 — 문자 키는 그 문자, 연타 키 `.,-/`, 페이지 키 `▶`, 문자 복귀 `가`/`ABC`(라벨),
+    /// 지구본 `🌐`, 스페이스 `␣`, ⌫ `⌫`, ⏎ `⏎`, 빈칸 `_`
     private func cells(_ row: [LayoutDefinition.Key]) -> [String] {
         row.map { key in
             switch key.event {
             case .character(let text): text
+            case .multiTap(let characters): characters.joined()
             case .keypadPageNext: "▶"
+            case .symbols: key.label
+            case .toggleLanguage: key.id == "globe" ? "🌐" : "?"
+            case .space: "␣"
             case .backspace: "⌫"
+            case .return: "⏎"
             case .spacer: "_"
             default: "?"
             }
         }
     }
 
-    @Test("숫자 페이지 — 3×4 숫자 + 오른쪽 . , - / 열, 4행 [페이지][0][⌫][/]")
+    private func widths(_ row: [LayoutDefinition.Key]) -> [Double] { row.map(\.width) }
+
+    private func rowSums(_ layout: LayoutDefinition) -> [Double] {
+        layout.rows.map { row in (row.reduce(0) { $0 + $1.width } * 1000).rounded() / 1000 }
+    }
+
+    // MARK: 2026-09-28 개정 — 아래 줄 없애기(삼성식), 사장님 폰 세션 4-1 피드백
+
+    @Test("숫자 페이지 — 삼성식 4행 4열, 공유 하단 행 없음 (2026-09-28 개정)")
     func numberPage() {
         let layout = page(0)
-        #expect(layout.rows.count == 5)
-        #expect(cells(layout.rows[0]) == ["1", "2", "3", "."])
-        #expect(cells(layout.rows[1]) == ["4", "5", "6", ","])
-        #expect(cells(layout.rows[2]) == ["7", "8", "9", "-"])
-        #expect(cells(layout.rows[3]) == ["▶", "0", "⌫", "/"])
+        #expect(layout.rows.count == 4, "공유 하단 행(ABC·지구본·스페이스·⏎)이 없다")
+        #expect(cells(layout.rows[0]) == ["1", "2", "3", "⌫"])
+        #expect(cells(layout.rows[1]) == ["4", "5", "6", "⏎"])
+        #expect(cells(layout.rows[2]) == ["7", "8", "9", ".,-/"])
+        #expect(cells(layout.rows[3]) == ["▶", "가", "0", "🌐", "␣"], "지구본은 스페이스 왼쪽")
+        for row in layout.rows.prefix(3) { #expect(widths(row) == [1.75, 1.75, 1.75, 1.75]) }
+        #expect(widths(layout.rows[3]) == [0.875, 0.875, 1.75, 0.875, 2.625])
+        #expect(rowSums(layout) == [7, 7, 7, 7])
     }
 
-    @Test("기호 1페이지 — ~ ♡ ☆ 우선 배치, 4행 끝 [페이지][⌫]")
-    func symbolPage1() {
-        let layout = page(1)
-        #expect(cells(layout.rows[0]) == ["~", "♡", "☆", "[", "]", "{", "}"])
-        #expect(cells(layout.rows[1]) == ["#", "%", "^", "*", "+", "=", "-"])
-        #expect(cells(layout.rows[2]) == ["/", ":", ";", "(", ")", "₩", "&"])
-        #expect(cells(layout.rows[3]) == ["@", "\"", ".", ",", "?", "▶", "⌫"])
+    @Test("숫자 페이지 — 지구본이 필요 없으면 스페이스가 그 폭을 흡수한다(행 폭 합 불변)")
+    func numberPageWithoutGlobe() {
+        let layout = page(0, globe: false)
+        #expect(cells(layout.rows[3]) == ["▶", "가", "0", "␣"])
+        #expect(widths(layout.rows[3]) == [0.875, 0.875, 1.75, 3.5])
+        #expect(rowSums(layout) == [7, 7, 7, 7])
+        #expect(Array(layout.rows.prefix(3)) == Array(page(0).rows.prefix(3)), "1~3행은 그대로")
     }
 
-    @Test("기호 2페이지")
-    func symbolPage2() {
-        let layout = page(2)
-        #expect(cells(layout.rows[0]) == ["!", "'", "_", "\\", "|", "~", "<"])
-        #expect(cells(layout.rows[1]) == [">", "€", "£", "¥", "•", "※", "★"])
-        #expect(cells(layout.rows[2]) == ["☆", "♡", "♥", "♪", "→", "←", "↑"])
-        #expect(cells(layout.rows[3]) == ["↓", "°", "±", "×", "÷", "▶", "⌫"])
+    @Test("숫자 페이지 — ⌫ ⏎ .,-/ ␣ 페이지 문자복귀 0~9가 다 있다")
+    func numberPageHasEverything() {
+        let events = page(0).rows.flatMap { $0 }.map(\.event)
+        for event: KeyEvent in [.backspace, .return, .space, .keypadPageNext, .symbols,
+                                .multiTap([".", ",", "-", "/"])] {
+            #expect(events.contains(event), "\(event)")
+        }
+        let digits = events.compactMap { event -> String? in
+            if case .character(let text) = event { return text }
+            return nil
+        }
+        #expect(digits.sorted() == (0...9).map(String.init), "문자 키는 숫자 10개뿐이다 — . , - /는 연타 키 하나")
     }
 
-    @Test("기호 3페이지 — 남은 6개 + 빈칸, 4행 끝 [페이지][⌫]")
-    func symbolPage3() {
-        let layout = page(3)
-        #expect(cells(layout.rows[0]) == ["≠", "√", "∞", "·", "…", "✓", "_"])
-        #expect(cells(layout.rows[1]) == Array(repeating: "_", count: 7))
-        #expect(cells(layout.rows[2]) == Array(repeating: "_", count: 7))
-        #expect(cells(layout.rows[3]) == ["_", "_", "_", "_", "_", "▶", "⌫"])
+    @Test(".,-/ 연타 키 — 문자 키 표면, 길게 누르기 없음, 순서 . , - /")
+    func multiTapKey() throws {
+        let key = try #require(page(0).rows.flatMap { $0 }.first { if case .multiTap = $0.event { true } else { false } })
+        #expect(key.event == .multiTap([".", ",", "-", "/"]))
+        #expect(key.label == ".,-/")
+        #expect(!key.isFunctionKey, "문자 키 표면")
+        #expect(key.alternate == nil, "길게 누르기 없음")
     }
 
-    @Test("쿼티형 기호 55개가 전부 최소 한 번 — ~ ♡ ☆만 두 번 (수용 기준 3, 완전성 재정의)")
+    /// 새 배치(코디네이터 제안 그대로, 설계서 개정 이력) — 1페이지에 자주 쓰는 것과 VoiceOver 대체 경로(. , - /)
+    @Test("기호 페이지 — 4행, 1~3행 7×3 = 21칸, 4행 [페이지][가][🌐][␣ 2][⌫][⏎]", arguments: [
+        (1, [["~", "♡", "☆", "!", "?", ".", ","],
+             ["@", "#", "%", "&", "*", "+", "="],
+             ["-", "/", ":", ";", "(", ")", "₩"]]),
+        (2, [["[", "]", "{", "}", "^", "\"", "'"],
+             ["_", "\\", "|", "<", ">", "€", "£"],
+             ["¥", "•", "※", "★", "♥", "♪", "→"]]),
+        (3, [["←", "↑", "↓", "°", "±", "×", "÷"],
+             ["≠", "√", "∞", "·", "…", "✓", "_"],
+             ["_", "_", "_", "_", "_", "_", "_"]])
+    ])
+    func symbolPages(index: Int, expected: [[String]]) {
+        let layout = page(index)
+        #expect(layout.rows.count == 4, "page \(index) — 공유 하단 행이 없다")
+        #expect(Array(layout.rows.prefix(3).map(cells)) == expected)
+        #expect(cells(layout.rows[3]) == ["▶", "가", "🌐", "␣", "⌫", "⏎"])
+        #expect(widths(layout.rows[3]) == [1, 1, 1, 2, 1, 1])
+        #expect(rowSums(layout) == [7, 7, 7, 7])
+        let without = page(index, globe: false)
+        #expect(cells(without.rows[3]) == ["▶", "가", "␣", "⌫", "⏎"])
+        #expect(widths(without.rows[3]) == [1, 1, 3, 1, 1], "스페이스가 지구본 폭을 흡수 — 3칸")
+        #expect(rowSums(without) == [7, 7, 7, 7])
+    }
+
+    @Test("기호는 페이지당 21개 이하, 기능 키 5종(+지구본)은 4행에만")
+    func symbolCountAndFunctionKeys() {
+        for index in 1...3 {
+            let layout = page(index)
+            let symbols = layout.rows.flatMap { $0 }.filter { if case .character = $0.event { true } else { false } }
+            #expect(symbols.count <= 21, "page \(index)")
+            #expect(layout.rows.prefix(3).allSatisfy { row in row.allSatisfy { !$0.isFunctionKey || $0.event == .spacer } })
+            let bottom = layout.rows[3].map(\.event)
+            for event: KeyEvent in [.keypadPageNext, .symbols, .space, .backspace, .return] {
+                #expect(bottom.contains(event), "page \(index) — \(event)")
+            }
+        }
+    }
+
+    @Test("1페이지 필수 7개 — . , - / @ ? ! (VoiceOver는 연타가 어려워 여기서 친다)")
+    func firstPageEssentials() {
+        let labels = Set(page(1).rows.flatMap { $0 }.map(\.label))
+        for symbol in [".", ",", "-", "/", "@", "?", "!"] {
+            #expect(labels.contains(symbol), "\(symbol)")
+        }
+    }
+
+    @Test("쿼티형 기호 55개가 기호 3페이지에 전부 정확히 한 번 — 중복(~ ♡ ☆)은 없앴다")
     func catalogCompleteness() {
         func characters(_ layout: LayoutDefinition) -> [String] {
             layout.rows.flatMap { $0 }.compactMap { key in
@@ -483,30 +552,45 @@ struct KeypadLayoutTests {
         #expect(Set(qwerty).count == 55)
         let keypad = (1...3).flatMap { characters(page($0)) }
         #expect(Set(keypad) == Set(qwerty), "빠지거나 새로 생긴 기호가 없다")
-        var counts: [String: Int] = [:]
-        for symbol in keypad { counts[symbol, default: 0] += 1 }
-        #expect(counts.filter { $0.value == 2 }.keys.sorted() == ["~", "☆", "♡"].sorted())
-        #expect(counts.values.allSatisfy { $0 <= 2 })
-        #expect(characters(page(0)).sorted() == ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", ",", "-", ".", "/"].sorted())
+        #expect(keypad.count == 55, "중복 없음")
     }
 
-    @Test("5행은 쿼티형 기호 자판과 같은 공유 행 — ABC · 지구본 · 스페이스 · ⏎, 1~4행에는 지구본이 없다")
-    func sharedBottomRow() {
+    @Test("공유 하단 행이 어느 페이지에도 없다 — 문자 복귀·스페이스·⏎·⌫는 자판 격자 안에")
+    func noSharedBottomRow() {
         for index in 0..<4 {
-            let layout = page(index)
-            #expect(layout.rows[4] == LayoutDefinition.symbols.rows.last!, "page \(index)")
-            #expect(layout.rows[4].first?.label == "ABC" && layout.rows[4].first?.event == .symbols)
-            #expect(!layout.rows.dropLast().flatMap { $0 }.contains { $0.id == "globe" }, "page \(index) — 지구본 중복 없음")
+            for globe in [true, false] {
+                let layout = page(index, globe: globe)
+                #expect(layout.rows.count == 4, "page \(index)")
+                #expect(!layout.rows.contains(LayoutDefinition.symbols.rows.last!), "page \(index)")
+                #expect(layout.rows.dropLast().flatMap { $0 }.allSatisfy { $0.id != "globe" }, "지구본은 4행에만")
+                #expect(layout.rows.flatMap { $0 }.filter { $0.id == "globe" }.count == (globe ? 1 : 0))
+            }
         }
     }
 
-    @Test("지구본이 필요 없으면 5행만 다시 짠다 — 1~4행은 그대로 (수용 기준 8)")
-    func withoutGlobe() {
+    @Test("문자 복귀 키 라벨은 돌아갈 문자 모드 — 한글 「가」, 영어 「ABC」", arguments: [
+        (InputMode.hangul, "가"), (.english, "ABC")
+    ])
+    func letterReturnLabel(letterMode: InputMode, label: String) throws {
         for index in 0..<4 {
-            let with = page(index), without = page(index, globe: false)
-            #expect(Array(without.rows.dropLast()) == Array(with.rows.dropLast()))
-            #expect(without.rows.last!.map(\.id) == ["symbols", "space", "return"])
-            #expect(!without.rows.flatMap { $0 }.contains { $0.id == "globe" })
+            let layout = LayoutDefinition.layout(for: .keypadPad(page: index), hangulLayout: .dubeolsik,
+                                                 letterMode: letterMode)
+            let key = try #require(layout.rows.flatMap { $0 }.first { $0.event == .symbols })
+            #expect(key.label == label, "page \(index)")
+            #expect(key.isFunctionKey)
+        }
+        // 쿼티형 기호 자판의 「ABC」는 그대로다(범위 밖)
+        for mode in [InputMode.symbols, .symbolsAlternate] {
+            let qwerty = LayoutDefinition.layout(for: mode, hangulLayout: .dubeolsik, letterMode: letterMode)
+            #expect(qwerty.rows.flatMap { $0 }.first { $0.event == .symbols }?.label == "ABC")
+        }
+    }
+
+    @Test("쿼티형 기호 자판은 이번 개정과 무관 — 두 페이지 모두 5행과 공유 하단 행 그대로")
+    func qwertySymbolsUntouched() {
+        for layout in [LayoutDefinition.symbols, .symbolsAlternate] {
+            #expect(layout.rows.count == 5)
+            #expect(layout.rows.last?.map(\.id) == ["symbols", "globe", "space", "return"])
         }
     }
 

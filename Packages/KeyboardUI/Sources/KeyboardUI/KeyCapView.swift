@@ -99,6 +99,8 @@ struct KeyCapView: View {
             }
             .gesture(pressGesture)
             .accessibilityLabel(accessibilityName)
+            // 힌트는 연타 키에만 있다(나머지는 빈 문자열 = 읽지 않는다). 수식어만 — 표면 구조는 그대로다
+            .accessibilityHint(KeyCapAccessibility.hint(for: key) ?? "")
             .accessibilityAddTraits(.isKeyboardKey)
             // ★ 길게 누르기의 VoiceOver 대체 — 로터 「동작」에서 고른다(v1.2.0 출시 전 마무리 ②).
             //   **접근성 수식어만 더한다** — 액션 목록은 그려지는 뷰가 아니라서 누르는 도중 표면 구조가 바뀌지 않는다
@@ -285,22 +287,8 @@ struct KeyCapView: View {
         }
     }
 
-    private var accessibilityName: String {
-        switch key.event {
-        case .backspace: "지우기"
-        case .space: "스페이스"
-        case .return: key.symbol == "checkmark" ? "완료" : (label == "⏎" ? "리턴" : label)
-        case .shift: "시프트"
-        case .toggleLanguage: key.id == "globe" ? "다음 키보드" : "한영 전환"
-        case .symbols: label == "ABC" ? "문자 자판" : "기호"
-        case .symbolsAlternate: label == "123" ? "기호 첫 페이지" : "기호 더보기"
-        case .advance: "이동"
-        case .keypadPageNext: "다음 페이지"
-        case .keypadPagePrevious: "이전 페이지"
-        case .character: label
-        case .spacer: ""
-        }
-    }
+    /// VoiceOver 이름·힌트 — 표는 `KeyCapAccessibility` 한 곳(테스트가 고정한다)
+    private var accessibilityName: String { KeyCapAccessibility.name(for: key, label: label) }
 }
 
 
@@ -319,6 +307,41 @@ struct KeyCapView: View {
 ///
 /// 판정은 여기 한 곳이다 — `KeyCapAccessibilityTests`가 고정한다.
 enum KeyCapAccessibility {
+
+    /// VoiceOver가 읽는 키 이름. `label`은 **지금 보이는** 라벨(시프트 반영)이다.
+    ///
+    /// - 문자 복귀 키(`.symbols`) — 키패드형은 돌아갈 모드를 라벨로 보여 주므로(「가」/「ABC」, 2026-09-28 개정)
+    ///   **둘 다 「문자 자판」**이다. 문자 자판의 「123」만 「기호」.
+    /// - 연타 키(`.multiTap`) — 라벨 `.,-/`를 그대로 읽으면 「점 쉼표…」가 기호 낭독 설정에 따라 들쭉날쭉하다.
+    ///   글자마다 이름을 붙여 「마침표 쉼표 하이픈 슬래시」로 읽는다.
+    static func name(for key: LayoutDefinition.Key, label: String) -> String {
+        switch key.event {
+        case .backspace: "지우기"
+        case .space: "스페이스"
+        case .return: key.symbol == "checkmark" ? "완료" : (label == "⏎" ? "리턴" : label)
+        case .shift: "시프트"
+        case .toggleLanguage: key.id == "globe" ? "다음 키보드" : "한영 전환"
+        case .symbols: (label == "ABC" || label == "가") ? "문자 자판" : "기호"
+        case .symbolsAlternate: label == "123" ? "기호 첫 페이지" : "기호 더보기"
+        case .advance: "이동"
+        case .keypadPageNext: "다음 페이지"
+        case .keypadPagePrevious: "이전 페이지"
+        case .multiTap(let characters): characters.map { spokenNames[$0] ?? $0 }.joined(separator: " ")
+        case .character: label
+        case .spacer: ""
+        }
+    }
+
+    /// VoiceOver 힌트 — 연타 키에만. VoiceOver로는 연타(0.8초 안에 두 번 탭)가 어렵다는 것까지 알린다 —
+    /// 네 기호는 페이지 키 한 번 너머 기호 1페이지(2/4)에도 있다(`LayoutDefinition.keypadSymbolPages` 주석).
+    static func hint(for key: LayoutDefinition.Key) -> String? {
+        guard case .multiTap = key.event else { return nil }
+        return "빠르게 다시 누를 때마다 다음 기호로 바뀜. 네 기호는 다음 페이지에도 있음"
+    }
+
+    private static let spokenNames: [String: String] = [
+        ".": "마침표", ",": "쉼표", "-": "하이픈", "/": "슬래시"
+    ]
 
     struct AlternateAction: Equatable {
         /// 로터에 보이는 이름
