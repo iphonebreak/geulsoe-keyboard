@@ -70,6 +70,9 @@ final class KeyboardViewController: UIInputViewController {
     private var inputController: InputController?
     private var viewState: KeyboardViewState?
     private var snippetMatcher: SnippetMatcher?
+    /// 날짜·시간 채움글의 달력 — 그레고리력·`autoupdatingCurrent`·월요일 시작(PDR `date-snippet-pack.md` 4-5·4-6·6-2절).
+    /// 계산(파서)과 탭 시점 신선도 판정(`handleSnippetTap`)이 **같은 달력**을 쓴다.
+    private let dateSnippetCalendar = DateSnippetParser.makeCalendar()
     /// 추천단어 엔진. 익스텐션 프로세스 수명 동안 유지한다 — 매 등장마다 다시 만들면
     /// Full Access 없는 기기의 세션 학습이 필드 전환마다 날아간다.
     private var suggestionEngine: SuggestionEngine?
@@ -578,7 +581,12 @@ final class KeyboardViewController: UIInputViewController {
         snippetMatcher = SnippetMatcher(
             bible: disabled.contains(SnippetPack.bible) ? nil : bibleRepository,
             entries: entries,
-            biblePrefix: settings.bibleSnippetPrefixEnabled
+            biblePrefix: settings.bibleSnippetPrefixEnabled,
+            // 날짜·시간 팩 — 문구 JSON이 없는 **계산 팩**이다. 끄면 파서를 아예 싣지 않는다(세 갈래 전부 빠진다).
+            // 값은 미리 계산하지 않는다 — 매처가 적중한 순간 `now()`를 읽는다(PDR 1절).
+            dates: disabled.contains(SnippetPack.date)
+                ? nil
+                : DateSnippetParser(style: settings.dateSnippetStyle, calendar: dateSnippetCalendar)
         )
     }
 
@@ -613,9 +621,8 @@ final class KeyboardViewController: UIInputViewController {
         // 비밀번호 필드에서는 매칭·표시·학습 모두 하지 않는다 (보안 규칙)
         let secure = textDocumentProxy.isSecureTextEntry == true
 
-        let matched: SnippetSuggestion? = secure
-            ? nil
-            : snippetMatcher?.suggestion(forTail: inputController.textTail)
+        // secure 게이트는 매처 안에 있다 — 날짜 팩 수용 기준 8을 `swift test`로 잠그려고 옮겼다(규칙은 같다)
+        let matched = snippetMatcher?.suggestion(forTail: inputController.textTail, isSecureTextEntry: secure)
         // ✕로 내린 추천단어는 같은 단어를 이어 치는 동안(접두 유지) 다시 띄우지 않는다.
         // 해제 판정은 사용자 편집 때만 — 커서 이동으로 꼬리가 바뀐 것은 "이어 치기"가 아니다.
         let currentWord = inputController.currentWord
@@ -749,7 +756,12 @@ final class KeyboardViewController: UIInputViewController {
             )
         }
 
-        if viewState.snippetSuggestion != snippet { viewState.snippetSuggestion = snippet }
+        // 날짜 칩은 키마다 새로 계산돼 계산 시각(`computedAt`)만 바뀐다 — 내용이 같으면 다시 싣지 않는다
+        // (뷰 갱신 낭비 방지). 값이 같다 = 같은 분/일이라 옛 계산 시각으로도 신선도 판정은 같다.
+        if snippet.map({ !$0.hasSameContent(as: viewState.snippetSuggestion) })
+            ?? (viewState.snippetSuggestion != nil) {
+            viewState.snippetSuggestion = snippet
+        }
         if viewState.wordSuggestions != words { viewState.wordSuggestions = words }
         if viewState.bibleMatchCount != badgeCount { viewState.bibleMatchCount = badgeCount }
         if viewState.pasteSuggestion != chip {
@@ -918,6 +930,13 @@ final class KeyboardViewController: UIInputViewController {
     private func handleSnippetTap(_ suggestion: SnippetSuggestion) {
         guard let viewState, viewState.snippetSuggestion == suggestion else { return }
         viewState.snippetSuggestion = nil  // 애니메이션 중 재탭 차단
+        // ★ 날짜·시간 칩 — 탭하는 순간 **표시 단위(분/일)가 바뀌었으면 넣지 않고 칩을 갱신한다**
+        //   (PDR `date-snippet-pack.md` 7-2절). 「보여 준 값 = 넣는 값」을 지키려면 몰래 새 값을 넣지 않고
+        //   새 칩을 다시 보여 줘 사용자가 다시 누르게 한다. 문구·성경 칩은 계산 시각이 없어 여기를 지나친다.
+        if suggestion.isStale(at: Date(), calendar: dateSnippetCalendar) {
+            updateSuggestionBar()
+            return
+        }
         playToolbarHaptic()
         inputController?.insertSnippet(suggestion)
         refreshLayout()  // 삽입으로 꼬리가 바뀌면 자동 대문자 시프트가 바뀔 수 있다

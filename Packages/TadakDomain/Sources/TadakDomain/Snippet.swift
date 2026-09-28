@@ -92,6 +92,9 @@ public enum SnippetPack {
     public static let anthem = "anthem"
     /// 인사·상용구 — 명절 인사, 축하, 조의, 감사, 사과 (자체 작성 문구, 2026-09-07)
     public static let greetings = "greetings"
+    /// 날짜·시간 — 「오늘 날짜」·「3일 후 날짜」·「지금 시간」처럼 치면 **그 순간** 계산한 값 (v1.2.0).
+    /// 문구 JSON이 없는 **계산 팩**이다 — 매처의 `DateSnippetParser` 분기가 이 id로 켜지고 꺼진다.
+    public static let date = "date"
 }
 
 /// 채움글 목록 경계 — 내장 팩과 사용자 문구가 이 프로토콜로 합쳐진다.
@@ -216,6 +219,25 @@ public extension SnippetEntry {
     var hasCommaInTrigger: Bool {
         triggers.contains { $0.contains(",") }
     }
+
+    /// ★ 내장 **날짜·시간 팩과 겹칠 수 있는** 단축어인가 — 「날짜」·「시간」·「시각」으로 끝난다.
+    ///
+    /// 매처는 사용자 문구를 날짜 계산보다 **먼저** 본다(PDR `date-snippet-pack.md` 3-5절 —
+    /// 「사용자 문구 > 내장 팩」 원칙). 그래서 사용자가 `날짜`나 `오늘 날짜`를 자기 단축어로 등록하면
+    /// 내장 날짜 칩이 **가려진다.** 버그가 아니라 확정 동작이고, 대신 편집기가 **알린다** —
+    /// `hasCommaInTrigger`와 같은 자리·같은 톤이다. **저장은 막지 않는다.**
+    ///
+    /// 판정은 **정규화 기준**이다(`날 짜`로 쳐도 걸린다 — 매처가 띄어쓰기를 안 보므로).
+    /// 뷰가 **지금 입력 중인** 단축어로 부를 수 있게 목록을 받는 정적 함수로 둔다.
+    static func mayOverlapDateSnippets(_ triggers: [String]) -> Bool {
+        triggers.contains { trigger in
+            let normalized = Self.normalizedTrigger(trigger)
+            return Self.dateSnippetEndings.contains { normalized.hasSuffix($0) }
+        }
+    }
+
+    /// 날짜·시간 팩의 끝말 (PDR 3-1절). 매처(`DateSnippetParser`)의 끝말과 같아야 한다.
+    static let dateSnippetEndings = ["날짜", "시간", "시각"]
 
     /// 목록 `ForEach` 의 안정된 id. 단축어가 여럿이라 하나만 쓰면 서로 다른 항목이 같은 id 를
     /// 가질 수 있다. 정규화한 단축어를 이어 붙여 쓴다.

@@ -35,7 +35,7 @@ struct SnippetSettingsView: View {
             Section {
                 Toggle("채움글 사용", isOn: $settings.snippetsEnabled)
             } footer: {
-                Text("단축어를 치면 전문이 툴바 후보로 떠요. 예) \"창세기 1장 1절\", \"창 1:1\", \"애국가 1절\", \"새해인사\", \"헌법 전문\"")
+                Text("단축어를 치면 전문이 툴바 후보로 떠요. 예) \"창세기 1장 1절\", \"창 1:1\", \"애국가 1절\", \"새해인사\", \"헌법 전문\", \"오늘 날짜\"")
             }
 
             Section {
@@ -228,6 +228,28 @@ private struct SnippetEditorView: View {
         parsedTriggers.contains { $0.count > Self.triggerLimit }
             || parsedTriggers.count > Self.triggerCountLimit
     }
+    /// ★ 내장 날짜·시간 팩과 겹칠 수 있는 단축어인가 — **지금 입력 중인** 단축어로 본다
+    /// (PDR `date-snippet-pack.md` 3-5절). 사용자 문구가 날짜 계산보다 먼저라 그 칩을 가린다 —
+    /// 버그가 아니라 확정 동작이고, 쉼표 경고와 같은 자리·같은 톤으로 **알리기만** 한다(저장은 막지 않는다).
+    /// 판정 규칙은 도메인(`SnippetEntry.mayOverlapDateSnippets`)에 있다 — 여기 두면 테스트가 못 닿는다.
+    private var overlapsDateSnippets: Bool {
+        SnippetEntry.mayOverlapDateSnippets(parsedTriggers)
+    }
+
+    /// 쉼표 경고 문구 — 날짜 겹침 경고와 **함께** 뜰 수 있어 따로 뺐다(문구·근거는 그대로).
+    private var commaWarning: some View {
+        // 문구를 짧게 둔다 — 무슨 일이 일어나는지와 무엇을 하면 되는지만.
+        //
+        // ★ **「지우면 이 안내가 사라진다」를 약속하지 않는다** (v1.2.0 ⑩-3, 사장님 결정).
+        // 판정이 **불러온 원본** 기준이라(`loadedCommaTrigger`) 입력칸에서 쉼표를 지워도
+        // 이 안내는 그대로 남는다. 옛 문구 「하나로 두려면 쉼표를 지우세요」는 지운 뒤에도
+        // 안내가 남아 「안 먹혔나」로 읽혔다(`docs/release/verify-v110-8combo-final.md` G).
+        // 판정은 현재 입력 기준으로 바꾸지 않는다 — 그러면 정상적인 여러 단축어 입력
+        // (`우리집주소, 집주소`)에 **항상** 떠서 더 나쁘다. 그래서 문구를 **저장 결과** 중심으로 쓴다.
+        Text("이 단축어에 쉼표가 들어 있어요. 저장하면 쉼표를 기준으로 나뉘어요.\n"
+             + "쉼표를 지우고 저장하면 하나로 남아요.")
+            .foregroundStyle(.orange)
+    }
 
     var body: some View {
         NavigationStack {
@@ -243,18 +265,15 @@ private struct SnippetEditorView: View {
                     if tooLong {
                         Text("단축어는 하나에 \(Self.triggerLimit)자 이하, \(Self.triggerCountLimit)개까지예요.")
                             .foregroundStyle(.red)
-                    } else if loadedCommaTrigger {
-                        // 문구를 짧게 둔다 — 무슨 일이 일어나는지와 무엇을 하면 되는지만.
-                        //
-                        // ★ **「지우면 이 안내가 사라진다」를 약속하지 않는다** (v1.2.0 ⑩-3, 사장님 결정).
-                        // 판정이 **불러온 원본** 기준이라(`loadedCommaTrigger`) 입력칸에서 쉼표를 지워도
-                        // 이 안내는 그대로 남는다. 옛 문구 「하나로 두려면 쉼표를 지우세요」는 지운 뒤에도
-                        // 안내가 남아 「안 먹혔나」로 읽혔다(`docs/release/verify-v110-8combo-final.md` G).
-                        // 판정은 현재 입력 기준으로 바꾸지 않는다 — 그러면 정상적인 여러 단축어 입력
-                        // (`우리집주소, 집주소`)에 **항상** 떠서 더 나쁘다. 그래서 문구를 **저장 결과** 중심으로 쓴다.
-                        Text("이 단축어에 쉼표가 들어 있어요. 저장하면 쉼표를 기준으로 나뉘어요.\n"
-                             + "쉼표를 지우고 저장하면 하나로 남아요.")
-                            .foregroundStyle(.orange)
+                    } else if loadedCommaTrigger || overlapsDateSnippets {
+                        VStack(alignment: .leading, spacing: 6) {
+                            if loadedCommaTrigger { commaWarning }
+                            if overlapsDateSnippets {
+                                // 결과 중심으로 쓴다 — 무엇이 겹치고, 저장하면 어떻게 되는지
+                                Text("이 단축어는 내장 날짜·시간 기능과 겹칠 수 있어요. 저장하면 이 문구가 먼저 떠요.")
+                                    .foregroundStyle(.orange)
+                            }
+                        }
                     } else {
                         Text("쉼표(,)로 여러 개를 등록해요. 띄어쓰기는 달라도 돼요.")
                     }
@@ -335,7 +354,21 @@ struct SnippetPackInfo {
                 ("위로·기원", "쾌유기원 · 조의문 · 조문답례"),
                 ("감사·사과", "감사인사 · 사과문")
             ],
-            note: "\"새해인사\"처럼 붙여 쓰거나 \"새해 인사\"처럼 띄어 써도 돼요.")
+            note: "\"새해인사\"처럼 붙여 쓰거나 \"새해 인사\"처럼 띄어 써도 돼요."),
+        // ★ 날짜·시간 팩(v1.2.0, PDR `date-snippet-pack.md` 8절) — 문구 JSON이 없는 계산 팩이다.
+        //   **예시는 전부 끝말까지 친 완성형이다**(8-1절) — 「오늘」·「3일 후」처럼 끝말을 뺀 예시는
+        //   따라 쳐도 칩이 안 뜬다(반론자2). 전체 목록은 상세 화면의 펼침 목록(`DateSnippetCatalog`)에 있다.
+        SnippetPackInfo(
+            id: SnippetPack.date, name: "날짜·시간",
+            summary: "\"오늘 날짜\", \"3일 후 날짜\", \"지금 시간\"처럼 끝에 \"날짜\"나 \"시간\"을 붙여 치면, 치는 그 순간의 날짜·시각을 계산해 후보로 띄워요. 양력 기준이에요.",
+            usage: [
+                ("오늘 날짜", "어제 날짜 · 내일 날짜 · 모레 날짜 · 그저께 날짜 · 글피 날짜도 돼요"),
+                ("3일 후 날짜", "숫자 + 일·주·개월·년 + 후·뒤·전 — 2주 뒤 날짜, 10개월 전 날짜"),
+                ("다음주 금요일 날짜", "이번주 · 다음주 · 지난주 + 요일 — 한 주는 월요일부터"),
+                ("광복절 날짜", "양력 공휴일 8종 — 내년 광복절 날짜도 돼요"),
+                ("지금 시간", "지금 날짜 시간이면 날짜와 시각을 함께 넣어요")
+            ],
+            note: nil)
     ]
 }
 
@@ -418,6 +451,11 @@ struct SnippetPackDetailView: View {
                 }
             }
 
+            if pack.id == SnippetPack.date {
+                DateSnippetStylePicker(style: $settings.dateSnippetStyle)
+                    .disabled(!enabledBinding.wrappedValue)
+            }
+
             Section("설명") {
                 Text(pack.summary)
                     .font(.callout)
@@ -437,6 +475,10 @@ struct SnippetPackDetailView: View {
                 Text("사용법")
             } footer: {
                 Text("단축어를 커서 끝까지 치면 툴바에 칩이 떠요. 칩을 누르면 단축어가 전문으로 바뀌어요.")
+            }
+
+            if pack.id == SnippetPack.date {
+                DateSnippetCatalog()
             }
         }
         .settingsFormWidth()
@@ -467,5 +509,99 @@ struct SnippetPackDetailView: View {
                 }
             }
         )
+    }
+}
+
+
+// MARK: - 날짜·시간 팩 (v1.2.0, PDR `date-snippet-pack.md` 4·8절)
+
+/// 출력 형식 고르기 — 세 형식을 **실제 모양**으로 보여 준다.
+///
+/// ★ 예시 문자열은 키보드의 출력 지점(`KeyboardCore.DateSnippetFormatter`)과 **같은 모양이어야 한다.**
+/// 앱 타깃은 KeyboardCore를 링크하지 않아(의존성 추가는 이번 범위 밖) 여기 문자열로 적었다 —
+/// 형식을 바꾸면 이 예시도 함께 고친다. 기준 시각은 2026-09-27 21:54(PDR 4-1절 표와 같다).
+private struct DateSnippetStylePicker: View {
+
+    @Binding var style: DateSnippetStyle
+
+    var body: some View {
+        Section {
+            Picker("출력 형식", selection: $style) {
+                ForEach(DateSnippetStyle.allCases, id: \.self) { option in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(option.displayName)
+                        Text(Self.example(option))
+                            .font(.footnote.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    .tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } header: {
+            Text("출력 형식")
+        } footer: {
+            Text("규범형·관행형은 24시간, 한글형은 오전·오후로 써요. 초는 넣지 않아요.")
+        }
+    }
+
+    private static func example(_ style: DateSnippetStyle) -> String {
+        switch style {
+        case .formal: "2026. 9. 27. · 21:54"
+        case .common: "2026.09.27 · 21:54"
+        case .korean: "2026년 9월 27일 · 오후 9시 54분"
+        }
+    }
+}
+
+/// 날짜 팩 단축어 전체 — 접었다 펴는 4묶음(PDR 8-3절). **모든 예시는 끝말까지 친 완성형이다**(8-1절).
+///
+/// 키보드가 받는 어휘는 `KeyboardCore.DateSnippetParser`의 표가 SSOT다 — 거기에 더하면 여기도 더한다.
+private struct DateSnippetCatalog: View {
+
+    var body: some View {
+        Section {
+            DisclosureGroup("숫자 계산") {
+                row("5일 후 날짜 · 2주 뒤 날짜 · 10개월 전 날짜", "숫자 + 단위 + 방향 + 날짜")
+                row("숫자", "1~999, 또는 한·두·세·네·다섯·여섯·일곱·여덟·아홉·열 — 두 달 후 날짜")
+                row("날 수로", "하루 · 이틀 · 사흘 · 나흘 · 닷새 · 엿새 · 이레 · 여드레 · 아흐레 · 열흘 · 보름 · 일주일 — 사흘 뒤 날짜")
+                row("단위", "일 · 주(주일) · 개월(달) · 년(해)")
+                row("방향", "후 · 뒤 · 전 · 이전")
+                row("말일에서 달을 더하면", "그 달의 말일로 맞춰요 — 1월 31일에 1개월 후 날짜는 2월 28일")
+            }
+            DisclosureGroup("요일·월말") {
+                row("그저께 · 어제 · 오늘 · 내일 · 모레 · 글피 날짜", "글피는 모레의 다음 날")
+                row("이번주 · 다음주 · 지난주 + 월요일~일요일 날짜", "한 주는 월요일부터 일요일까지 — 다음주 금요일 날짜")
+                row("이번달 첫날 날짜 · 이번달 말일 날짜", "")
+                row("올해 마지막날 날짜", "연말 날짜라고 쳐도 같아요")
+                row("분기말 날짜", "지금이 속한 분기의 마지막 날")
+            }
+            DisclosureGroup("공휴일·기념일") {
+                row("신정 · 삼일절 · 어린이날 · 현충일 · 광복절 · 개천절 · 한글날 · 성탄절 날짜",
+                    "앞에 올해·내년을 붙일 수 있어요 — 내년 성탄절 날짜")
+                row("올해 날짜를 보여 줍니다", "올해 공휴일이 지난 뒤 다음 공휴일을 찾으려면 『내년 … 날짜』를 입력하세요")
+                row("후보 이름 옆 표시", "· 올해(아직 안 옴) · 지남(지났음) · 오늘 — 넣는 값에는 붙지 않아요")
+                row("양력만 돼요", "설날·추석 같은 음력 명절과 대체·임시공휴일은 없어요")
+            }
+            DisclosureGroup("시간") {
+                row("현재 시간 · 지금 시간 · 현재 시각 · 지금 시각", "시각만")
+                row("지금 날짜 시간 · 지금 날짜 시각", "날짜와 시각을 함께")
+                row("후보를 띄운 뒤 분이 바뀌면", "누를 때 새 시각으로 다시 떠요 — 한 번 더 누르세요")
+            }
+        } header: {
+            Text("단축어 전체")
+        }
+    }
+
+    private func row(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title)
+            if !detail.isEmpty {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }

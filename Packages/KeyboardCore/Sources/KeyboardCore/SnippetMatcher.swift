@@ -1,3 +1,4 @@
+import Foundation
 import TadakDomain
 
 /// 툴바 추천 칩 하나 — 탭하면 **단축어**를 지우고 본문을 넣는다.
@@ -12,15 +13,47 @@ public struct SnippetSuggestion: Equatable, Sendable {
     /// 붙여넣은 본문이 어느 절인지 보이게). **사용자가 친 단축어 원문을 그대로 되비춘다**
     /// (2026-09-14) — 정규 표기로 바꾸지 않는다. 문구 팩·사용자 문구는 nil.
     public let prefix: String?
+    /// 날짜 채움글이 값을 **계산한 시각** — 날짜 칩만 가진다(문구·성경은 nil).
+    public let computedAt: Date?
+    /// 날짜 채움글의 종류 — 탭 시점 신선도 판정의 단위(분/일)를 정한다. 문구·성경은 nil.
+    public let kind: DateSnippetKind?
 
     /// 문서 끝에서 지울 문자 수 — **꼬리 원문 기준**이다(정규화 길이가 아니다).
     public var triggerLength: Int { trigger.count }
 
-    public init(trigger: String, title: String, body: String, prefix: String? = nil) {
+    public init(
+        trigger: String, title: String, body: String, prefix: String? = nil,
+        computedAt: Date? = nil, kind: DateSnippetKind? = nil
+    ) {
         self.trigger = trigger
         self.title = title
         self.body = body
         self.prefix = prefix
+        self.computedAt = computedAt
+        self.kind = kind
+    }
+
+    /// ★ 탭하는 순간 **표시 단위가 바뀌었는가** — 바뀌었으면 넣지 않고 칩을 갱신한다
+    /// (PDR `date-snippet-pack.md` 7-2절, 사장님 결정).
+    ///
+    /// 칩을 띄운 뒤 5분 있다 탭하면 「보여 준 값 = 넣는 값」 원칙 때문에 5분 전 시각이 들어간다 —
+    /// 상한이 없다(반론자2). 몰래 새 값을 넣는 대신 **거절하고 새 칩을 다시 보여 준다.**
+    /// 날짜는 **일**, 시간이 들어가면 **분** 단위로 본다. 문구·성경 칩(계산 시각 없음)은 늘 신선하다.
+    ///
+    /// - Parameter calendar: 계산에 쓴 것과 같은 달력(`DateSnippetParser.makeCalendar()`)
+    public func isStale(at now: Date, calendar: Calendar) -> Bool {
+        guard let computedAt, let kind else { return false }
+        let granularity: Calendar.Component = kind == .dateOnly ? .day : .minute
+        return !calendar.isDate(now, equalTo: computedAt, toGranularity: granularity)
+    }
+
+    /// 계산 시각만 빼고 같은 칩인가 — 날짜 칩은 매 키 입력마다 새로 계산돼 `computedAt`만 바뀐다.
+    /// 조립 지점이 이것으로 **같은 칩을 다시 싣지 않는다**(뷰 갱신 낭비 방지). 값이 같다는 것은
+    /// 같은 분/일 안이라는 뜻이라 옛 계산 시각을 그대로 들고 있어도 신선도 판정이 바뀌지 않는다.
+    public func hasSameContent(as other: SnippetSuggestion?) -> Bool {
+        guard let other else { return false }
+        return trigger == other.trigger && title == other.title && body == other.body
+            && prefix == other.prefix && kind == other.kind
     }
 
     /// 실제로 문서에 들어가는 텍스트
@@ -29,7 +62,7 @@ public struct SnippetSuggestion: Equatable, Sendable {
 
 /// 입력 꼬리에서 채움글 **단축어**를 찾는다.
 ///
-/// 우선순위: 문구 목록(entries — 사용자 문구를 내장 팩보다 앞에 넣는다) > 성경 참조(단일 절·절 범위).
+/// 우선순위: 문구 목록(entries — 사용자 문구를 내장 팩보다 앞에 넣는다) > 날짜·시간(`dates`) > 성경 참조(단일 절·절 범위).
 /// 문구끼리 겹치면 **정규화 길이가 긴** 단축어가 이기고, 같으면 앞선 항목(=사용자)이 이긴다.
 /// 후보는 1건만 낸다 — 다중 후보는 Phase 5 추천단어 바에 합류할 때 확장한다 (PDR).
 ///
@@ -74,12 +107,17 @@ public struct SnippetMatcher: Sendable {
     /// 성경 후보 삽입 시 `[창세기 1장 1절] `(친 그대로) 머리말을 앞에 넣을지
     /// (설정 `bibleSnippetPrefixEnabled`, 2026-09-07)
     private let biblePrefix: Bool
+    private let dates: DateSnippetParser?
 
     /// - Parameter biblePrefix: 성경 머리말 여부 (기본 켬)
-    public init(bible: (any BibleVerseRepository)?, entries: [SnippetEntry], biblePrefix: Bool = true) {
+    public init(
+        bible: (any BibleVerseRepository)?, entries: [SnippetEntry], biblePrefix: Bool = true,
+        dates: DateSnippetParser? = nil
+    ) {
         self.bible = bible
         self.entries = entries
         self.biblePrefix = biblePrefix
+        self.dates = dates
         // 정규화는 **여기서 한 번만** 한다 (핫패스 규율).
         // 공백만으로 이뤄진 단축어와 빈 단축어는 아예 목록에 넣지 않는다 — 꼬리 어디에나
         // 맞아 버리는 것을 원천 차단한다.
@@ -99,6 +137,14 @@ public struct SnippetMatcher: Sendable {
                 : $0.entryIndex < $1.entryIndex                   // 같으면 앞선 엔트리
         }
         needles = built
+    }
+
+    /// ★ **secure 입력란이면 아무것도 매칭하지 않는다** — 문구·성경·날짜 전부(보안 규칙).
+    ///
+    /// 이 게이트는 원래 조립 지점(`KeyboardViewController.updateSuggestionBar`)의 삼항식에만 있어
+    /// `swift test`가 닿지 않았다(반론자1 — 날짜 팩 수용 기준 8). 같은 규칙을 여기로 옮겨 테스트로 잠근다.
+    public func suggestion(forTail tail: String, isSecureTextEntry: Bool) -> SnippetSuggestion? {
+        isSecureTextEntry ? nil : suggestion(forTail: tail)
     }
 
     public func suggestion(forTail tail: String) -> SnippetSuggestion? {
@@ -150,6 +196,13 @@ public struct SnippetMatcher: Sendable {
             return SnippetSuggestion(
                 trigger: String(characters[start...]),
                 title: entry.title, body: entry.body)
+        }
+
+        // 날짜·시간 팩 — **문구 다음, 성경 앞**(PDR `date-snippet-pack.md` 3-5절).
+        // 사용자 문구가 먼저라 「날짜」로 끝나는 사용자 단축어가 이긴다(확정 동작 — 편집기가 경고한다).
+        // 끝말(날짜·시간·시각)이 아니면 두어 번의 글자 비교로 끝난다. 값은 맞았을 때만 계산한다.
+        if let dates, let suggestion = dates.suggestion(characters: characters, reversed: reversed) {
+            return suggestion
         }
 
         if let bible,

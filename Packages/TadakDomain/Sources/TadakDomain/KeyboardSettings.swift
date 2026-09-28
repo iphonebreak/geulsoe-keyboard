@@ -66,6 +66,9 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     public var bibleSnippetPrefixEnabled: Bool
     /// 끈 내장 채움글 팩 id 목록 (`"bible"`, `"anthem"`). 옵트아웃이라 새 팩은 기본 켬.
     public var disabledSnippetPacks: [String]
+    /// 날짜·시간 채움글 팩의 출력 형식 (v1.2.0, PDR `date-snippet-pack.md` 4절). 기본 **규범형**.
+    /// 팩 켜기/끄기는 다른 팩과 같이 `disabledSnippetPacks`의 `"date"`로 한다.
+    public var dateSnippetStyle: DateSnippetStyle
 
     /// 성경 키워드 검색(툴바 배지 + 구절 패널). **기본값은 꺼짐**(사용자 결정 2026-09-19).
     ///
@@ -219,6 +222,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         snippetsEnabled: Bool = true,
         bibleSnippetPrefixEnabled: Bool = true,
         disabledSnippetPacks: [String] = [],
+        dateSnippetStyle: DateSnippetStyle = .formal,
         bibleSearchEnabled: Bool = false,
         defaultToolbarMode: ToolbarMode = .tools,
         enabledTools: [ToolbarTool] = ToolbarTool.allCases,
@@ -254,6 +258,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.snippetsEnabled = snippetsEnabled
         self.bibleSnippetPrefixEnabled = bibleSnippetPrefixEnabled
         self.disabledSnippetPacks = disabledSnippetPacks
+        self.dateSnippetStyle = dateSnippetStyle
         self.bibleSearchEnabled = bibleSearchEnabled
         self.defaultToolbarMode = defaultToolbarMode
         self.enabledTools = enabledTools
@@ -308,6 +313,8 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         snippetsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snippetsEnabled) ?? base.snippetsEnabled
         bibleSnippetPrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .bibleSnippetPrefixEnabled) ?? base.bibleSnippetPrefixEnabled
         disabledSnippetPacks = try container.decodeIfPresent([String].self, forKey: .disabledSnippetPacks) ?? base.disabledSnippetPacks
+        // 모르는 값(다음 버전이 형식을 더한 저장분)은 기본값으로 — 설정 전체가 디코딩 실패로 날아가면 안 된다
+        dateSnippetStyle = (try? container.decodeIfPresent(DateSnippetStyle.self, forKey: .dateSnippetStyle)) ?? base.dateSnippetStyle
         bibleSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .bibleSearchEnabled) ?? base.bibleSearchEnabled
         defaultToolbarMode = try container.decodeIfPresent(ToolbarMode.self, forKey: .defaultToolbarMode) ?? base.defaultToolbarMode
         // 도구 목록은 raw 문자열로 읽어 관대하게 매핑한다 (구 "cursor" → 왼쪽·오른쪽, 미지 값 무시)
@@ -517,6 +524,29 @@ public enum ToolbarTool: String, Codable, CaseIterable, Sendable {
 
 public enum Appearance: String, Codable, CaseIterable, Sendable {
     case system, light, dark
+}
+
+/// 날짜·시간 채움글의 출력 형식 (PDR `date-snippet-pack.md` 4-1절, 사장님 결정).
+///
+/// | | 날짜 | 시간 |
+/// |---|---|---|
+/// | `formal` 규범형(기본) | `2026. 9. 27.` | `21:54` |
+/// | `common` 관행형 | `2026.09.27` | `21:54` |
+/// | `korean` 한글형 | `2026년 9월 27일` | `오후 9시 54분` |
+///
+/// 규범·관행형은 24시간제, 한글형만 12시간제 — **기기의 12/24시간 설정은 읽지 않는다.**
+/// 문자열 조립은 KeyboardCore `DateSnippetFormatter` 한 곳뿐이다.
+public enum DateSnippetStyle: String, Codable, CaseIterable, Sendable {
+    case formal, common, korean
+
+    /// 설정 화면에 보이는 이름
+    public var displayName: String {
+        switch self {
+        case .formal: "규범형"
+        case .common: "관행형"
+        case .korean: "한글형"
+        }
+    }
 }
 
 public extension KeyboardSettings {
