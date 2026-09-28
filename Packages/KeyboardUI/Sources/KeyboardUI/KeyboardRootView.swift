@@ -697,10 +697,11 @@ struct KeyboardLayoutView: View {
     }
 
     private func rowView(_ row: [LayoutDefinition.Key], totalWidth: CGFloat) -> some View {
-        // 키 폭 계산은 `KeyboardMetrics.keyWidths` 한 곳 — 열 정렬(키패드·숫자 패드)과 **음수 방어**(첫 패스 폭 0 →
-        // `Invalid frame dimension`, 2026-09-09)가 거기 있다. 열 정렬이 꺼진 자판은 옛 식과 같은 폭이다(테스트 고정).
-        let widths = KeyboardMetrics.keyWidths(units: row.map(\.width), totalWidth: totalWidth,
-                                               alignsColumns: state.layout.alignsColumns)
+        // 키 폭 계산은 `KeyboardMetrics.keyWidths(row:in:totalWidth:)` 한 곳 — 열 정렬 여부는 **배열이 들고 있다**
+        // (`layout.alignsColumns`, 키패드·숫자 패드만). 여기서 boolean을 따로 넘기지 않는다(반론자2 M2 — 넘기던 시절엔 그 값을
+        // 바꿔도 테스트가 녹색이었다). **음수 방어**(첫 패스 폭 0 → `Invalid frame dimension`, 2026-09-09)도 그 함수에 있다.
+        // 그린 화면이 정말 정렬되는지는 `KeyboardRowRenderTests`가 픽셀로 본다.
+        let widths = KeyboardMetrics.keyWidths(row: row, in: state.layout, totalWidth: totalWidth)
         return HStack(spacing: KeyboardMetrics.keySpacing) {
             ForEach(Array(zip(row, widths)), id: \.0.id) { key, width in
                 keyView(key)

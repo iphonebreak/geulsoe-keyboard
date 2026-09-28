@@ -39,7 +39,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 기본 켬. 끄면 키 귀퉁이 힌트도 함께 사라진다.
     public var longPressSymbolsEnabled: Bool
     /// 숫자·기호 자판 모양 (v1.2.0, PDR `number-symbol-keypad.md`). **기본 쿼티형** — 기존 사용자는 그대로다.
-    /// 키패드형이면 「123」이 숫자 페이지(3×4 + 연타 키 `.,*/`·`+-`)로 들어가고 기호 3페이지까지 한 키로 순환한다.
+    /// 키패드형이면 「123」이 숫자 페이지(3×4 + 연타 키 `.,*/`·`-+`)로 들어가고 기호 3페이지까지 한 키로 순환한다.
     /// 문자 키 길게 누르기 기호는 **스타일과 무관하게** 쿼티형 기호 자판에서 파생된다.
     public var symbolKeyboardStyle: SymbolKeyboardStyle
 
@@ -551,7 +551,7 @@ public enum Appearance: String, Codable, CaseIterable, Sendable {
 /// | | 「123」을 누르면 | 페이지 |
 /// |---|---|---|
 /// | `qwerty` 쿼티형(기본) | 숫자 줄 + 기호 5행 | 123 ↔ #+= 두 페이지 |
-/// | `keypad` 키패드형 | 3×4 숫자 + 연타 키 `.,*/`·`+-` | 숫자 1 + 기호 3 = 4페이지, 한 키로 순환(탭 다음·길게 이전) |
+/// | `keypad` 키패드형 | 3×4 숫자 + 연타 키 `.,*/`·`-+` | 숫자 1 + 기호 3 = 4페이지, 한 키로 순환(탭 다음·길게 이전) |
 public enum SymbolKeyboardStyle: String, Codable, CaseIterable, Sendable {
     case qwerty, keypad
 

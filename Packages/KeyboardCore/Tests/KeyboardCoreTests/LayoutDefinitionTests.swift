@@ -455,7 +455,7 @@ struct KeypadLayoutTests {
         #expect(cells(layout.rows[0]) == ["1", "2", "3", "⌫"])
         #expect(cells(layout.rows[1]) == ["4", "5", "6", "⏎"])
         #expect(cells(layout.rows[2]) == ["7", "8", "9", ".,*/"])
-        #expect(cells(layout.rows[3]) == ["▶", "가", "0", "🌐", "␣", "+-"], "지구본은 스페이스의 반을 쓴다")
+        #expect(cells(layout.rows[3]) == ["▶", "가", "0", "🌐", "␣", "-+"], "지구본은 스페이스의 반을 쓴다")
         for row in layout.rows.prefix(3) { #expect(widths(row) == [1.75, 1.75, 1.75, 1.75]) }
         #expect(widths(layout.rows[3]) == [0.875, 0.875, 1.75, 0.875, 0.875, 1.75])
         #expect(rowSums(layout) == [7, 7, 7, 7])
@@ -464,7 +464,7 @@ struct KeypadLayoutTests {
     @Test("숫자 페이지 — 지구본이 필요 없으면 스페이스가 되찾아 9 밑 한 칸(1.75), +-는 .,*/ 밑 한 칸")
     func numberPageWithoutGlobe() {
         let layout = page(0, globe: false)
-        #expect(cells(layout.rows[3]) == ["▶", "가", "0", "␣", "+-"])
+        #expect(cells(layout.rows[3]) == ["▶", "가", "0", "␣", "-+"])
         #expect(widths(layout.rows[3]) == [0.875, 0.875, 1.75, 1.75, 1.75])
         #expect(rowSums(layout) == [7, 7, 7, 7])
         #expect(Array(layout.rows.prefix(3)) == Array(page(0).rows.prefix(3)), "1~3행은 그대로")
@@ -474,7 +474,7 @@ struct KeypadLayoutTests {
     func numberPageHasEverything() {
         let events = page(0).rows.flatMap { $0 }.map(\.event)
         for event: KeyEvent in [.backspace, .return, .space, .keypadPageNext, .symbols,
-                                .multiTap([".", ",", "*", "/"]), .multiTap(["+", "-"])] {
+                                .multiTap([".", ",", "*", "/"]), .multiTap(["-", "+"])] {
             #expect(events.contains(event), "\(event)")
         }
         let digits = events.compactMap { event -> String? in
@@ -487,13 +487,32 @@ struct KeypadLayoutTests {
     @Test("연타 키 둘 — .,*/ 와 +- : 문자 키 표면·22pt·길게 누르기 없음·id가 다르다")
     func multiTapKeys() throws {
         let keys = page(0).rows.flatMap { $0 }.filter { if case .multiTap = $0.event { true } else { false } }
-        #expect(keys.map(\.event) == [.multiTap([".", ",", "*", "/"]), .multiTap(["+", "-"])])
-        #expect(keys.map(\.label) == [".,*/", "+-"])
+        #expect(keys.map(\.event) == [.multiTap([".", ",", "*", "/"]), .multiTap(["-", "+"])],
+                "부호 키는 탭 `-`·연타 `+`(3차 개정 A안 — 하이픈이 가장 잦다)")
+        #expect(keys.map(\.label) == [".,*/", "-+"])
         #expect(Set(keys.map(\.id)).count == 2, "뷰가 id로 키를 가린다 — 같으면 안 된다")
         for key in keys {
             #expect(!key.isFunctionKey, "문자 키 표면")
             #expect(key.alternate == nil, "길게 누르기 없음")
             #expect(key.labelSize == 22)
+        }
+    }
+
+    /// 3차 개정(반론자 급소 ②): 한 칸짜리 스페이스는 라벨 `" "`뿐이라 `0` 옆 **빈 키**로 보였다 — 천지인이 이미 쓰는
+    /// `symbol: "space"`(␣ 아이콘)를 키패드 네 페이지 스페이스에 준다. 쿼티형 기호·문자 자판 스페이스는 그대로(넓어서 모양으로 알아본다)
+    @Test("키패드 네 페이지 스페이스는 ␣ 아이콘(symbol \"space\"), 다른 자판 스페이스는 그대로", arguments: [true, false])
+    func keypadSpaceHasIcon(globe: Bool) throws {
+        for index in 0..<4 {
+            let space = try #require(page(index, globe: globe).rows.flatMap { $0 }.first { $0.event == .space })
+            #expect(space.symbol == "space", "page \(index)")
+        }
+        for hangul in HangulLayout.allCases {
+            for mode in [InputMode.hangul, .english, .symbols, .symbolsAlternate] {
+                let layout = LayoutDefinition.layout(for: mode, hangulLayout: hangul, inputModeSwitchKey: globe)
+                let space = try #require(layout.rows.flatMap { $0 }.first { $0.event == .space })
+                let expected: String? = (mode == .hangul && hangul == .cheonjiin) ? "space" : nil
+                #expect(space.symbol == expected, "\(mode) \(hangul) — 불변")
+            }
         }
     }
 

@@ -312,8 +312,8 @@ enum KeyCapAccessibility {
     ///
     /// - 문자 복귀 키(`.symbols`) — 키패드형은 돌아갈 모드를 라벨로 보여 주므로(「가」/「ABC」, 2026-09-28 개정)
     ///   **둘 다 「문자 자판」**이다. 문자 자판의 「123」만 「기호」.
-    /// - 연타 키(`.multiTap`) — 라벨 `.,*/`·`+-`를 그대로 읽으면 기호 낭독 설정에 따라 들쭉날쭉하다. 글자마다 이름을 붙여
-    ///   「마침표 쉼표 별표 슬래시」·「더하기 하이픈」으로 읽는다. 이름은 **애플 VoiceOver가 그 글자를 읽는 말** 그대로다
+    /// - 연타 키(`.multiTap`) — 라벨 `.,*/`·`-+`를 그대로 읽으면 기호 낭독 설정에 따라 들쭉날쭉하다. 글자마다 이름을 붙여
+    ///   **연타 순서대로** 「마침표 쉼표 별표 슬래시」·「하이픈 더하기」로 읽는다. 이름은 **애플 VoiceOver가 그 글자를 읽는 말** 그대로다
     ///   (macOS `ScreenReader.framework` 음성 출력 표 `SCROutputSpeechComponent.loctable` ko: `+` 더하기 · `-`(U+002D) 하이픈 ·
     ///   `*` 별표 — 「빼기」는 U+2212 마이너스 기호의 이름이고 이 키는 U+002D를 넣는다). 입력 뒤 되읽는 말과 같아야 헷갈리지 않는다.
     static func name(for key: LayoutDefinition.Key, label: String) -> String {
@@ -336,7 +336,7 @@ enum KeyCapAccessibility {
 
     /// VoiceOver 힌트 — 연타 키에만. VoiceOver로는 연타(0.8초 안에 두 번 탭)가 어렵다는 것까지 알린다 —
     /// 연타 키의 기호는 전부 페이지 키 한 번 너머 기호 1페이지(2/4)에도 있다(`LayoutDefinitionTests`가 고정).
-    /// 키마다 글자 수가 달라(`.,*/` 넷, `+-` 둘) 개수는 말하지 않는다.
+    /// 키마다 글자 수가 달라(`.,*/` 넷, `-+` 둘) 개수는 말하지 않는다.
     static func hint(for key: LayoutDefinition.Key) -> String? {
         guard case .multiTap = key.event else { return nil }
         return "빠르게 다시 누를 때마다 다음 기호로 바뀜. 이 기호들은 다음 페이지에도 있음"

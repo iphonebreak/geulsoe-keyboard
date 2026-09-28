@@ -37,20 +37,31 @@ public enum KeyboardMetrics {
 
     // MARK: - 계산
 
-    /// 한 행의 키 폭(pt) — `KeyboardLayoutView.rowView`가 쓰고 테스트가 고정한다. 키는 `HStack(spacing: keySpacing)`으로 놓인다.
+    /// 한 행의 키 폭(pt) — **화면(`KeyboardLayoutView.rowView`)이 쓰는 유일한 함수**다. 키는 `HStack(spacing: keySpacing)`으로 놓인다.
+    ///
+    /// 열 정렬 여부는 **배열(`layout.alignsColumns`)이 정한다** — 화면은 따로 boolean을 끼우지 않는다. 예전에는 `rowView`가
+    /// `alignsColumns:` 인자를 넘겨서, 그 인자를 `false`로 바꿔도 테스트가 전부 녹색이었다(3차 개정, 반론자2 변이 M2).
+    /// 그린 화면이 이 함수를 쓰는지는 `KeyboardRowRenderTests`가 픽셀로 본다.
+    public static func keyWidths(row: [LayoutDefinition.Key], in layout: LayoutDefinition,
+                                 totalWidth: CGFloat) -> [CGFloat] {
+        keyWidths(units: row.map(\.width), totalWidth: totalWidth, alignsColumns: layout.alignsColumns)
+    }
+
+    /// 위 함수의 계산부 — 밖에서 boolean을 골라 부르지 못하게 감춘다.
     ///
     /// - `alignsColumns == false`(기본 — 두벌식·쿼티·천지인·단모음·쿼티형 기호): **옛 식 그대로**. 행마다 `간격 × (키 수 − 1)`을
     ///   먼저 빼고 남은 폭을 단위 비율로 나눈다. 키 수가 다른 행끼리는 경계가 조금씩 어긋나지만, 이 자판들의 키 폭을
     ///   바꾸는 것은 요청받지 않은 변화라 그대로 둔다.
     /// - `alignsColumns == true`(키패드 4페이지·자동 숫자 패드 — `LayoutDefinition.alignsColumns`): 키마다
     ///   **자리 = (W + 간격) × 단위 ÷ 행 단위 합**, 키 폭 = 자리 − 간격. 키 수와 무관하게 **같은 단위 경계가 같은 x**에 온다 —
-    ///   반 칸 둘이 한 칸과 정확히 맞물려 숫자 4행의 `0`이 위 `2 5 8` 열에 선다(옛 식은 간격 하나 5pt만큼 오른쪽으로 밀렸다,
-    ///   사장님 폰 세션 4-1 2차 2026-09-28). 키 폭 합 + 간격 합 = W 그대로다.
+    ///   반 칸 둘이 한 칸과 정확히 맞물려 숫자 4행의 `0`이 위 `2 5 8` 열에 선다(사장님 폰 세션 4-1 2차 2026-09-28). 키 폭 합 +
+    ///   간격 합 = W 그대로다. 옛 식에서 밀린 양은 **배치마다 다르다**(반론자2 계산): 1차 숫자 4행 지구본 없음 왼쪽 **+5pt**
+    ///   (@3x 15px — 사장님 폰), 지구본 있음 왼쪽 +3.75pt(중심 +3.125pt), 자동 숫자 패드(지구본 있음) 왼쪽 +3⅓pt.
     ///
     /// **음수 방어**: 등장 첫 레이아웃 패스에서는 `totalWidth`가 0으로 온다. 그대로 계산하면 음수 폭이 SwiftUI로 들어가
     /// `Invalid frame dimension`을 수십 줄 뱉고 자판이 빈 회색으로 떴다(2026-09-09) — 두 방식 모두 0으로 눌러 둔다.
     /// 폭이 확정되면 다음 패스에서 제대로 그려진다.
-    public static func keyWidths(units: [Double], totalWidth: CGFloat, alignsColumns: Bool) -> [CGFloat] {
+    private static func keyWidths(units: [Double], totalWidth: CGFloat, alignsColumns: Bool) -> [CGFloat] {
         let totalUnits = units.reduce(0, +)
         guard totalUnits > 0 else { return units.map { _ in 0 } }
         if alignsColumns {

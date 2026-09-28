@@ -993,7 +993,8 @@ struct InputControllerKeypadTests {
     /// 숫자 페이지의 두 연타 키 — 2차 개정(폰 세션 4-1 2차)에서 `-`가 `+-` 키로 옮겨 가고 그 자리에 `*`가 들어왔다.
     /// 연타 규칙은 키와 무관하다(`InputController`는 글자 목록만 본다) — 아래 테스트는 대부분 `.,*/`로 규칙을 고정한다
     private static let cycle: KeyEvent = .multiTap([".", ",", "*", "/"])
-    private static let sign: KeyEvent = .multiTap(["+", "-"])
+    /// 부호 키 — 3차 개정(반론 뒤 사장님 결정 A안)에서 `+-` → **`-+`**: 탭 = `-`(가장 잦은 기호), 연타 = `+`
+    private static let sign: KeyEvent = .multiTap(["-", "+"])
 
     /// 숫자 페이지에 들어가 `12`를 친 상태 — 시계는 손으로 넘긴다
     private func multiTapSetup() -> (RecordingOutput, InputController, (TimeInterval) -> Void) {
@@ -1137,7 +1138,7 @@ struct InputControllerKeypadTests {
         #expect(!output.operations.suffix(2).contains(.delete(1)), "다른 글자를 지우지 않는다")
     }
 
-    @Test("+- 연타 — + → - → +, 꼬리는 문서와 같다(로직 추가 없이 데이터만)")
+    @Test("-+ 연타 — - → + → -, 꼬리는 문서와 같다(로직 추가 없이 데이터만)")
     func signKeyCycles() {
         let (output, controller, advance) = multiTapSetup()
         var seen: [String] = []
@@ -1147,7 +1148,7 @@ struct InputControllerKeypadTests {
             seen.append(output.text)
             #expect(controller.textTail == output.text)
         }
-        #expect(seen == ["12+", "12-", "12+"])
+        #expect(seen == ["12-", "12+", "12-"])
     }
 
     @Test("연타 키 둘은 서로의 글자를 바꾸지 않는다 — 다른 키면 새로 넣는다")
@@ -1155,12 +1156,12 @@ struct InputControllerKeypadTests {
         let (output, controller, advance) = multiTapSetup()
         controller.handle(Self.cycle)               // 12.
         advance(0.1)
-        controller.handle(Self.sign)                // 12.+ — 「.」를 「+」로 바꾸지 않는다
+        controller.handle(Self.sign)                // 12.- — 「.」를 「-」로 바꾸지 않는다
         advance(0.1)
-        controller.handle(Self.sign)                // 12.-
+        controller.handle(Self.sign)                // 12.+
         advance(0.1)
-        controller.handle(Self.cycle)               // 12.-.
-        #expect(output.text == "12.-.")
+        controller.handle(Self.cycle)               // 12.+. — 「+」를 「.」로 바꾸지 않는다
+        #expect(output.text == "12.+.")
         #expect(controller.textTail == output.text)
     }
 
@@ -1202,15 +1203,17 @@ struct InputControllerKeypadTests {
     }
 
     /// 2026-09-28 개정(연타 키): `-`가 연타 3번이라 「010-1234」가 9 → 11탭이 됐다가, 2차 개정에서 `-`가 `+-` 키의
-    /// 두 번째로 옮겨 **10탭**이 됐다. `.`·`+`는 1탭, `*`는 3탭, `/`는 4탭이다
+    /// 두 번째로 옮겨 10탭, **3차 개정(`-+`, 반론 뒤 A안)에서 `-`가 첫 탭이 되어 9탭** — 원판과 같다.
+    /// `.`·`-`는 1탭, `+`는 2탭, `*`는 3탭, `/`는 4탭이다. 전화번호 「010-1234-5678」은 16 → 14탭(반론자 표와 같다)
     @Test("대표 입력 — 탭 수와 페이지 넘김이 설계서 표와 같다", arguments: [
         ("12.5", 5, 0),
-        ("010-1234", 10, 0),
+        ("010-1234", 9, 0),
+        ("010-1234-5678", 14, 0),
         ("2026. 9. 27.", 13, 0),
         ("12/3", 8, 0),
         ("2*3", 6, 0),
-        ("+82", 4, 0),
-        ("-5", 4, 0),
+        ("+82", 5, 0),
+        ("-5", 3, 0),
         ("(~♡", 5, 1)
     ])
     func representativeInputs(text: String, taps: Int, pageTurns: Int) {

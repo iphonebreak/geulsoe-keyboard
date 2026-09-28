@@ -70,7 +70,7 @@ public final class InputController {
     /// 마지막 키가 스페이스였을 때 그 시각. 다른 입력이 끼면 nil.
     private var lastSpaceTimestamp: TimeInterval?
 
-    /// 연타 키(`KeyEvent.multiTap` — 키패드 숫자 페이지의 `.,*/`·`+-`) 인정 시간. **설정이 아닌 상수**다 —
+    /// 연타 키(`KeyEvent.multiTap` — 키패드 숫자 페이지의 `.,*/`·`-+`) 인정 시간. **설정이 아닌 상수**다 —
     /// 천지인 연타 기본값(`KeyboardSettings.cheonjiinTimeout` 0.8초)과 같은 감각으로 맞췄다. 천지인 설정을 따라가게
     /// 묶지 않은 이유: 그 슬라이더는 천지인일 때만 보이고, 이 키는 자판 종류와 무관하게 키패드형에만 있다.
     private let multiTapTimeout: TimeInterval = 0.8

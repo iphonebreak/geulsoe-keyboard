@@ -57,7 +57,7 @@ struct KeyCapAccessibilityNameTests {
     /// 키 이름을 입력 뒤 되읽는 말과 맞춰야 「더하기 빼기」를 눌렀는데 「하이픈」이 들어간 것처럼 들리지 않는다.
     @Test("연타 키 둘 — 애플 VoiceOver의 글자 이름으로 읽고, 힌트로 연타를 알린다", arguments: [
         ([".", ",", "*", "/"], "마침표 쉼표 별표 슬래시"),
-        (["+", "-"], "더하기 하이픈")
+        (["-", "+"], "하이픈 더하기")
     ])
     func multiTapKey(characters: [String], name: String) throws {
         let layout = LayoutDefinition.layout(for: .keypadPad(page: 0), hangulLayout: .dubeolsik)
@@ -65,7 +65,7 @@ struct KeyCapAccessibilityNameTests {
         #expect(KeyCapAccessibility.name(for: key, label: key.label) == name)
         let hint = try #require(KeyCapAccessibility.hint(for: key))
         #expect(hint.contains("다음 기호"))
-        #expect(!hint.contains("네 기호"), "+-는 두 글자다 — 개수를 말하지 않는다")
+        #expect(!hint.contains("네 기호"), "-+는 두 글자다 — 개수를 말하지 않는다")
     }
 
     @Test("문자 복귀 키 — 「가」도 「ABC」도 「문자 자판」, 「123」은 「기호」", arguments: [
