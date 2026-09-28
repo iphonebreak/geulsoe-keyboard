@@ -72,6 +72,18 @@ public struct LayoutDefinition: Equatable, Sendable {
 
     public let rows: [[Key]]
 
+    /// **열 정렬** — 참이면 UI가 키 폭을 **단위 자리(slot)**로 나눠, 키 수가 다른 행끼리도 같은 단위 경계가 같은 x에 온다
+    /// (`KeyboardMetrics.keyWidths`). 반 칸 둘로 시작하는 키패드 숫자 4행의 `0`이 위 `2 5 8`보다 간격 하나만큼 밀리던 버그
+    /// (사장님 폰 세션 4-1 2차, 2026-09-28)의 수정이다. **키패드 4페이지와 자동 숫자 패드만** 켠다 — 다른 자판에 켜면
+    /// 두벌식·쿼티 하단 행 등의 키 폭이 몇 pt씩 바뀐다(요청하지 않은 변화). 모든 변환(`removingGlobe`·`replacingPunctuation`·
+    /// `addingLongPressSymbols`·숫자 줄·라벨 교체)이 이 값을 그대로 넘긴다(테스트 고정).
+    public let alignsColumns: Bool
+
+    init(rows: [[Key]], alignsColumns: Bool = false) {
+        self.rows = rows
+        self.alignsColumns = alignsColumns
+    }
+
     /// 이 자판의 **기준 열 수** — 폭 상한과 행 높이를 여기서 되짚는다.
     ///
     /// 행마다 폭 합이 다르다: 두벌식 `10 / 9 / 9.8 / 9.6`, 단모음 `8 / 8 / 8 / 9.6`,
@@ -261,8 +273,8 @@ public struct LayoutDefinition: Equatable, Sendable {
     public static let keypadPages: [LayoutDefinition] = [keypadNumberPage] + keypadSymbolPages
 
     /// 숫자 페이지 — **삼성 3×4 숫자 배열**(4행 4열, 아래 줄 없음):
-    /// `1 2 3 ⌫` / `4 5 6 ⏎` / `7 8 9 .,-/` / `[페이지½][가½][0][🌐½][␣]`.
-    /// `. , - /`는 **연타 키 하나**다(`KeyEvent.multiTap`) — 탭 `.`, 연타 `, - /`. VoiceOver 사용자는 연타가 어려워
+    /// `1 2 3 ⌫` / `4 5 6 ⏎` / `7 8 9 .,*/` / `[페이지½][가½][0][␣][+-]`(지구본이 필요하면 스페이스의 반 — `[🌐½][␣½]`).
+    /// `. , * /`와 `+ -`는 각각 **연타 키 하나**다(`KeyEvent.multiTap`) — 탭 `.`·`+`, 연타로 다음 글자. VoiceOver 사용자는 연타가 어려워
     /// 네 기호가 **기호 1페이지에도** 있다. 자동 숫자 패드(`numberPad(_:)`, 숫자 전용 입력란)와는 **별개**다.
     public static let keypadNumberPage: LayoutDefinition = {
         func key(_ character: String) -> Key {
@@ -271,20 +283,25 @@ public struct LayoutDefinition: Equatable, Sendable {
         return LayoutDefinition(rows: [
             ["1", "2", "3"].map(key) + [backspaceKey(width: 1.75)],
             ["4", "5", "6"].map(key) + [returnKey(width: 1.75)],
-            ["7", "8", "9"].map(key) + [keypadMultiTapKey],
-            // 반 칸 둘 + 0 + (지구본 반 칸) + 스페이스 = 7. 지구본이 빠지면 스페이스가 3.5가 된다
+            ["7", "8", "9"].map(key) + [keypadPunctuationCycleKey],
+            // 반 칸 둘 + 0 + 스페이스(9 밑 한 칸) + `+-`(`.,*/` 밑 한 칸) = 7. 지구본이 필요하면 **스페이스의 반**을 쓴다 —
+            // 빠지면 `removingGlobe()`가 스페이스로 되돌려 1.75가 된다(2026-09-28 2차 개정 — 「스페이스바가 너무 크다」)
             [keypadPageKey(page: 0, width: 0.875), keypadLetterKey(width: 0.875), key("0"),
-             keypadGlobeKey(width: 0.875), keypadSpaceKey(width: 2.625)]
-        ])
+             keypadGlobeKey(width: 0.875), keypadSpaceKey(width: 0.875), keypadSignCycleKey]
+        ], alignsColumns: true)
     }()
 
-    /// `.,-/` 연타 키 — 문자 키 표면, 길게 누르기 없음. 라벨은 숫자 키와 같은 22pt(`labelSize`) —
-    /// 두지 않으면 다문자 라벨 규칙(15pt)을 타서 넓은 키에 작게 박힌다
-    private static let keypadMultiTapKey = Key(
-        id: "kp-multitap", label: ".,-/", event: .multiTap([".", ",", "-", "/"]), width: 1.75, labelSize: 22)
+    /// 연타 키 둘 — 문자 키 표면, 길게 누르기 없음. 라벨은 숫자 키와 같은 22pt(`labelSize`) — 두지 않으면 다문자 라벨
+    /// 규칙(15pt)을 타서 넓은 키에 작게 박힌다. **id가 달라야 한다**(뷰가 id로 키를 가린다).
+    /// 2026-09-28 2차 개정(사장님 원문 「,.-/에는 '-'을빼고 '*'을 넣자」): `.,-/` → `.,*/`, `-`는 새 `+-` 키로.
+    /// 연타 규칙은 `InputController`가 글자 목록만 보고 돌린다 — 키를 더해도 로직은 그대로다.
+    private static let keypadPunctuationCycleKey = Key(
+        id: "kp-cycle-punct", label: ".,*/", event: .multiTap([".", ",", "*", "/"]), width: 1.75, labelSize: 22)
+    private static let keypadSignCycleKey = Key(
+        id: "kp-cycle-sign", label: "+-", event: .multiTap(["+", "-"]), width: 1.75, labelSize: 22)
 
     /// 기호 3페이지 — 1~3행 7×3 = **21칸**, 4행은 `[페이지][가][🌐][␣ 2][⌫][⏎]`.
-    /// 1페이지는 자주 쓰는 것과 `. , - / @ ? !`(숫자 페이지 연타 키의 VoiceOver 대체 경로)를 모았고,
+    /// 1페이지는 자주 쓰는 것과 `. , * / + - @ ? !`(숫자 페이지 연타 키 둘의 VoiceOver 대체 경로)를 모았고,
     /// 쿼티형 기호 55개를 **정확히 한 번씩** 담는다(예전 2페이지의 `~ ☆ ♡` 중복은 뺐다 — 1페이지에 있다).
     /// 3페이지는 남은 13개 뒤를 빈칸으로 둔다(실사용 데이터 없이 채우지 않는다 — PDR 2-2절).
     static let keypadSymbolPages: [LayoutDefinition] = [
@@ -320,7 +337,7 @@ public struct LayoutDefinition: Equatable, Sendable {
             Array(keys[14..<21]),
             [keypadPageKey(page: page, width: 1), keypadLetterKey(width: 1), keypadGlobeKey(width: 1),
              keypadSpaceKey(width: 2), backspaceKey(width: 1), returnKey(width: 1)]
-        ])
+        ], alignsColumns: true)
     }
 
     /// 페이지 키 — 탭 = 다음, 길게 = 이전. 라벨은 **지금 페이지와 다음 방향**(`1/4 ▶`, 반론자2 — 이전을 모르고
@@ -377,7 +394,7 @@ public struct LayoutDefinition: Equatable, Sendable {
                 digit("0"),
                 backspaceKey()
             ]
-        ])
+        ], alignsColumns: true)
     }
 
     /// ⇧ — 표면은 SF Symbol `shift`. UI가 시프트 상태에 따라 `shift.fill`(once)·`capslock.fill`(캡스락)로 바꿔 그린다
@@ -495,7 +512,7 @@ public struct LayoutDefinition: Equatable, Sendable {
             // 단모음이 그 사례다: 1행 잔여 `+ =`가 누적되면 3행 빈 자리를 `+`가 가져가고 `@`는 또 버려진다.
             carry = overflowStart < symbols.count ? Array(symbols[overflowStart...]) : []
         }
-        return LayoutDefinition(rows: rows)
+        return LayoutDefinition(rows: rows, alignsColumns: alignsColumns)
     }
 
     /// 모드에 맞는 자판을 고른다. 한글 자판은 활성 배열에 따라 달라진다.
@@ -542,7 +559,7 @@ public struct LayoutDefinition: Equatable, Sendable {
         // 키패드형도 제외 — 숫자 페이지가 따로 있고, 기호 페이지 위에 숫자 줄이 붙으면 6행이 된다(PDR 4-4절)
         guard numberRow, !mode.isSymbols, !mode.isNumberPad, !mode.isKeypadPad,
               !(mode == .hangul && hangulLayout == .cheonjiin) else { return base }
-        return LayoutDefinition(rows: [numberRowKeys] + base.rows)
+        return LayoutDefinition(rows: [numberRowKeys] + base.rows, alignsColumns: base.alignsColumns)
     }
 
     /// 지구본 키를 빼고 그 자리를 이웃이 채운 배열 — 시스템이 지구본을 요구하지 않는 환경
@@ -576,14 +593,14 @@ public struct LayoutDefinition: Equatable, Sendable {
             let absorber = bottom.firstIndex(where: { $0.event == .space }) ?? max(globeIndex - 1, 0)
             bottom[absorber] = bottom[absorber].resized(width: bottom[absorber].width + globe.width)
         }
-        return LayoutDefinition(rows: Array(rows.dropLast()) + [bottom])
+        return LayoutDefinition(rows: Array(rows.dropLast()) + [bottom], alignsColumns: alignsColumns)
     }
 
     /// 문자 복귀 키(`.symbols`)의 라벨만 바꾼 배열 — 키패드형이 영어로 돌아갈 때 「ABC」
     private func relabelingLetterReturn(_ label: String) -> LayoutDefinition {
         LayoutDefinition(rows: rows.map { row in
             row.map { $0.event == .symbols ? $0.relabeled(label: label, symbol: $0.symbol) : $0 }
-        })
+        }, alignsColumns: alignsColumns)
     }
 
     /// 문장부호 키의 내용을 입력란 종류에 맞게 바꾼 배열 (이메일 `@`/`.`, 주소 `.`/`.com`).
@@ -593,7 +610,7 @@ public struct LayoutDefinition: Equatable, Sendable {
         for (rowIndex, row) in rows.enumerated() {
             if let index = row.firstIndex(where: { $0.id == "punct" }) {
                 rows[rowIndex][index] = Self.punctuationKey(spec, width: row[index].width, labelSize: row[index].labelSize)
-                return LayoutDefinition(rows: rows)
+                return LayoutDefinition(rows: rows, alignsColumns: alignsColumns)
             }
         }
         return self

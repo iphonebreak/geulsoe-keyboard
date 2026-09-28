@@ -697,18 +697,14 @@ struct KeyboardLayoutView: View {
     }
 
     private func rowView(_ row: [LayoutDefinition.Key], totalWidth: CGFloat) -> some View {
-        let totalUnits = row.reduce(0) { $0 + $1.width }
-        let spacing = KeyboardMetrics.keySpacing
-        // **음수 방어.** 등장 첫 레이아웃 패스에서는 `geometry.size.width`가 0으로 온다.
-        // 그때 `0 − 5 × 9 = −45`가 키 폭으로 들어가 SwiftUI가
-        // `Invalid frame dimension (negative or non-finite)`를 수십 줄 뱉고 자판이 빈 회색으로 떴다
-        // (전체 접근을 켠 직후 등장에서 재현, 2026-09-09 — 검증자가 두 번 목격한 증상).
-        // 폭이 확정되면 다음 패스에서 제대로 그려지므로, 여기서는 0으로 눌러 두기만 하면 된다.
-        let available = max(0, totalWidth - spacing * CGFloat(max(0, row.count - 1)))
-        return HStack(spacing: spacing) {
-            ForEach(row) { key in
+        // 키 폭 계산은 `KeyboardMetrics.keyWidths` 한 곳 — 열 정렬(키패드·숫자 패드)과 **음수 방어**(첫 패스 폭 0 →
+        // `Invalid frame dimension`, 2026-09-09)가 거기 있다. 열 정렬이 꺼진 자판은 옛 식과 같은 폭이다(테스트 고정).
+        let widths = KeyboardMetrics.keyWidths(units: row.map(\.width), totalWidth: totalWidth,
+                                               alignsColumns: state.layout.alignsColumns)
+        return HStack(spacing: KeyboardMetrics.keySpacing) {
+            ForEach(Array(zip(row, widths)), id: \.0.id) { key, width in
                 keyView(key)
-                    .frame(width: totalUnits > 0 ? available * CGFloat(key.width) / CGFloat(totalUnits) : 0)
+                    .frame(width: width)
             }
         }
         .frame(maxWidth: .infinity)

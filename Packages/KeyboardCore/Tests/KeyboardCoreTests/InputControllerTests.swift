@@ -988,9 +988,12 @@ struct InputControllerKeypadTests {
         #expect(controller.mode == expected)
     }
 
-    // MARK: .,-/ 연타 키 (2026-09-28 개정)
+    // MARK: .,*/ · +- 연타 키 (2026-09-28 개정, 2차 개정에서 `.,-/` → `.,*/` + `+-` 추가)
 
-    private static let cycle: KeyEvent = .multiTap([".", ",", "-", "/"])
+    /// 숫자 페이지의 두 연타 키 — 2차 개정(폰 세션 4-1 2차)에서 `-`가 `+-` 키로 옮겨 가고 그 자리에 `*`가 들어왔다.
+    /// 연타 규칙은 키와 무관하다(`InputController`는 글자 목록만 본다) — 아래 테스트는 대부분 `.,*/`로 규칙을 고정한다
+    private static let cycle: KeyEvent = .multiTap([".", ",", "*", "/"])
+    private static let sign: KeyEvent = .multiTap(["+", "-"])
 
     /// 숫자 페이지에 들어가 `12`를 친 상태 — 시계는 손으로 넘긴다
     private func multiTapSetup() -> (RecordingOutput, InputController, (TimeInterval) -> Void) {
@@ -1012,7 +1015,7 @@ struct InputControllerKeypadTests {
             seen.append(output.text)
             #expect(controller.textTail == output.text, "꼬리 정합 — 마지막 글자를 바꾼다")
         }
-        #expect(seen == ["12.", "12,", "12-", "12/", "12."])
+        #expect(seen == ["12.", "12,", "12*", "12/", "12."])
         #expect(output.operations.suffix(2) == [.delete(1), .insert(".")], "교체는 ⌫ 1 + 삽입")
     }
 
@@ -1048,7 +1051,7 @@ struct InputControllerKeypadTests {
     @Test("연타 뒤 ⌫ — 바뀐 글자 하나만 지워지고 꼬리도 같이")
     func multiTapThenBackspace() {
         let (output, controller, advance) = multiTapSetup()
-        for _ in 0..<3 { advance(0.2); controller.handle(Self.cycle) }   // 12-
+        for _ in 0..<3 { advance(0.2); controller.handle(Self.cycle) }   // 12*
         controller.handle(.backspace)
         #expect(output.text == "12")
         #expect(controller.textTail == "12")
@@ -1109,7 +1112,7 @@ struct InputControllerKeypadTests {
         controller.syncWithDocument(documentTail: output.text)
         advance(0.2)
         controller.handle(Self.cycle)
-        #expect(output.text == "12-")
+        #expect(output.text == "12*")
         #expect(controller.textTail == output.text)
     }
 
@@ -1134,10 +1137,37 @@ struct InputControllerKeypadTests {
         #expect(!output.operations.suffix(2).contains(.delete(1)), "다른 글자를 지우지 않는다")
     }
 
+    @Test("+- 연타 — + → - → +, 꼬리는 문서와 같다(로직 추가 없이 데이터만)")
+    func signKeyCycles() {
+        let (output, controller, advance) = multiTapSetup()
+        var seen: [String] = []
+        for _ in 0..<3 {
+            advance(0.3)
+            controller.handle(Self.sign)
+            seen.append(output.text)
+            #expect(controller.textTail == output.text)
+        }
+        #expect(seen == ["12+", "12-", "12+"])
+    }
+
+    @Test("연타 키 둘은 서로의 글자를 바꾸지 않는다 — 다른 키면 새로 넣는다")
+    func twoMultiTapKeysDoNotCross() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)               // 12.
+        advance(0.1)
+        controller.handle(Self.sign)                // 12.+ — 「.」를 「+」로 바꾸지 않는다
+        advance(0.1)
+        controller.handle(Self.sign)                // 12.-
+        advance(0.1)
+        controller.handle(Self.cycle)               // 12.-.
+        #expect(output.text == "12.-.")
+        #expect(controller.textTail == output.text)
+    }
+
     // MARK: 대표 입력 탭 수 (PDR 2-4절 — 사장님·반론자2 요청)
 
     /// 문자 자판에서 시작해 `text`를 친다. 지금 떠 있는 페이지에 글자가 없으면 페이지 키를 **탭(다음)**으로
-    /// 넘긴다 — 사람이 하듯. 스페이스는 숫자 페이지 4행에서 바로 친다. 숫자 페이지의 `. , - /`는 **연타 키**다 —
+    /// 넘긴다 — 사람이 하듯. 스페이스는 숫자 페이지 4행에서 바로 친다. 숫자 페이지의 `. , * /`·`+ -`는 **연타 키**다 —
     /// 그 글자가 나올 때까지 연달아 누른다(0.1초 간격, 제한 시간 안). 반환: (총 탭 수, 페이지 넘김 수).
     private func type(_ text: String) -> (taps: Int, pageTurns: Int, output: String) {
         var now: TimeInterval = 0
@@ -1154,10 +1184,12 @@ struct InputControllerKeypadTests {
                     tap(event)
                     break
                 }
-                if let cycle = keys.lazy.compactMap({ key -> [String]? in
-                    if case .multiTap(let characters) = key.event { return characters }
-                    return nil
-                }).first, let index = cycle.firstIndex(of: String(character)) {
+                // 연타 키가 둘이다(`.,*/`·`+-`) — 그 글자를 가진 키를 찾는다
+                if let (cycle, index) = keys.lazy.compactMap({ key -> ([String], Int)? in
+                    guard case .multiTap(let characters) = key.event,
+                          let index = characters.firstIndex(of: String(character)) else { return nil }
+                    return (characters, index)
+                }).first {
                     for _ in 0...index { tap(.multiTap(cycle)) }
                     break
                 }
@@ -1169,12 +1201,16 @@ struct InputControllerKeypadTests {
         return (taps, turns, output.text)
     }
 
-    /// 2026-09-28 개정(연타 키): `-`가 연타 3번이라 「010-1234」가 9 → 11탭이 됐다. `.`는 여전히 1탭이다
+    /// 2026-09-28 개정(연타 키): `-`가 연타 3번이라 「010-1234」가 9 → 11탭이 됐다가, 2차 개정에서 `-`가 `+-` 키의
+    /// 두 번째로 옮겨 **10탭**이 됐다. `.`·`+`는 1탭, `*`는 3탭, `/`는 4탭이다
     @Test("대표 입력 — 탭 수와 페이지 넘김이 설계서 표와 같다", arguments: [
         ("12.5", 5, 0),
-        ("010-1234", 11, 0),
+        ("010-1234", 10, 0),
         ("2026. 9. 27.", 13, 0),
         ("12/3", 8, 0),
+        ("2*3", 6, 0),
+        ("+82", 4, 0),
+        ("-5", 4, 0),
         ("(~♡", 5, 1)
     ])
     func representativeInputs(text: String, taps: Int, pageTurns: Int) {

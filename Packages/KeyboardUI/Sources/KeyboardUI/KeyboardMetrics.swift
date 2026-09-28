@@ -37,6 +37,31 @@ public enum KeyboardMetrics {
 
     // MARK: - 계산
 
+    /// 한 행의 키 폭(pt) — `KeyboardLayoutView.rowView`가 쓰고 테스트가 고정한다. 키는 `HStack(spacing: keySpacing)`으로 놓인다.
+    ///
+    /// - `alignsColumns == false`(기본 — 두벌식·쿼티·천지인·단모음·쿼티형 기호): **옛 식 그대로**. 행마다 `간격 × (키 수 − 1)`을
+    ///   먼저 빼고 남은 폭을 단위 비율로 나눈다. 키 수가 다른 행끼리는 경계가 조금씩 어긋나지만, 이 자판들의 키 폭을
+    ///   바꾸는 것은 요청받지 않은 변화라 그대로 둔다.
+    /// - `alignsColumns == true`(키패드 4페이지·자동 숫자 패드 — `LayoutDefinition.alignsColumns`): 키마다
+    ///   **자리 = (W + 간격) × 단위 ÷ 행 단위 합**, 키 폭 = 자리 − 간격. 키 수와 무관하게 **같은 단위 경계가 같은 x**에 온다 —
+    ///   반 칸 둘이 한 칸과 정확히 맞물려 숫자 4행의 `0`이 위 `2 5 8` 열에 선다(옛 식은 간격 하나 5pt만큼 오른쪽으로 밀렸다,
+    ///   사장님 폰 세션 4-1 2차 2026-09-28). 키 폭 합 + 간격 합 = W 그대로다.
+    ///
+    /// **음수 방어**: 등장 첫 레이아웃 패스에서는 `totalWidth`가 0으로 온다. 그대로 계산하면 음수 폭이 SwiftUI로 들어가
+    /// `Invalid frame dimension`을 수십 줄 뱉고 자판이 빈 회색으로 떴다(2026-09-09) — 두 방식 모두 0으로 눌러 둔다.
+    /// 폭이 확정되면 다음 패스에서 제대로 그려진다.
+    public static func keyWidths(units: [Double], totalWidth: CGFloat, alignsColumns: Bool) -> [CGFloat] {
+        let totalUnits = units.reduce(0, +)
+        guard totalUnits > 0 else { return units.map { _ in 0 } }
+        if alignsColumns {
+            return units.map { unit in
+                max(0, (totalWidth + keySpacing) * CGFloat(unit) / CGFloat(totalUnits) - keySpacing)
+            }
+        }
+        let available = max(0, totalWidth - keySpacing * CGFloat(max(0, units.count - 1)))
+        return units.map { available * CGFloat($0) / CGFloat(totalUnits) }
+    }
+
     /// 주어진 자판 폭에서 문자 키 하나의 폭. `KeyboardLayoutView.rowView`와 같은 식이다.
     public static func keyWidth(availableWidth: CGFloat, units: Double) -> CGFloat {
         guard units > 0 else { return 0 }
