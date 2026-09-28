@@ -1057,6 +1057,36 @@ struct InputControllerKeypadTests {
         #expect(output.text == "12.", "⌫가 연타를 끊었다")
     }
 
+    /// ★ 검증자 변이 검사(2026-09-28): 「다른 이벤트면 끊는다」 줄을 지운 변형이 위 ⌫ 테스트를 통과했다 — 문서에 앞선 「.」가
+    /// 없으면 꼬리 정합 검사(`hasSuffix`)만으로도 새로 넣게 되기 때문이다. **앞에 오래된 「.」가 있으면** 드러난다:
+    /// 끊기지 않은 연타가 ⌫ 뒤에 남은 그 「.」를 「,」로 바꿔 버린다.
+    @Test("연타 → ⌫ → 0.8초 안 재탭 — 앞에 있던 「.」를 건드리지 않고 새 「.」")
+    func multiTapBreaksOnBackspaceBeforeOldPeriod() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(.character("."))          // 오래된 「.」 — 연타로 넣은 것이 아니다
+        advance(0.1)
+        controller.handle(Self.cycle)               // 12..
+        advance(0.1)
+        controller.handle(.backspace)               // 12.
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..", "⌫가 연타를 끊었다 — 남은 「.」가 「,」로 바뀌면 안 된다")
+        #expect(controller.textTail == output.text)
+    }
+
+    /// ★ 검증자 변이 검사(2026-09-28): `commitComposition()`(공개 — 툴바 도구·후보·붙여넣기가 지난다)에서 끊는 줄을 지운
+    /// 변형이 잡히지 않았다. 조립 지점이 그 경로를 부른 뒤 사용자가 0.8초 안에 다시 누르면 새 「.」여야 한다.
+    @Test("연타 → commitComposition() → 0.8초 안 재탭 — 새 「.」")
+    func multiTapBreaksOnCommitComposition() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)               // 12.
+        controller.commitComposition()
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..", "조합 확정 경로가 연타를 끊었다 — 「12,」가 되면 안 된다")
+        #expect(controller.textTail == output.text)
+    }
+
     @Test("연타 — 모드 전환(ABC)으로 끊긴다")
     func multiTapBreaksOnModeSwitch() {
         let (output, controller, advance) = multiTapSetup()
