@@ -956,13 +956,18 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: - 클립보드 읽기 (PDR verification-code-paste · clipboard-history)
 
-    /// 키보드 등장 시 1회 클립보드를 읽는다 — 인증번호 칩(값 그대로 표시, 사용자 결정
-    /// 2026-09-01)과 클립보드 기록이 **같은 읽기를 공유**한다. 두 기능이 모두 꺼져 있거나,
+    /// 키보드 등장 시 1회 클립보드를 읽는다 — 인증번호·텍스트 칩(값 그대로 표시, 사용자 결정
+    /// 2026-09-01)과 클립보드 기록이 **같은 읽기를 공유**한다. 세 스위치가 모두 꺼져 있거나,
     /// FA가 없거나, secure 필드거나, 이 changeCount를 이미 소비·기록했으면 읽지 않는다
     /// (최소 접근). 주기 폴링이 아니고, 읽은 내용은 칩 표시·삽입·App Group 기록 외로
     /// 나가지 않는다. iOS가 첫 회 붙여넣기 확인을 띄울 수 있으며 이는 수용된 트레이드오프다.
     /// (탭 시에만 읽는 이전 방식은 detectPatterns 콜백의 @MainActor 격리 상속 크래시
     /// 이력이 있다 — 지금은 전부 메인 스레드 동기 경로라 해당 문제 자체가 없다.)
+    ///
+    /// ★ 2026-09-29 수정(검증자 발견, 출시 차단): 예전에는 `string`을 스위치 게이트보다 **먼저** 불러
+    /// 셋 다 꺼도·이미 소비·기록했어도 등장마다 내용을 읽었다(`4e4fe5a`부터). 지금은 판정과 읽는 순서를
+    /// `PasteboardProbe`(KeyboardCore)가 쥐고, **`string`은 그 `read`에 넘기는 클로저 안에서만** 부른다 —
+    /// 여기서 `pasteboard.string`을 직접 부르지 마라(스파이 테스트가 닿지 않는다).
     private func probePasteboard(isRetry: Bool = false) {
         defer { updateSuggestionBar() }
         pasteSuggestion = nil
@@ -971,21 +976,25 @@ final class KeyboardViewController: UIInputViewController {
         if !isRetry { pasteChipSuppressedByTyping = false }   // 등장마다 다시 띄운다
         guard hasFullAccess, textDocumentProxy.isSecureTextEntry != true else { return }
         let pasteboard = UIPasteboard.general
-        let changeCount = pasteboard.changeCount
+        let changeCount = pasteboard.changeCount   // 정수 — 내용을 가져오지 않는다
         seenPasteboardChangeCount = changeCount
-        // 스위치 둘 중 하나라도 켜져 있으면 칩 후보를 만든다 — 어느 쪽이 뜰지는
+        // 스위치 셋(인증번호·텍스트 제안, 기록) 중 필요한 것이 있을 때만 읽는다 — 칩으로 어느 쪽이 뜰지는
         // `PasteSuggestion.make`가 정한다(인증번호 우선, 그 다음 일반 텍스트).
-        let needsCode = (settings.verificationCodeSuggestionsEnabled || settings.pasteSuggestionEnabled)
-            && changeCount != Self.consumedPasteboardChangeCount
-        let needsHistory = settings.clipboardHistoryEnabled
-            && changeCount != Self.recordedPasteboardChangeCount
+        let plan = PasteboardProbe.plan(
+            codeSuggestionsEnabled: settings.verificationCodeSuggestionsEnabled,
+            pasteSuggestionsEnabled: settings.pasteSuggestionEnabled,
+            historyEnabled: settings.clipboardHistoryEnabled,
+            changeCount: changeCount,
+            consumedChangeCount: Self.consumedPasteboardChangeCount,
+            recordedChangeCount: Self.recordedPasteboardChangeCount)
         // 알려진 한계: 다른 기기에서 복사 직후(Universal Clipboard)에는 이 동기 읽기가
         // 전송 완료까지 지연될 수 있다 — PDR 개정 섹션·실기 체크리스트 항목.
         //
-        // **`hasStrings`를 먼저 본다** — 내용을 가져오지 않아 붙여넣기 확인 창을 띄우지 않는다.
-        // 참일 때만 `string`으로 실제 읽기를 한 번 한다(최소 접근).
-        let hasStrings = pasteboard.hasStrings
-        let probed = hasStrings ? pasteboard.string : nil
+        // **게이트 → `hasStrings` → `string`** — 게이트가 닫히면 클립보드를 건드리지 않고, `hasStrings`(확인 창 없음)가
+        // 참일 때만 `string`으로 실제 읽기를 한 번 한다(최소 접근). 순서는 `PasteboardProbe.read`가 지킨다.
+        let probed = PasteboardProbe.read(plan,
+                                          hasStrings: { pasteboard.hasStrings },
+                                          readString: { pasteboard.string })
         // ★ **읽기가 빈손으로 돌아오면 짧게 다시 시도한다** (2026-09-15 실기 확인)
         //
         // 앱을 옮겨 온 직후에는 익스텐션이 `changeCount`는 최신으로 받는데 **내용은 아직 못 받는다**
@@ -995,16 +1004,17 @@ final class KeyboardViewController: UIInputViewController {
         //
         // `hasStrings`는 **확인 창을 띄우지 않는다** — 내용이 올 때까지의 재시도는 조용하고,
         // `string`은 실제로 내용이 생긴 그 한 번에만 불린다.
-        if needsCode || needsHistory, probed == nil { scheduleProbeRetry() }
-        guard needsCode || needsHistory, let text = probed else { return }
-        if needsCode {
+        // 재시도도 같은 게이트를 지난다 — 원하는 게 없으면 재시도하지 않는다.
+        if plan.retries(afterReading: probed) { scheduleProbeRetry() }
+        guard let text = probed else { return }
+        if plan.needsSuggestion {
             pasteSuggestion = PasteSuggestion.make(
                 from: text,
                 allowsCode: settings.verificationCodeSuggestionsEnabled,
                 allowsText: settings.pasteSuggestionEnabled)
             probedPasteboardChangeCount = changeCount
         }
-        if needsHistory {
+        if plan.needsHistory {
             recordClipboardHistory(text)
             Self.recordedPasteboardChangeCount = changeCount
         }
