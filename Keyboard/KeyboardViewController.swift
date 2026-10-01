@@ -173,6 +173,8 @@ final class KeyboardViewController: UIInputViewController {
         let clickable = ClickableInputView(frame: .zero, inputViewStyle: .default)
         clickable.preferredHeight = totalKeyboardHeight   // 창이 없어도 세로 기준값은 지금 알 수 있다
         inputView = clickable
+        // SwiftUI 호스트를 붙이거나 무거운 준비 작업을 하기 전에 크기 응답부터 준비한다.
+        updateHeight()
 
         let controller = InputController(
             output: ProxyTextOutput(controller: self),
@@ -197,8 +199,8 @@ final class KeyboardViewController: UIInputViewController {
             clipboardHistoryEnabled: settings.clipboardHistoryEnabled
         )
         viewState = state
-        rebuildSnippetMatcher()
-        rebuildSuggestionEngineIfNeeded()
+        // 매처·추천 엔진과 등장 상태는 viewWillAppear에서 한 번 준비한 뒤 호스트에 싣는다.
+        // 여기서 기본 상태를 먼저 렌더하면 입력란 특성·툴바가 확정될 때 다시 그리게 된다.
         // 학습 연결 — secure 필드는 학습에서 뺀다 (보안 규칙)
         controller.onWordCommitted = { [weak self] word in
             guard let self, self.textDocumentProxy.isSecureTextEntry != true else { return }
@@ -213,12 +215,8 @@ final class KeyboardViewController: UIInputViewController {
             }
             self.suggestionEngine?.learn(word: word)
         }
-        installKeyboardView(state: state)
         clearSystemContainerBackground()   // 조상이 이미 붙어 있으면 여기서 먼저 잡는다
         applyBackdropColor()
-        // 높이 제약은 여기서 미리 건다 — viewWillAppear에서 처음 걸면 시스템 기본 높이로 한 번 뜬 뒤
-        // 우리 높이로 바뀌어 등장할 때 깜빡인다 (실기 피드백 2026-09-04). viewWillAppear는 값만 갱신한다
-        updateHeight()
         // 설정 앱이 값을 저장하면 Darwin 알림이 온다 — 키보드가 떠 있는 채로 즉시 반영
         // (PDR field-traits-and-live-settings). 값은 App Group에서 다시 읽는다 (FA 불필요).
         settingsChangeObserver = SettingsChangeObserver { [weak self] in
@@ -314,13 +312,8 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // **수정 C의 안전장치.** `viewWillDisappear`에서 호스트를 떼어 두는데,
-        // 같은 인스턴스가 `viewDidLoad` 없이 다시 등장하면(아이패드 다중 창 — 위 주석과 같은 경우)
-        // `installKeyboardView`가 다시 돌지 않아 **자판이 통째로 비어 버린다.**
-        // 그 경우 여기서 다시 설치한다. `viewDidLoad` 경로에서는 이미 설치돼 있어 걸리지 않는다.
-        if Self.releaseHostOnDisappear, hostingController == nil, let viewState {
-            installKeyboardView(state: viewState)
-        }
+        // 최초 등장·재등장 모두 화면을 붙이기 전에 설정과 입력란 상태를 준비한다.
+        // 재사용 호스트는 viewWillDisappear에서 떼어 둔 채로 갱신해 중간 상태를 렌더하지 않는다.
         clearSystemContainerBackground()
         reloadSettingsIfChanged()
         // 이모지 최근 사용 — 저장소에서 다시 읽고, 설정 앱이 껐으면 여기서 비운다(설정이 그대로여도 매번)
@@ -328,14 +321,18 @@ final class KeyboardViewController: UIInputViewController {
         // 설정이 그대로여도 사용자 문구는 설정 앱에서 바뀌었을 수 있다 — 항상 다시 만든다
         rebuildSnippetMatcher()
         rebuildSuggestionEngineIfNeeded()
-        // needsInputModeSwitchKey는 viewDidLoad 시점엔 미확정일 수 있다
-        viewState?.needsInputModeSwitchKey = needsInputModeSwitchKey
-        updateHeight()
+        // 같은 값 대입도 Observation에 통지되므로 바뀐 경우에만 갱신한다.
+        // 최종 확인은 기존대로 viewWillLayoutSubviews에서 한다.
+        let needs = needsInputModeSwitchKey
+        if let viewState, viewState.needsInputModeSwitchKey != needs {
+            viewState.needsInputModeSwitchKey = needs
+        }
         // 키보드가 내려갔다 다시 뜨는 사이 앱이 텍스트를 바꿨을 수 있다 —
         // 이전 세션의 꼬리·후보를 문서 기준으로 다시 세운다 (textDidChange가 안 오는 호스트 방어)
         inputController?.syncWithDocument(documentTail: documentTailForSync)
         // 입력란 특성(숫자 패드·리턴 라벨·ASCII 시작)은 등장마다 다시 적용한다
         applyFieldTraits(force: true)
+        applyKeyboardHeight(layoutNow: false)
         // 새 필드에서는 자판부터 (@Observable은 같은 값 대입도 통지하므로 가드)
         if viewState?.showsEmojiPanel == true { viewState?.showsEmojiPanel = false }
         if viewState?.showsClipboardPanel == true { viewState?.showsClipboardPanel = false }
@@ -345,9 +342,12 @@ final class KeyboardViewController: UIInputViewController {
         dismissedSuggestionWord = nil  // ✕ 억제는 그 표시 세션에서만 (채움글 칩은 예외 — 편집 전까지 유지)
         suppressesWordSuggestionsAfterCursorMove = false
         updateVisibleTools()
-        updateSuggestionBar()
         pasteboardRetryCount = 0        // 등장마다 재시도 예산을 새로 준다
+        // probePasteboard의 defer가 후보 행을 갱신한다 — 프로브 직전의 중간 상태는 싣지 않는다.
         probePasteboard()
+        if hostingController == nil, let viewState {
+            installKeyboardView(state: viewState)
+        }
         // 첫 진동·첫 클릭음이 지연·약화되지 않게 미리 준비한다 (Apple 권고)
         if settings.hapticEnabled, hasFullAccess { hapticGenerator.prepare() }
         prepareClickPlayerIfNeeded()
@@ -1543,6 +1543,10 @@ final class KeyboardViewController: UIInputViewController {
             }
             isFresh = true
         }
+        // 최초 강제 레이아웃부터 투명도·테마가 맞아야 한다. 새 호스트에도 배경을 다시 적용한다.
+        hostingController = host
+        appliedBackdropKey = nil
+        applyBackdropColor()
         // **presize 여부는 여기서 정한다** — 아래 `preAdd` 단계가 이 값을 보기 때문이다.
         // (2026-09-11 정정: 예전에는 `addSubview` **뒤에** 정해서 `preAdd`가 영영 돌지 않았다.)
         needsFreshHostPresize = Self.presizeFreshHost && (Self.presizeAllHostInstalls || isFresh)
@@ -1567,7 +1571,6 @@ final class KeyboardViewController: UIInputViewController {
             }
         }
         host.view.translatesAutoresizingMaskIntoConstraints = false
-        host.view.backgroundColor = .clear  // applyBackdropColor가 테마 색으로 덮는다
 
         addChild(host)
         view.addSubview(host.view)
@@ -1597,7 +1600,6 @@ final class KeyboardViewController: UIInputViewController {
             hostHeight.isActive = true
             hostHeightConstraint = hostHeight
         }
-        hostingController = host
         if needsFreshHostPresize { presizeFreshHostIfNeeded(tag: "install") }
     }
 
