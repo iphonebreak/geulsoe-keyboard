@@ -35,11 +35,13 @@ private struct CountingGenerator: RandomNumberGenerator {
 }
 
 /// 조립 지점(`KeyboardViewController.updateSuggestionBar`)과 **같은 순서**로 부르는 하네스 —
-/// 키 입력은 `userDidEdit()` 뒤 `isUserEdit: true`, 호스트 `textDidChange`는 `syncWithDocument` 뒤 `false`.
+/// 키 입력은 처리 뒤 **문서 글자가 바뀌었을 때만** `documentDidChange()`(D17)를 부르고 `isUserEdit: true`,
+/// 호스트 `textDidChange`는 `syncWithDocument` 뒤 `false`. 키보드 재표시는 VC가 새로 만들어지고(새 `InputController`)
+/// 칩 상태는 프로세스 수명이라 그대로 넘어간다(D16) — `reappear`가 그 순서다.
 @MainActor
 private struct ChipHarness {
-    let output = RecordingOutput()
-    let controller: InputController
+    private(set) var output = RecordingOutput()
+    private(set) var controller: InputController
     let index = CountingEmojiIndex()
     var resolver: EmojiCandidateResolver?
     var state = EmojiChipState()
@@ -59,9 +61,25 @@ private struct ChipHarness {
     }
 
     mutating func press(_ event: KeyEvent) {
+        let revision = controller.documentRevision
         controller.handle(event)
-        state.userDidEdit()
+        if controller.documentRevision != revision { state.documentDidChange() }
         recompute(isUserEdit: true)
+    }
+
+    /// 키보드를 내렸다 다시 띄운다 — VC·`InputController`는 새로, 칩 상태는 그대로(D16). 등장 sync 뒤 계산
+    mutating func reappear(documentTail: String?) {
+        output = RecordingOutput()
+        controller = InputController(output: output)
+        hostSync(documentTail: documentTail)
+    }
+
+    /// 이모지 칩 탭 — 조립 지점의 `handleWordTap` 이모지 분기와 같은 순서
+    mutating func tapEmojiChip(_ candidate: WordSuggestionCandidate) -> Bool {
+        guard controller.replaceCurrentWord(candidate.sourceWord, with: candidate.insertionText) else { return false }
+        state.emojiChipTapped()
+        recompute(isUserEdit: true)
+        return true
     }
 
     /// 호스트 `textDidChange` — 문서 문맥(없으면 nil)으로 꼬리를 다시 세운 **뒤** 계산한다
@@ -208,6 +226,132 @@ struct EmojiChipFlowTests {
     }
 }
 
+@MainActor
+@Suite("이모지 칩 — 재표시 유지(D16)·숨김 해제는 문서가 바뀐 입력에서만(D17)")
+struct EmojiChipLifetimeTests {
+
+    @Test("D16 — 키보드를 내렸다 띄워도 같은 단어면 같은 값이고 새로 뽑지 않는다")
+    func reappearSameWordKeepsPick() {
+        var harness = ChipHarness()
+        harness.type("wkehdck")
+        let first = harness.shown
+        #expect(first != nil)
+        let used = harness.generator.draws
+        harness.reappear(documentTail: "메모 자동차")
+        #expect(harness.shown == first)
+        #expect(harness.generator.draws == used)
+    }
+
+    @Test("D16 — 다시 띄운 곳의 단어가 다르면 칩이 없다 — 「다 친 순간」이 아니다(Q1)")
+    func reappearOtherWordShowsNothing() {
+        var harness = ChipHarness()
+        harness.type("wkehdck")
+        harness.reappear(documentTail: "치킨")
+        #expect(harness.shown == nil)
+    }
+
+    @Test("D16 — secure 입력란을 거치면(reset) 기억이 비어 같은 단어라도 칩이 없다")
+    func secureClearsMemory() {
+        var harness = ChipHarness()
+        harness.type("wkehdck")
+        harness.state.reset()                       // 조립 지점: secure면 reset
+        harness.reappear(documentTail: "자동차")
+        #expect(harness.shown == nil)
+    }
+
+    /// 숨김이 재표시를 넘어 이어지지 않으면, 다시 띄운 뒤 ⇧ 한 번에 넣은 「자동차」에 새 칩이 뜬다(겹침 위험).
+    @Test("D16 — 탭 뒤 숨김도 재표시를 넘어 이어진다 — 다시 띄운 뒤 ⇧로는 칩이 안 뜬다")
+    func suppressionSurvivesReappear() throws {
+        var harness = ChipHarness()
+        harness.type("wkehdck")
+        let emoji = try #require(harness.shown)
+        let tapped = harness.tapEmojiChip(.emojiWithWord(emoji, word: "자동차"))
+        #expect(tapped)
+        harness.reappear(documentTail: "\(emoji) 자동차")
+        #expect(harness.shown == nil)
+        harness.press(.shift)
+        #expect(harness.shown == nil)
+        #expect(harness.state.isSuppressedAfterTap)
+    }
+
+    /// 검증 ⑤-2b 참고 1 — ⇧·한영·123이 숨김을 풀어 넣은 「자동차」에 새 칩이 뜨고, 다시 누르면 `🚕 🚗 자동차`.
+    @Test("D17 — 혼합 탭 뒤 문서를 바꾸지 않는 키로는 숨김이 안 풀린다",
+          arguments: [KeyEvent.shift, .toggleLanguage, .symbols, .advance])
+    func nonEditingKeysKeepSuppression(key: KeyEvent) throws {
+        var harness = ChipHarness()
+        harness.type("wkehdck")
+        let emoji = try #require(harness.shown)
+        let tapped = harness.tapEmojiChip(.emojiWithWord(emoji, word: "자동차"))
+        #expect(tapped)
+        harness.press(key)
+        #expect(harness.shown == nil)
+        #expect(harness.state.isSuppressedAfterTap)
+        #expect(harness.output.text == "\(emoji) 자동차", "겹침 없음")
+    }
+
+    @Test("D17 — 글자·공백·지우기·리턴처럼 문서가 바뀐 입력에서 푼다",
+          arguments: [KeyEvent.character("s"), .space, .backspace, .return])
+    func editingKeysRelease(key: KeyEvent) throws {
+        var harness = ChipHarness()
+        harness.type("wkehdck")
+        let emoji = try #require(harness.shown)
+        let tapped = harness.tapEmojiChip(.emojiWithWord(emoji, word: "자동차"))
+        #expect(tapped)
+        harness.press(.shift)
+        #expect(harness.state.isSuppressedAfterTap)
+        harness.press(key)
+        #expect(!harness.state.isSuppressedAfterTap)
+    }
+
+    @Test("D17 — ⇧로는 안 풀리고, 지웠다 다시 치면 풀려 새로 뽑은 칩이 뜬다")
+    func releaseThenRedraw() throws {
+        var harness = ChipHarness()
+        harness.type("wkehdck")
+        let emoji = try #require(harness.shown)
+        let tapped = harness.tapEmojiChip(.emojiWithWord(emoji, word: "자동차"))
+        #expect(tapped)
+        harness.press(.shift)
+        #expect(harness.shown == nil)
+        let used = harness.generator.draws
+        harness.type("⌫ck")
+        #expect(harness.shown.map(ChipHarness.car.contains) == true)
+        #expect(harness.generator.draws > used)
+    }
+}
+
+@MainActor
+@Suite("InputController — 문서 변경 횟수 (D17)")
+struct DocumentRevisionTests {
+
+    @Test("문서 글자를 넣거나 지운 입력만 센다", arguments: [
+        (KeyEvent.character("d"), true), (.space, true), (.backspace, true), (.return, true),
+        (.multiTap([".", ","]), true),
+        (.shift, false), (.toggleLanguage, false), (.symbols, false), (.symbolsAlternate, false),
+        (.advance, false), (.spacer, false), (.keypadPageNext, false), (.keypadPagePrevious, false)
+    ])
+    func countsOnlyDocumentEdits(testCase: (event: KeyEvent, changes: Bool)) {
+        let controller = InputController(output: RecordingOutput())
+        for key in "dkssud" { controller.handle(.character(String(key))) }  // 안녕 — 지울 글자가 있게
+        let before = controller.documentRevision
+        controller.handle(testCase.event)
+        #expect((controller.documentRevision != before) == testCase.changes)
+    }
+
+    @Test("후보·채움글·붙여넣기·이모지 칩 삽입도 센다 — 거절된 삽입은 세지 않는다")
+    func countsInsertions() {
+        let controller = InputController(output: RecordingOutput())
+        for key in "wkehdck" { controller.handle(.character(String(key))) }
+        var revision = controller.documentRevision
+        #expect(!controller.replaceCurrentWord("고양이", with: "🐈"))
+        #expect(controller.documentRevision == revision, "거절은 문서를 안 바꾼다")
+        #expect(controller.replaceCurrentWord("자동차", with: "🚕 자동차"))
+        #expect(controller.documentRevision != revision)
+        revision = controller.documentRevision
+        controller.insertProvidedText("!")
+        #expect(controller.documentRevision != revision)
+    }
+}
+
 @Suite("이모지 칩 — 후보 값 (Q8·6-2절·수용 기준 11·15)")
 struct WordSuggestionCandidateTests {
 
@@ -314,6 +458,29 @@ struct EmojiChipInsertionTests {
         #expect(!controller.replaceCurrentWord("자동차", with: "🚕 자동차"))
         #expect(output.operations == after)
         #expect(output.text == "🚕 자동차")
+    }
+
+    /// 검증 ⑤-2b 참고 2 — 둘째 층이 「꼬리가 삽입문으로 끝나는가」였을 때는 손으로 쳐 둔 「🚕 자동차」에 같은 🚕가
+    /// 뽑히면 칩이 죽었다(눌러도 진동만). 둘째 층은 이제 「직전 문서 변경이 이모지 칩 삽입인가」만 본다.
+    @Test("손으로 친 「🚕 자동차」에 🚕 혼합 칩 — 사용자가 누른 그대로 「🚕 🚕 자동차」가 된다")
+    func handTypedSameEmojiAccepted() {
+        let output = RecordingOutput()
+        let controller = InputController(output: output)
+        controller.insertProvidedText("🚕 ")
+        for key in "wkehdck" { controller.handle(.character(String(key))) }
+        #expect(output.text == "🚕 자동차")
+        #expect(controller.replaceCurrentWord("자동차", with: "🚕 자동차"))
+        #expect(output.text == "🚕 🚕 자동차")
+    }
+
+    @Test("이모지 칩 삽입 뒤 문서가 바뀌면 다음 이모지 칩은 받는다")
+    func guardClearsAfterDocumentEdit() {
+        let (output, controller) = typedCar()
+        #expect(controller.replaceCurrentWord("자동차", with: "🚕 자동차"))
+        controller.handle(.backspace)                    // 🚕 자동
+        for key in "ck" { controller.handle(.character(String(key))) }   // 🚕 자동차
+        #expect(controller.replaceCurrentWord("자동차", with: "🚗 자동차"))
+        #expect(output.text == "🚕 🚗 자동차")
     }
 
     @Test("이모지 칩은 학습으로 보내지 않는다 — 바로 이어 친 공백도 (수용 기준 4)", arguments: ["🚕 자동차", "🚕"])

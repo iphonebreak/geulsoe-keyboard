@@ -84,8 +84,15 @@ final class KeyboardViewController: UIInputViewController {
     /// 리소스를 열지 않는다. 번들 읽기뿐이라 전체 접근과 무관하다(PDR emoji-word-suggestion 7절).
     private static let emojiCandidateResolver = EmojiCandidateResolver(
         index: BundledEmojiAnnotationIndex(), curation: BundledEmojiCurationRepository().curation())
-    /// 이모지 칩 뽑기·탭 뒤 억제(D9·Q10) — 메모리에만, 기록·저장 없음. 규칙은 `EmojiChipState`.
-    private var emojiChipState = EmojiChipState()
+    /// 이모지 칩 뽑기·탭 뒤 숨김(D9·Q10·D17) — 규칙은 `EmojiChipState`.
+    ///
+    /// ## ★ 인스턴스가 아니라 타입에 둔다 (D16, 2026-10-02 — `dismissedSnippetTail`과 같은 이유)
+    ///
+    /// 키보드 등장마다 이 VC가 새로 만들어진다. 인스턴스면 키보드를 내렸다 띄우는 순간 뽑은 값을 잊어 칩이 사라졌다
+    /// (검증 ⑤-2b 주의 1 — PDR 8-2절 9번 「키보드 재표시에서도 바뀌지 않는다」와 부딪혔다). 등장 sync는 `peek`이라
+    /// 같은 단어면 같은 값을 다시 보여 주고 새로 뽑지 않는다. 탭 뒤 숨김도 함께 이어진다. secure 입력란이면 비운다.
+    /// **기억은 단어 하나·이모지 하나·숨김 여부뿐이고 메모리에만 있다** — 저장·로그 없음(사용자 입력 유래 값).
+    private static var emojiChipState = EmojiChipState()
     /// 툴바 붙여넣기 칩 — 인증번호 또는 복사한 일반 텍스트 (사용자 결정 2026-09-15).
     private var pasteSuggestion: PasteSuggestion?
     /// 이번 등장에서 쓴 재시도 횟수 — 등장마다 0으로 되돌린다. `Self.pasteboardRetryDelays`가 상한.
@@ -348,7 +355,6 @@ final class KeyboardViewController: UIInputViewController {
         if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
         dismissedSuggestionWord = nil  // ✕ 억제는 그 표시 세션에서만 (채움글 칩은 예외 — 편집 전까지 유지)
         suppressesWordSuggestionsAfterCursorMove = false
-        emojiChipState.reset()         // 등장마다 새로 — 커서 앞 단어에는 다시 칠 때까지 이모지 칩이 없다
         updateVisibleTools()
         pasteboardRetryCount = 0        // 등장마다 재시도 예산을 새로 준다
         // probePasteboard의 defer가 후보 행을 갱신한다 — 프로브 직전의 중간 상태는 싣지 않는다.
@@ -548,7 +554,6 @@ final class KeyboardViewController: UIInputViewController {
         // 예약된 성경 검색은 버린다 — 내려간 키보드를 위해 본문을 훑을 이유가 없고,
         // 다음 등장에서 꼬리가 다시 서면 그때 새로 예약된다.
         bibleSearchScheduler?.cancel()
-        emojiChipState.reset()  // 뽑은 이모지는 칩이 떠 있는 동안만 — 내려가면 버린다(D9)
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -573,12 +578,22 @@ final class KeyboardViewController: UIInputViewController {
 
     private func handle(_ event: KeyEvent) {
         guard let inputController else { return }
+        let revision = inputController.documentRevision
         inputController.handle(event)
         // 드물게 바뀌는 상태만 뷰에 반영한다 (모드·시프트)
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false  // 다시 타이핑 — 추천 재개
-        emojiChipState.userDidEdit()                      // 이모지 칩 탭 뒤 숨김도 여기서 풀린다(Q10)
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)  // ⇧·한영·123으로는 안 풀린다(D17)
         updateSuggestionBar(userEdited: true)
+    }
+
+    /// 사용자 입력 하나가 **문서 글자를 실제로 바꿨으면** 이모지 칩 탭 뒤 숨김을 푼다(PDR emoji-word-suggestion D17).
+    /// ⇧·한영·123·페이지 전환처럼 문서를 안 바꾸는 키로는 풀리지 않는다 — 풀리면 넣은 「자동차」에 새로 뽑은 칩이 떠
+    /// 다시 누를 때 `🚕 🚗 자동차`가 된다(검증 ⑤-2b 참고 1). 키 종류 목록이 아니라 실제 쓰기 횟수를 비교하므로
+    /// 새 키가 생겨도 맞고, 거절된 삽입(꼬리 정합 실패)도 풀지 않는다.
+    private func releaseEmojiChipSuppressionIfDocumentChanged(since revision: Int?) {
+        guard let revision, inputController?.documentRevision != revision else { return }
+        Self.emojiChipState.documentDidChange()
     }
 
     // MARK: - 채움글 · 추천단어
@@ -777,8 +792,8 @@ final class KeyboardViewController: UIInputViewController {
             isSecureTextEntry: secure, hasSnippet: snippet != nil, isDismissed: dismissedSuggestionWord != nil,
             isSuppressedAfterCursorMove: suppressesWordSuggestionsAfterCursorMove
         ) && suggestionEngine != nil
-        if secure { emojiChipState.reset() }
-        let emoji = emojiChipState.emoji(
+        if secure { Self.emojiChipState.reset() }  // secure는 기억을 비운다(D16 예외)
+        let emoji = Self.emojiChipState.emoji(
             for: currentWord,
             resolver: wordsAllowed && settings.allowsEmojiChips(isSecureTextEntry: secure)
                 ? Self.emojiCandidateResolver : nil,
@@ -899,11 +914,12 @@ final class KeyboardViewController: UIInputViewController {
             body: body,
             prefix: settings.bibleSnippetPrefixEnabled ? "[\(reference)] " : nil
         )
+        let revision = inputController.documentRevision
         _ = inputController.insertSnippet(suggestion)
         closeBibleSearchPanel()
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
-        emojiChipState.userDidEdit()
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
     }
 
@@ -976,10 +992,11 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         playToolbarHaptic()
+        let revision = inputController?.documentRevision
         inputController?.insertSnippet(suggestion)
         refreshLayout()  // 삽입으로 꼬리가 바뀌면 자동 대문자 시프트가 바뀔 수 있다
         suppressesWordSuggestionsAfterCursorMove = false
-        emojiChipState.userDidEdit()
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
     }
 
@@ -1105,11 +1122,12 @@ final class KeyboardViewController: UIInputViewController {
         guard let paste = pasteSuggestion, viewState?.pasteSuggestion == paste else { return }
         playToolbarHaptic()
         Self.consumedPasteboardChangeCount = probedPasteboardChangeCount
+        let revision = inputController?.documentRevision
         inputController?.insertProvidedText(paste.insertText)
         pasteSuggestion = nil
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
-        emojiChipState.userDidEdit()
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
     }
 
@@ -1118,7 +1136,7 @@ final class KeyboardViewController: UIInputViewController {
     ///
     /// 이모지 칩은 **지금 툴바에 떠 있는 칩만 받는다** — 채움글 칩과 같은 2중 방어의 첫 층이다(탭 콜백은 한 박자
     /// 미뤄 도착하고, 그 사이 첫 탭이 칩을 숨겼으면 두 번째 탭은 버린다). 둘째 층은 `replaceCurrentWord`의 꼬리
-    /// 정합 검사다. 탭한 뒤에는 다음 키 입력까지 이모지 칩을 전부 숨긴다(Q10 — 단어 칸은 원래 개수, D3).
+    /// 정합 검사다. 탭한 뒤에는 문서 글자가 바뀐 입력이 올 때까지 이모지 칩을 전부 숨긴다(Q10·D17 — 단어 칸은 원래 개수, D3).
     private func handleWordTap(_ candidate: WordSuggestionCandidate) {
         if let emoji = candidate.emoji {
             guard let inputController, viewState?.wordSuggestions.contains(candidate) == true else { return }
@@ -1129,11 +1147,12 @@ final class KeyboardViewController: UIInputViewController {
                 return
             }
             recordRecentEmoji(emoji)
-            emojiChipState.emojiChipTapped()
+            Self.emojiChipState.emojiChipTapped()
         } else {
             playToolbarHaptic()
+            let revision = inputController?.documentRevision
             inputController?.completeWord(candidate.insertionText)
-            emojiChipState.userDidEdit()
+            releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         }
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
@@ -1227,11 +1246,12 @@ final class KeyboardViewController: UIInputViewController {
 
     private func handleEmojiTap(_ emoji: String) {
         playToolbarHaptic()
+        let revision = inputController?.documentRevision
         inputController?.insertProvidedText(emoji)
         recordRecentEmoji(emoji)
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
-        emojiChipState.userDidEdit()
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
     }
 
@@ -1308,11 +1328,12 @@ final class KeyboardViewController: UIInputViewController {
 
     private func handleClipboardEntryTap(_ text: String) {
         playToolbarHaptic()
+        let revision = inputController?.documentRevision
         inputController?.insertProvidedText(text)
         viewState?.showsClipboardPanel = false
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
-        emojiChipState.userDidEdit()
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
     }
 

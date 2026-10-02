@@ -26,7 +26,12 @@ public final class InputController {
     /// 여기서 정한다(`LayoutDefinition.layout(... letterMode:)`). 기호·키패드·숫자 패드에 있을 때만 뜻이 있다
     public private(set) var letterMode: InputMode = .hangul
 
-    private let output: TextOutput
+    /// 문서 쓰기는 전부 이 계수기를 지난다 — `documentRevision`(D17)
+    private let revisionCounter: RevisionCountingOutput
+    private var output: TextOutput { revisionCounter }
+    /// 마지막 이모지 칩 삽입 직후의 `documentRevision` — 그 뒤 문서가 안 바뀐 채 온 이모지 칩 탭은 퇴장 중 더블탭이다
+    /// (`replaceCurrentWord`의 둘째 층). 값은 정수뿐이다 — 넣은 글자는 기억하지 않는다
+    private var revisionAfterEmojiChip: Int?
     private var automaton = HangulAutomaton()
     private var hangulSource: JamoSource
     /// 문서에 들어가 있는 조합 중 글자 수 (교체 시 지울 개수). pending 문자 포함.
@@ -94,11 +99,17 @@ public final class InputController {
         startsInHangul: Bool = true,
         clock: @escaping () -> TimeInterval = { Date().timeIntervalSinceReferenceDate }
     ) {
-        self.output = output
+        self.revisionCounter = RevisionCountingOutput(base: output)
         self.hangulSource = hangulSource
         self.mode = startsInHangul ? .hangul : .english
         self.clock = clock
     }
+
+    /// 이 컨트롤러가 문서에 글자를 넣거나 지운 횟수 — 조립 지점이 입력 하나 앞뒤로 비교해 **문서 글자가 실제로
+    /// 바뀌었는가**를 안다(이모지 칩 탭 뒤 숨김 해제, PDR emoji-word-suggestion D17). ⇧·한영·123·페이지 전환·천지인
+    /// 이동처럼 문서를 안 바꾸는 키는 세지 않는다 — 키 종류 목록이 아니라 실제 쓰기를 세므로 새 키가 생겨도 맞다.
+    /// 호스트가 바꾼 문서(sync)는 세지 않는다(우리 쓰기가 아니다).
+    public var documentRevision: Int { revisionCounter.revision }
 
     /// 지금 조합 중인가. 툴바 모드 전환(`ToolbarState.textDidChange`)의 입력이 된다.
     /// 천지인의 pending 점만 떠 있는 상태도 조합 중으로 본다.
@@ -599,9 +610,11 @@ public final class InputController {
     /// 이모지 칩 탭 — 치던 단어를 지우고 `text`(`🚗 자동차` 또는 `🚗`)를 넣는다(PDR emoji-word-suggestion 1-2·1-3절).
     ///
     /// **정합 검사(채움글 칩과 같은 방어).** 꼬리 끝 한글 run이 **칩이 든 원본 단어와 같을 때만** 바꾼다 —
-    /// 「큰자동차」에 「자동차」 칩이면 거절한다(세 글자만 지우면 「큰🚗 자동차」가 된다). 꼬리가 이미 `text`로
-    /// 끝나면(혼합 칩 퇴장 중 더블탭 — 넣은 「자동차」가 다시 꼬리 끝 run이라 위 검사를 통과한다) 거절한다.
-    /// 어긋나면 **아무 것도 하지 않는다.** 첫 층 방어는 조립 지점의 「지금 떠 있는 칩만」이다.
+    /// 「큰자동차」에 「자동차」 칩이면 거절한다(세 글자만 지우면 「큰🚗 자동차」가 된다). **직전 문서 변경이 이모지 칩
+    /// 삽입이면** 거절한다 — 혼합 칩 퇴장 중 더블탭(넣은 「자동차」가 다시 꼬리 끝 run이라 위 검사를 통과한다).
+    /// 예전 「꼬리가 이미 `text`로 끝나면 거절」은 손으로 쳐 둔 「🚕 자동차」에 같은 🚕가 뽑힌 칩까지 죽였다
+    /// (검증 ⑤-2b 참고 2) — 그때는 사용자가 누른 그대로 「🚕 🚕 자동차」가 맞다.
+    /// 어긋나면 **아무 것도 하지 않는다.** 첫 층 방어는 조립 지점의 「지금 떠 있는 칩만」과 탭 뒤 숨김이다.
     ///
     /// **학습으로 보내지 않는다**(5-3절, 수용 기준 4) — `completeWord`와 달리 `onWordCommitted`를 부르지 않는다.
     /// 이모지가 섞인 삽입분은 사용자가 친 단어가 아니다. 다음 구분자가 넣은 「자동차」를 다시 보내지 않게
@@ -609,7 +622,8 @@ public final class InputController {
     /// - Returns: 실제로 바꿨으면 true.
     @discardableResult
     public func replaceCurrentWord(_ sourceWord: String, with text: String) -> Bool {
-        guard !sourceWord.isEmpty, !text.isEmpty, currentWord == sourceWord, !textTail.hasSuffix(text)
+        guard !sourceWord.isEmpty, !text.isEmpty, currentWord == sourceWord,
+              revisionAfterEmojiChip != documentRevision
         else { return false }
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 — 문서 텍스트는 안 변한다
@@ -618,6 +632,7 @@ public final class InputController {
         committedTail.removeLast(min(sourceWord.count, committedTail.count))
         appendToTail(text)
         suppressesNextWordCommit = true
+        revisionAfterEmojiChip = documentRevision
         updateAutoCapitalization()
         return true
     }
@@ -715,5 +730,27 @@ public final class InputController {
         if committedTail.count > committedTailLimit {
             committedTail.removeFirst(committedTail.count - committedTailLimit)
         }
+    }
+}
+
+/// 문서 쓰기를 그대로 넘기면서 실제로 글자를 넣거나 지운 횟수만 센다 — `InputController.documentRevision`.
+/// 빈 삽입·0개 지우기는 넘기되 세지 않는다(문서가 안 바뀐다). 내용은 기억하지 않는다(보안 규칙).
+@MainActor
+private final class RevisionCountingOutput: TextOutput {
+    private let base: TextOutput
+    private(set) var revision = 0
+
+    init(base: TextOutput) {
+        self.base = base
+    }
+
+    func insertText(_ text: String) {
+        if !text.isEmpty { revision += 1 }
+        base.insertText(text)
+    }
+
+    func deleteBackward(_ count: Int) {
+        if count > 0 { revision += 1 }
+        base.deleteBackward(count)
     }
 }

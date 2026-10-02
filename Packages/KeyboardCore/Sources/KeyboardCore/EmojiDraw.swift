@@ -50,7 +50,7 @@ public struct EmojiDraw: Sendable {
         return emoji(for: word, from: candidates, using: &generator)
     }
 
-    /// 기억을 버린다 — 키보드가 내려가거나 secure 입력란으로 바뀔 때 조립 지점이 부른다.
+    /// 기억을 버린다 — secure 입력란·이모지 칩 탭 때 `EmojiChipState`가 부른다(키보드가 내려가는 것으로는 버리지 않는다 — D16).
     public mutating func reset() {
         word = nil
         emoji = nil
