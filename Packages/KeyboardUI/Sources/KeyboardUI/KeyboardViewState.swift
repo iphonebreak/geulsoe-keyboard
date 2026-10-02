@@ -22,9 +22,9 @@ public final class KeyboardViewState {
     /// 툴바에 띄울 채움글 후보. 단축어 근처에서만 nil↔값이 바뀌고
     /// 구독자는 툴바뿐이라 키캡 뷰 리빌드를 일으키지 않는다 (성능 규율 유지).
     public var snippetSuggestion: SnippetSuggestion?
-    /// 추천단어 후보 (최대 3개). 채움글 칩이 있으면 조립 지점이 비워 넣는다 (칩만 표시).
-    /// 구독자는 툴바뿐 — 키캡 리빌드 없음.
-    public var wordSuggestions: [String]
+    /// 추천단어 후보 — 단어 칩 최대 3개, 이모지 칩이 뜨면 단어 2(배지 있으면 1) + `[🚗 자동차][🚗]`(v1.3.0 ⑤).
+    /// 채움글 칩이 있으면 조립 지점이 비워 넣는다 (칩만 표시). 구독자는 툴바뿐 — 키캡 리빌드 없음.
+    public var wordSuggestions: [WordSuggestionCandidate]
     /// 툴바 붙여넣기 칩 — **인증번호 또는 복사한 일반 텍스트** 하나. nil이면 칩 없음.
     ///
     /// 2026-09-15 이전에는 `pasteboardCode: String?`(인증번호 전용)였다. 사용자 요구로
@@ -74,7 +74,7 @@ public final class KeyboardViewState {
         showsKeyPreview: Bool = true,
         needsInputModeSwitchKey: Bool = false,
         snippetSuggestion: SnippetSuggestion? = nil,
-        wordSuggestions: [String] = [],
+        wordSuggestions: [WordSuggestionCandidate] = [],
         pasteSuggestion: PasteSuggestion? = nil,
         visibleTools: [ToolbarTool] = [],
         showsEmojiPanel: Bool = false,

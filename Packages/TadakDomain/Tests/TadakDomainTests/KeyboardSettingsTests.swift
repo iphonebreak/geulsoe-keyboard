@@ -718,3 +718,23 @@ struct EmojiWordSuggestionsSettingTests {
         #expect(try JSONDecoder().decode(KeyboardSettings.self, from: stored).emojiWordSuggestionsEnabled == false)
     }
 }
+
+/// 이모지 칩 게이트 — `추천단어 ∧ 추천단어에 이모지 ∧ !secure` (PDR `emoji-word-suggestion.md` 3-2절·5-3절, 수용 기준 5).
+/// 조립 지점이 이 식만 읽는다 — 익스텐션 타깃은 `swift test`가 닿지 않아 식을 여기 둔다(`allowsBibleSearch` 선례).
+@Suite("KeyboardSettings — 이모지 칩 게이트")
+struct EmojiChipGateTests {
+
+    @Test("세 조건이 모두 참일 때만 연다 — 8조합", arguments: [false, true], [false, true])
+    func eightCombinations(suggestions: Bool, emoji: Bool) {
+        var settings = KeyboardSettings.default
+        settings.suggestionsEnabled = suggestions
+        settings.emojiWordSuggestionsEnabled = emoji
+        #expect(settings.allowsEmojiChips(isSecureTextEntry: false) == (suggestions && emoji))
+        #expect(settings.allowsEmojiChips(isSecureTextEntry: true) == false, "secure는 언제나 닫힌다")
+    }
+
+    @Test("입력란이 secure 여부를 알려 주지 않으면(nil) 일반 입력란으로 본다")
+    func unknownSecureIsOpen() {
+        #expect(KeyboardSettings.default.allowsEmojiChips(isSecureTextEntry: nil))
+    }
+}

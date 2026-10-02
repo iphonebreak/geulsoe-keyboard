@@ -29,6 +29,8 @@ TadakData 테스트 픽스처(`IOS17EmojiBaseline.swift`, 생성물)로 함께 �
 
 사용:
   python3 tools/convert_emoji.py                     # 받기(캐시)·검증·생성 + 손질 목록 검사 + 픽스처
+  python3 tools/convert_emoji.py --check             # 쓰지 않고 재생성 결과를 emoji.tde·픽스처와 바이트 비교
+                                                     # + 손질 목록 검사. 다르면 exit 1 (/keyboard-check가 돈다)
   python3 tools/convert_emoji.py --stats [--ref main-396355a] [--host-catalog FILE]
                                                      # 반론자2 실측 재현표 출력(파일 쓰지 않음)
   python3 tools/convert_emoji.py --curation-csv PATH [--top 300]
@@ -300,7 +302,8 @@ def product_index():
     return index, name_match, catalog
 
 
-def generate() -> None:
+def build_outputs():
+    """제품 산출물 두 가지(emoji.tde 바이트·픽스처 텍스트)를 만들고 손질 목록을 검사한다 — 쓰지 않는다."""
     index, name_match, catalog = product_index()
     output = encode(index, name_match)
 
@@ -314,8 +317,26 @@ def generate() -> None:
         sys.exit(f"키 수가 예상 범위를 벗어남: {len(index)}")
 
     curated = check_curation(catalog)
+    return index, name_match, catalog, output, baseline_fixture(catalog), curated
+
+
+def check() -> None:
+    """저장소의 산출물이 지금 재생성 결과와 같은가 — 손으로 고친 픽스처·emoji.tde를 잡는다
+    (검증 ⑤-2a 참고 1: 개수를 지키며 바꿔치기하면 `swift test`가 못 잡는다). `generate_lunar_holidays.swift --check` 선례."""
+    _, _, _, output, fixture, curated = build_outputs()
+    stale = [path.relative_to(ROOT) if path.is_relative_to(ROOT) else path for path, expected in
+             [(OUTPUT, output), (BASELINE_FIXTURE, fixture.encode("utf-8"))]
+             if not path.exists() or path.read_bytes() != expected]
+    if stale:
+        sys.exit("재생성 결과와 다르다: " + ", ".join(map(str, stale))
+                 + " — 손으로 고치지 말고 `python3 tools/convert_emoji.py`로 다시 만든다")
+    print(f"확인: emoji.tde·IOS17EmojiBaseline.swift가 재생성 결과와 바이트 동일 · 손질 목록 {curated}항목 통과")
+
+
+def generate() -> None:
+    index, name_match, catalog, output, fixture, curated = build_outputs()
     OUTPUT.write_bytes(output)
-    BASELINE_FIXTURE.write_text(baseline_fixture(catalog), encoding="utf-8")
+    BASELINE_FIXTURE.write_text(fixture, encoding="utf-8")
     links = sum(len(values) for values in index.values())
     print(f"완료: {OUTPUT.relative_to(ROOT)} — {PRODUCT_REF}({CLDR_REFS[PRODUCT_REF]['commit'][:9]}), "
           f"Unicode 15.0 카탈로그 {len(catalog)}개, 키 {len(index)}, 연결 {links}, "
@@ -424,13 +445,17 @@ def write_curation_csv(path: Path, top: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--stats", action="store_true", help="실측 재현표만 출력한다")
+    parser.add_argument("--check", action="store_true",
+                        help="쓰지 않고 재생성 결과를 저장소 산출물과 비교한다(다르면 exit 1)")
     parser.add_argument("--ref", choices=sorted(CLDR_REFS), default=PRODUCT_REF)
     parser.add_argument("--host-catalog", type=Path,
                         help="EmojiCatalog.categories를 한 줄에 하나씩 덤프한 파일(--stats용)")
     parser.add_argument("--curation-csv", type=Path, help="손질 후보표 CSV 경로")
     parser.add_argument("--top", type=int, default=300)
     args = parser.parse_args()
-    if args.stats:
+    if args.check:
+        check()
+    elif args.stats:
         print_stats(args.ref, args.host_catalog)
     elif args.curation_csv:
         write_curation_csv(args.curation_csv, args.top)

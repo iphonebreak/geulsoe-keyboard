@@ -207,6 +207,31 @@ public enum KeyboardMetrics {
         hasBadge ? 2 : 3
     }
 
+    /// 이모지 칩(혼합·전용)이 뜰 때의 단어 후보 개수 — **한 칸 적게**(PDR `emoji-word-suggestion.md` Q2).
+    ///
+    /// | | 이모지 없음(숨김 동안 포함, D3) | 이모지 있음 |
+    /// |---|---|---|
+    /// | 배지 없음 | 단어 3 | 단어 2 + `[🚗 자동차][🚗]` = 4칸 |
+    /// | 배지 있음 | 단어 2 | 단어 1 + `[🚗 자동차 │ 🚗]`(둘째 칸을 반으로) = 2칸 |
+    public static func wordSuggestionLimit(hasBadge: Bool, hasEmojiChips: Bool) -> Int {
+        wordSuggestionLimit(hasBadge: hasBadge) - (hasEmojiChips ? 1 : 0)
+    }
+
+    /// 추천단어 칩 안쪽 좌우 여백 — **이모지 칩이 뜬 줄만 0**(D6 여백C: 칩 사이 간격 10pt는 그대로, 배지 반쪽 칩도 0).
+    /// 이모지가 없는 3칩 줄은 지금 그대로 6이다. 글자는 기존 `minimumScaleFactor(0.7)`로 줄인다(4-5절).
+    public static func wordChipHorizontalPadding(hasEmojiChips: Bool) -> CGFloat {
+        hasEmojiChips ? 0 : 6
+    }
+
+    /// 후보를 칸으로 묶는다 — 칸 하나가 툴바의 균등 분배 단위다.
+    /// 배지가 있을 때만 혼합·전용 두 이모지 칩이 **한 칸을 반씩** 나눈다(Q2 배지판·4-3절) — 단어 후보 칸이
+    /// 0개로 떨어지지 않는다. 그 밖에는 후보 하나에 칸 하나(이모지가 없으면 v1.2.0과 같다).
+    public static func wordChipSlots(_ candidates: [WordSuggestionCandidate], hasBadge: Bool) -> [[WordSuggestionCandidate]] {
+        let emojiChips = candidates.filter { $0.emoji != nil }
+        guard hasBadge, !emojiChips.isEmpty else { return candidates.map { [$0] } }
+        return candidates.filter { $0.emoji == nil }.map { [$0] } + [emojiChips]
+    }
+
     /// 자판 배열의 기준 열 수에서 곧바로 최대 폭을 낸다.
     public static func contentMaxWidth(for layout: LayoutDefinition) -> CGFloat {
         contentMaxWidth(units: layout.referenceUnits)

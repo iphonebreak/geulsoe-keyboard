@@ -79,6 +79,13 @@ final class KeyboardViewController: UIInputViewController {
     /// 엔진을 만들 때의 학습 초기화 토큰. 설정 앱이 토큰을 올리면 엔진을 재생성해
     /// 세션 메모리째 버린다 (저장소만 비우면 다음 학습이 옛 단어를 되살린다).
     private var appliedLearningResetToken: Int?
+    /// 이모지 칩 후보 묶음 — 역색인(`emoji.tde` mmap)·손질 목록을 **프로세스에서 한 번** 만들고 재사용한다
+    /// (VC는 등장마다 새로 만들어진다). `static let`은 처음 쓸 때 만들어지므로 이모지 칩이 꺼진 사용자는
+    /// 리소스를 열지 않는다. 번들 읽기뿐이라 전체 접근과 무관하다(PDR emoji-word-suggestion 7절).
+    private static let emojiCandidateResolver = EmojiCandidateResolver(
+        index: BundledEmojiAnnotationIndex(), curation: BundledEmojiCurationRepository().curation())
+    /// 이모지 칩 뽑기·탭 뒤 억제(D9·Q10) — 메모리에만, 기록·저장 없음. 규칙은 `EmojiChipState`.
+    private var emojiChipState = EmojiChipState()
     /// 툴바 붙여넣기 칩 — 인증번호 또는 복사한 일반 텍스트 (사용자 결정 2026-09-15).
     private var pasteSuggestion: PasteSuggestion?
     /// 이번 등장에서 쓴 재시도 횟수 — 등장마다 0으로 되돌린다. `Self.pasteboardRetryDelays`가 상한.
@@ -341,6 +348,7 @@ final class KeyboardViewController: UIInputViewController {
         if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
         dismissedSuggestionWord = nil  // ✕ 억제는 그 표시 세션에서만 (채움글 칩은 예외 — 편집 전까지 유지)
         suppressesWordSuggestionsAfterCursorMove = false
+        emojiChipState.reset()         // 등장마다 새로 — 커서 앞 단어에는 다시 칠 때까지 이모지 칩이 없다
         updateVisibleTools()
         pasteboardRetryCount = 0        // 등장마다 재시도 예산을 새로 준다
         // probePasteboard의 defer가 후보 행을 갱신한다 — 프로브 직전의 중간 상태는 싣지 않는다.
@@ -540,6 +548,7 @@ final class KeyboardViewController: UIInputViewController {
         // 예약된 성경 검색은 버린다 — 내려간 키보드를 위해 본문을 훑을 이유가 없고,
         // 다음 등장에서 꼬리가 다시 서면 그때 새로 예약된다.
         bibleSearchScheduler?.cancel()
+        emojiChipState.reset()  // 뽑은 이모지는 칩이 떠 있는 동안만 — 내려가면 버린다(D9)
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -568,6 +577,7 @@ final class KeyboardViewController: UIInputViewController {
         // 드물게 바뀌는 상태만 뷰에 반영한다 (모드·시프트)
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false  // 다시 타이핑 — 추천 재개
+        emojiChipState.userDidEdit()                      // 이모지 칩 탭 뒤 숨김도 여기서 풀린다(Q10)
         updateSuggestionBar(userEdited: true)
     }
 
@@ -757,14 +767,31 @@ final class KeyboardViewController: UIInputViewController {
         // 낮에는 게이트가 켜져 있기만 하면 자리를 비워 두고 2개로 고정했는데, 배지가 없을 때
         // **오른쪽이 비어 보인다**고 사용자가 실기에서 판정했다. 그래서 전처럼 되돌린다 —
         // 결과 0건이면 3개, 1건 이상이면 2개다. 규칙과 근거는 `KeyboardMetrics.wordSuggestionLimit`.
+        //
+        // ★ 이모지 칩(v1.3.0 ⑤, PDR emoji-word-suggestion Q1·Q2·D9)도 **이 계산 안**에 있다 — 게이트(secure·채움글 칩·
+        //   ✕ 억제·커서 이동 억제)를 그대로 물려받고, 지금 치는 단어 **자신**을 정확 조회 1회 한다. 뜨면 단어 칸이 하나
+        //   준다(`wordSuggestionLimit(hasBadge:hasEmojiChips:)`). 이 함수는 꼬리를 **다시 세운 뒤**에만 불리고
+        //   (`textDidChange`는 sync 뒤), sync(userEdited == false)에서는 뽑은 값을 버리지도 새로 뽑지도 않는다 —
+        //   호스트가 꼬리를 잠깐 비웠다 다시 세워도 같은 값이다(검증 ⑤-2a 참고 2, `EmojiChipState`).
+        let wordsAllowed = WordSuggestionGate.allowsWords(
+            isSecureTextEntry: secure, hasSnippet: snippet != nil, isDismissed: dismissedSuggestionWord != nil,
+            isSuppressedAfterCursorMove: suppressesWordSuggestionsAfterCursorMove
+        ) && suggestionEngine != nil
+        if secure { emojiChipState.reset() }
+        let emoji = emojiChipState.emoji(
+            for: currentWord,
+            resolver: wordsAllowed && settings.allowsEmojiChips(isSecureTextEntry: secure)
+                ? Self.emojiCandidateResolver : nil,
+            isUserEdit: userEdited
+        )
         var words: [String] = []
-        if !secure, snippet == nil, dismissedSuggestionWord == nil,
-           !suppressesWordSuggestionsAfterCursorMove, let suggestionEngine {
+        if wordsAllowed, let suggestionEngine {
             words = suggestionEngine.suggestions(
                 forWord: currentWord,
-                limit: KeyboardMetrics.wordSuggestionLimit(hasBadge: badgeCount != nil)
+                limit: KeyboardMetrics.wordSuggestionLimit(hasBadge: badgeCount != nil, hasEmojiChips: emoji != nil)
             )
         }
+        let candidates = WordSuggestionCandidate.row(words: words, emoji: emoji, sourceWord: currentWord)
 
         // 날짜 칩은 키마다 새로 계산돼 계산 시각(`computedAt`)만 바뀐다 — 내용이 같으면 다시 싣지 않는다
         // (뷰 갱신 낭비 방지). 값이 같다 = 같은 분/일이라 옛 계산 시각으로도 신선도 판정은 같다.
@@ -772,7 +799,7 @@ final class KeyboardViewController: UIInputViewController {
             ?? (viewState.snippetSuggestion != nil) {
             viewState.snippetSuggestion = snippet
         }
-        if viewState.wordSuggestions != words { viewState.wordSuggestions = words }
+        if viewState.wordSuggestions != candidates { viewState.wordSuggestions = candidates }
         if viewState.bibleMatchCount != badgeCount { viewState.bibleMatchCount = badgeCount }
         if viewState.pasteSuggestion != chip {
             viewState.pasteSuggestion = chip
@@ -876,6 +903,7 @@ final class KeyboardViewController: UIInputViewController {
         closeBibleSearchPanel()
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
+        emojiChipState.userDidEdit()
         updateSuggestionBar(userEdited: true)
     }
 
@@ -951,6 +979,7 @@ final class KeyboardViewController: UIInputViewController {
         inputController?.insertSnippet(suggestion)
         refreshLayout()  // 삽입으로 꼬리가 바뀌면 자동 대문자 시프트가 바뀔 수 있다
         suppressesWordSuggestionsAfterCursorMove = false
+        emojiChipState.userDidEdit()
         updateSuggestionBar(userEdited: true)
     }
 
@@ -1080,12 +1109,32 @@ final class KeyboardViewController: UIInputViewController {
         pasteSuggestion = nil
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
+        emojiChipState.userDidEdit()
         updateSuggestionBar(userEdited: true)
     }
 
-    private func handleWordTap(_ word: String) {
-        playToolbarHaptic()
-        inputController?.completeWord(word)
+    /// 추천단어 줄 탭 — 단어 칩은 지금처럼 `completeWord`, 이모지 칩(v1.3.0 ⑤)은 치던 단어를 지우고
+    /// `🚗 자동차`(혼합) 또는 `🚗`(전용)를 넣는다(PDR emoji-word-suggestion 1-2절, Q3·Q4).
+    ///
+    /// 이모지 칩은 **지금 툴바에 떠 있는 칩만 받는다** — 채움글 칩과 같은 2중 방어의 첫 층이다(탭 콜백은 한 박자
+    /// 미뤄 도착하고, 그 사이 첫 탭이 칩을 숨겼으면 두 번째 탭은 버린다). 둘째 층은 `replaceCurrentWord`의 꼬리
+    /// 정합 검사다. 탭한 뒤에는 다음 키 입력까지 이모지 칩을 전부 숨긴다(Q10 — 단어 칸은 원래 개수, D3).
+    private func handleWordTap(_ candidate: WordSuggestionCandidate) {
+        if let emoji = candidate.emoji {
+            guard let inputController, viewState?.wordSuggestions.contains(candidate) == true else { return }
+            playToolbarHaptic()
+            // 꼬리가 어긋났으면(호스트가 문서를 바꿈) 문서를 건드리지 않고 후보만 다시 낸다 — 채움글 칩과 같다
+            guard inputController.replaceCurrentWord(candidate.sourceWord, with: candidate.insertionText) else {
+                updateSuggestionBar()
+                return
+            }
+            recordRecentEmoji(emoji)
+            emojiChipState.emojiChipTapped()
+        } else {
+            playToolbarHaptic()
+            inputController?.completeWord(candidate.insertionText)
+            emojiChipState.userDidEdit()
+        }
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
         updateSuggestionBar(userEdited: true)
@@ -1179,6 +1228,16 @@ final class KeyboardViewController: UIInputViewController {
     private func handleEmojiTap(_ emoji: String) {
         playToolbarHaptic()
         inputController?.insertProvidedText(emoji)
+        recordRecentEmoji(emoji)
+        refreshLayout()
+        suppressesWordSuggestionsAfterCursorMove = false
+        emojiChipState.userDidEdit()
+        updateSuggestionBar(userEdited: true)
+    }
+
+    /// 이모지 「최근 사용」에 기록한다 — 이모지 판 탭과 추천단어 줄 이모지 칩 탭이 같이 쓴다
+    /// (PDR emoji-word-suggestion 5-3절·6-2절 — 칩이 `emoji`를 따로 들고 있어 삽입 문자열을 뜯지 않는다).
+    private func recordRecentEmoji(_ emoji: String) {
         // ★ 기록은 **쓰기 직전에 설정을 다시 읽어** 판정한다(학습 단어의 토큰 재확인과 같은 방어) —
         //   아이패드 병렬 사용 중 설정 앱이 껐다면 옛 목록을 되살리지 않는다(PDR 3-2절).
         //   secure 입력란은 **입력은 그대로, 기록만** 건너뛴다 — v1.2.0에 새로 생긴 규칙(PDR 5절).
@@ -1194,9 +1253,6 @@ final class KeyboardViewController: UIInputViewController {
             emojiHistoryRepository.save(updated)
             viewState?.recentEmojis = updated.entries
         }
-        refreshLayout()
-        suppressesWordSuggestionsAfterCursorMove = false
-        updateSuggestionBar(userEdited: true)
     }
 
     /// 이모지 「최근 사용」을 설정과 맞춰 싣는다 — 등장마다·설정이 바뀔 때.
@@ -1256,6 +1312,7 @@ final class KeyboardViewController: UIInputViewController {
         viewState?.showsClipboardPanel = false
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
+        emojiChipState.userDidEdit()
         updateSuggestionBar(userEdited: true)
     }
 

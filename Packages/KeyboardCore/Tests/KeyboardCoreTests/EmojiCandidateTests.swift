@@ -231,6 +231,21 @@ struct EmojiDrawTests {
         #expect(generator.draws > before)
     }
 
+    /// 호스트 sync가 쓰는 엿보기 — 기억을 버리지도 새로 뽑지도 않는다(검증 ⑤-2a 참고 2, `EmojiChipState`).
+    @Test("peek은 같은 단어일 때만 기억한 값을 주고, 다른 단어·빈 단어를 봐도 기억을 버리지 않는다")
+    func peekNeverForgets() throws {
+        var generator = SeededGenerator(seed: 5)
+        var draw = EmojiDraw()
+        let first = try #require(draw.emoji(for: "자동차", from: car, using: &generator))
+        #expect(draw.peek(for: "자동차", in: car) == first)
+        #expect(draw.peek(for: "", in: []) == nil)
+        #expect(draw.peek(for: "맥주", in: beer) == nil)
+        let used = generator.draws
+        #expect(draw.emoji(for: "자동차", from: car, using: &generator) == first, "엿본 뒤에도 같은 값")
+        #expect(generator.draws == used)
+        #expect(draw.peek(for: "자동차", in: car.filter { $0 != first }) == nil, "고정 값이 묶음에서 빠지면 nil")
+    }
+
     @Test("시스템 난수원을 쓰는 편의 함수도 묶음 안의 값을 고정한다")
     func systemGeneratorConvenience() {
         var draw = EmojiDraw()

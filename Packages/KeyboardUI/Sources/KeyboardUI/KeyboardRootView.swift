@@ -25,7 +25,7 @@ public struct KeyboardRootView: View {
     private let state: KeyboardViewState
     private let onEvent: (KeyEvent) -> Void
     private let onSnippetTap: ((SnippetSuggestion) -> Void)?
-    private let onWordTap: ((String) -> Void)?
+    private let onWordTap: ((WordSuggestionCandidate) -> Void)?
     private let onPasteboardCodeTap: (() -> Void)?
     private let onToolTap: ((ToolbarTool) -> Void)?
     private let onCursorMove: ((Int) -> Void)?
@@ -66,7 +66,7 @@ public struct KeyboardRootView: View {
     ///   - inputModeSwitchButton: `needsInputModeSwitchKey`가 참일 때
     ///     지구본 자리에 들어갈 UIKit 버튼 래퍼. 조립 지점이 만들어 준다.
     ///   - onSnippetTap: 툴바 채움글 칩을 탭했을 때. nil이면 칩을 그리지 않는다.
-    ///   - onWordTap: 추천단어 후보를 탭했을 때. nil이면 후보를 그리지 않는다.
+    ///   - onWordTap: 추천단어 후보(단어 칩·이모지 칩)를 탭했을 때. nil이면 후보를 그리지 않는다.
     ///   - onPasteboardCodeTap: 인증번호 붙여넣기 칩을 탭했을 때. nil이면 칩을 그리지 않는다.
     ///   - onToolTap: 툴바 도구(내리기·클립보드·이모지)를 탭했을 때. nil이면 도구 행을 그리지 않는다.
     ///   - onClipboardEntryTap/Delete/Clear: 클립보드 기록 패널 항목 삽입·삭제·모두 지우기.
@@ -84,7 +84,7 @@ public struct KeyboardRootView: View {
         inputModeSwitchButton: AnyView? = nil,
         onEvent: @escaping (KeyEvent) -> Void,
         onSnippetTap: ((SnippetSuggestion) -> Void)? = nil,
-        onWordTap: ((String) -> Void)? = nil,
+        onWordTap: ((WordSuggestionCandidate) -> Void)? = nil,
         onPasteboardCodeTap: (() -> Void)? = nil,
         onToolTap: ((ToolbarTool) -> Void)? = nil,
         onCursorMove: ((Int) -> Void)? = nil,
@@ -237,7 +237,7 @@ private struct SuggestionToolbar: View {
     let state: KeyboardViewState
     let theme: ResolvedTheme
     let onSnippetTap: ((SnippetSuggestion) -> Void)?
-    let onWordTap: ((String) -> Void)?
+    let onWordTap: ((WordSuggestionCandidate) -> Void)?
     let onPasteboardCodeTap: (() -> Void)?
     let onToolTap: ((ToolbarTool) -> Void)?
     let onCursorMove: ((Int) -> Void)?
@@ -289,25 +289,28 @@ private struct SuggestionToolbar: View {
                 .id(snippet.title)  // 다른 절로 바뀌면 새 칩으로 다시 애니메이션
             }
             if let onWordTap, !words.isEmpty {
-                ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                // 이모지 칩(v1.3.0 ⑤)이 있으면 `[단어][단어][🚗 자동차][🚗]`, 배지가 있으면 `[단어][🚗 자동차 │ 🚗]` —
+                // 칸 묶기·여백은 `KeyboardMetrics`(테스트로 고정). 이모지가 없으면 v1.2.0과 같다(칸 하나에 후보 하나·여백 6).
+                let hasEmojiChips = words.contains { $0.emoji != nil }
+                let padding = KeyboardMetrics.wordChipHorizontalPadding(hasEmojiChips: hasEmojiChips)
+                let slots = KeyboardMetrics.wordChipSlots(words, hasBadge: state.bibleMatchCount != nil)
+                ForEach(Array(slots.enumerated()), id: \.offset) { index, slot in
                     if index > 0 || snippet != nil {
-                        Rectangle()
-                            .fill(theme.keyText.opacity(0.2))
-                            .frame(width: 1, height: 18)
+                        candidateDivider
                     }
                     // 후보는 남은 폭을 균등 분배 — Apple QuickType처럼 좌우가 꽉 찬다
-                    Button(word) { onWordTap(word) }
-                        .font(.system(size: 17))
-                        .foregroundStyle(theme.keyText)
-                        .lineLimit(1)
-                        // 배지가 오른쪽 폭을 가져가므로 긴 후보는 줄여 넣는다 (계획서 2-1).
-                        // 자르는 대신 줄이는 이유: 「창조하시니라」가 「창조하…」가 되면
-                        // 무엇을 넣을지 알 수 없다.
-                        .minimumScaleFactor(0.7)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 10)
+                    if slot.count == 1 {
+                        wordChip(slot[0], padding: padding, action: onWordTap)
+                    } else {
+                        // 배지판 둘째 칸 — 혼합·전용 칩이 반씩(가운데 구분선 1pt, 칸 안 간격 0 — 시안 5절)
+                        HStack(spacing: 0) {
+                            ForEach(Array(slot.enumerated()), id: \.offset) { half, candidate in
+                                if half > 0 { candidateDivider }
+                                wordChip(candidate, padding: padding, action: onWordTap)
+                            }
+                        }
                         .frame(maxWidth: .infinity)
-                        .buttonStyle(.plain)
+                    }
                 }
             }
             if !hasCandidates {
@@ -355,6 +358,34 @@ private struct SuggestionToolbar: View {
         // 칩 등장/퇴장에만 애니메이션 — 추천단어 후보는 키마다 바뀌므로 애니메이션을 걸지 않는다
         // (매 키 입력마다 툴바가 꿈틀거리면 산만하고 비용도 든다)
         .animation(.spring(duration: 0.28, bounce: 0.25), value: snippet?.title)
+    }
+
+    private var candidateDivider: some View {
+        Rectangle()
+            .fill(theme.keyText.opacity(0.2))
+            .frame(width: 1, height: 18)
+    }
+
+    /// 추천단어 칩 하나 — 단어 칩과 이모지 칩이 **같은 버튼**을 쓴다(Q8 — 받는 타입만 바꿨다).
+    /// 이모지 칩은 VoiceOver 라벨이 따로 있다(6-2절 — 🚕를 애플 이름표 「택시」로 읽지 않게).
+    /// 칩 텍스트는 칩이 떠 있는 동안 바뀌지 않는다(뽑은 값 고정, D9) — 누르는 도중 서브트리도 그대로다.
+    private func wordChip(
+        _ candidate: WordSuggestionCandidate, padding: CGFloat,
+        action: @escaping (WordSuggestionCandidate) -> Void
+    ) -> some View {
+        Button(candidate.insertionText) { action(candidate) }
+            .font(.system(size: 17))
+            .foregroundStyle(theme.keyText)
+            .lineLimit(1)
+            // 배지가 오른쪽 폭을 가져가므로 긴 후보는 줄여 넣는다 (계획서 2-1).
+            // 자르는 대신 줄이는 이유: 「창조하시니라」가 「창조하…」가 되면
+            // 무엇을 넣을지 알 수 없다.
+            .minimumScaleFactor(0.7)
+            .padding(.horizontal, padding)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
+            .accessibilityLabel(candidate.accessibilityLabel)
     }
 
     /// 성경 검색 배지 — 건수가 있을 때만 그린다. **자리는 두 가지다** (v1.1.0).

@@ -296,6 +296,14 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.selectedThemeID = selectedThemeID
     }
 
+    /// 이모지 칩을 계산해도 되는가 — `추천단어 ∧ 추천단어에 이모지 ∧ !secure`
+    /// (PDR `emoji-word-suggestion.md` 3-2절·5-3절, D2). 채움글 칩·✕ 억제 같은 툴바 우선순위는
+    /// KeyboardCore `WordSuggestionGate`가 따로 본다. 식을 여기 두는 이유는 `allowsBibleSearch`와 같다 —
+    /// 익스텐션 타깃은 `swift test`가 닿지 않는다. 전체 접근과 무관하다(번들 사전 읽기뿐 — 7절).
+    public func allowsEmojiChips(isSecureTextEntry: Bool?) -> Bool {
+        suggestionsEnabled && emojiWordSuggestionsEnabled && isSecureTextEntry != true
+    }
+
     /// 설정을 읽지 못했을 때 쓰는 기본값.
     ///
     /// 익스텐션 쪽에도 이 값이 있어야 App Group 접근이 실패해도 키보드가 동작한다.

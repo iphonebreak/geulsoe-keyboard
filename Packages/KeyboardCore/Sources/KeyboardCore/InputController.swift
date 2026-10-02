@@ -596,6 +596,32 @@ public final class InputController {
         updateAutoCapitalization()
     }
 
+    /// 이모지 칩 탭 — 치던 단어를 지우고 `text`(`🚗 자동차` 또는 `🚗`)를 넣는다(PDR emoji-word-suggestion 1-2·1-3절).
+    ///
+    /// **정합 검사(채움글 칩과 같은 방어).** 꼬리 끝 한글 run이 **칩이 든 원본 단어와 같을 때만** 바꾼다 —
+    /// 「큰자동차」에 「자동차」 칩이면 거절한다(세 글자만 지우면 「큰🚗 자동차」가 된다). 꼬리가 이미 `text`로
+    /// 끝나면(혼합 칩 퇴장 중 더블탭 — 넣은 「자동차」가 다시 꼬리 끝 run이라 위 검사를 통과한다) 거절한다.
+    /// 어긋나면 **아무 것도 하지 않는다.** 첫 층 방어는 조립 지점의 「지금 떠 있는 칩만」이다.
+    ///
+    /// **학습으로 보내지 않는다**(5-3절, 수용 기준 4) — `completeWord`와 달리 `onWordCommitted`를 부르지 않는다.
+    /// 이모지가 섞인 삽입분은 사용자가 친 단어가 아니다. 다음 구분자가 넣은 「자동차」를 다시 보내지 않게
+    /// `suppressesNextWordCommit`을 켜고, 이어 치면 풀려 「자동차는」처럼 사용자가 완성한 run은 학습된다.
+    /// - Returns: 실제로 바꿨으면 true.
+    @discardableResult
+    public func replaceCurrentWord(_ sourceWord: String, with text: String) -> Bool {
+        guard !sourceWord.isEmpty, !text.isEmpty, currentWord == sourceWord, !textTail.hasSuffix(text)
+        else { return false }
+        lastSpaceTimestamp = nil
+        commitComposition()  // 조합 확정 + 소스 리셋 — 문서 텍스트는 안 변한다
+        output.deleteBackward(sourceWord.count)
+        output.insertText(text)
+        committedTail.removeLast(min(sourceWord.count, committedTail.count))
+        appendToTail(text)
+        suppressesNextWordCommit = true
+        updateAutoCapitalization()
+        return true
+    }
+
     /// 외부에서 온 텍스트(인증번호 붙여넣기 등)를 그대로 삽입한다.
     /// 조합은 확정되고, 삽입분은 학습 대상이 아니다.
     public func insertProvidedText(_ text: String) {

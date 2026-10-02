@@ -1,9 +1,10 @@
 /// 이모지 칩 뽑기 — **단어를 다 친 순간 한 번 뽑고, 칩이 떠 있는 동안 고정, 다시 치면 새로 뽑는다**
 /// (PDR `docs/design-reviews/emoji-word-suggestion.md` 확정 결정 D9).
 ///
-/// 조립 지점은 추천단어 줄을 다시 계산할 때마다(키 입력·`textDidChange`·sync) 지금 단어와 그 묶음
-/// (`EmojiCandidateResolver.candidates(for:)`)으로 `emoji(for:from:)`를 부른다 — **단어가 없거나 묶음이
-/// 비어도 부른다.** 그래야 「다른 단어가 됐다가(또는 비었다가) 다시 그 단어」를 알아 새로 뽑는다.
+/// **사용자 편집**(키 입력·후보 탭) 뒤 재계산마다 지금 단어와 그 묶음(`EmojiCandidateResolver.candidates(for:)`)으로
+/// `emoji(for:from:)`를 부른다 — **단어가 없거나 묶음이 비어도 부른다.** 그래야 「다른 단어가 됐다가(또는
+/// 비었다가) 다시 그 단어」를 알아 새로 뽑는다. 호스트 sync 뒤에는 `peek(for:in:)`만 쓴다 — sync 중간값으로
+/// 기억을 버리면 같은 단어인데 값이 바뀐다(검증 ⑤-2a 참고 2). 이 갈래는 `EmojiChipState`가 쥔다.
 ///
 /// - 같은 단어가 이어서 오면(호스트 메아리 sync·재계산 포함) 같은 값 — 난수를 쓰지 않는다
 /// - 단어가 바뀌거나 묶음이 비면 기억을 버린다 → 같은 단어가 다시 오면 새로 뽑는다
@@ -33,6 +34,14 @@ public struct EmojiDraw: Sendable {
         self.word = word
         self.emoji = pick
         return pick
+    }
+
+    /// 기억만 본다 — 같은 단어이고 고정 값이 아직 묶음 안이면 그 값, 아니면 nil. **기억을 버리지도 새로
+    /// 뽑지도 않는다.** 사용자 편집이 아닌 재계산(호스트 sync)이 쓴다 — sync가 꼬리를 잠깐 비웠다 다시
+    /// 세워도 값이 바뀌지 않게(검증 ⑤-2a 참고 2, `EmojiChipState`).
+    public func peek(for word: String, in candidates: [String]) -> String? {
+        guard word == self.word, let emoji, candidates.contains(emoji) else { return nil }
+        return emoji
     }
 
     /// 시스템 난수원으로 뽑는다 — 제품 경로.

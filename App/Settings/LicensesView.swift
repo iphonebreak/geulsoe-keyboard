@@ -37,7 +37,7 @@ struct LicensesView: View {
                         .font(.headline)
                     Text("""
                     추천단어 줄에 함께 보여 주는 이모지는 Unicode CLDR 48.2의 한국어 이모지 이름·키워드로 \
-                    만든 색인에서 고르며, 글쇠가 고른 손질 목록을 더했습니다. CLDR 데이터는 \
+                    만든 색인에서 고르며, 글쇠가 직접 고른 단어·이모지 짝을 더했습니다. CLDR 데이터는 \
                     Unicode License v3(Unicode-3.0)로 제공됩니다. Copyright © 2004-2026 Unicode, Inc.
                     """)
                     .font(.footnote)
