@@ -1,5 +1,6 @@
 import Testing
 import CoreGraphics
+import TadakDomain
 import KeyboardCore
 @testable import KeyboardUI
 
@@ -87,12 +88,17 @@ struct KeyboardMetricsTests {
     // MARK: - 도구 행 (REQ-4)
 
     /// 아이폰 도구 행은 지금 모습 그대로여야 한다 — 합의된 레이아웃이다.
-    /// 아이폰에서 나오는 버튼 폭(폭 320~440pt · 도구 4~5개)이 전부 상한 아래인지 단정한다.
+    /// 아이폰에서 나오는 버튼 폭이 전부 상한 아래인지 단정한다.
+    ///
+    /// ★ **도구 수에 6을 넣었다** (2026-09-22, 검증자 지적). `.bibleSearch` 편입으로
+    /// **6칸이 기본**이 됐는데 이 파일은 5칸까지만 잠그고 있었다 —
+    /// 「6칸 회귀 테스트」가 다른 파일(`TadakDomain`)에 새로 생겼을 뿐 **지적된 자리는 안 닫혔다.**
+    /// 여기서 재는 것은 스트립 이름표가 아니라 **키보드 툴바 버튼 폭**이라 둘은 다른 치수다.
     @Test("아이폰에서는 도구 버튼 폭 상한에 걸리지 않는다")
     func toolRowUnclampedOnPhone() {
         let toolbarPadding: CGFloat = 20  // KeyboardRootView의 .padding(.horizontal, 10)
         for screenWidth in [320.0, 375.0, 393.0, 402.0, 440.0] as [CGFloat] {
-            for count in [4, 5] {
+            for count in [4, 5, 6] {
                 let available = screenWidth - toolbarPadding
                     - CGFloat(count - 1) * KeyboardMetrics.toolButtonSpacing
                 let evenWidth = available / CGFloat(count)
@@ -108,12 +114,15 @@ struct KeyboardMetricsTests {
     @Test("아이패드 가로에서는 도구 행이 상한에 걸려 가운데로 모인다")
     func toolRowClampedOnWideKeyboard() {
         let available: CGFloat = 894 - 20   // 자판 폭 안의 툴바 가용 폭
-        for count in [4, 5] {
+        // ★ 6칸에서도 상한이 걸려야 한다 — 6칸 상한은 650pt로 가용 874pt보다 작다
+        for count in [4, 5, 6] {
             let cap = KeyboardMetrics.toolRowMaxWidth(count: count)
             #expect(cap < available, "도구 \(count)개 상한 \(cap)pt가 가용 \(available)pt보다 작아야 한다")
         }
         // 도구 5개일 때 버튼 중심 간격 = 버튼 폭 + 간격 = 110pt (수정 전 178pt)
         #expect(KeyboardMetrics.maxToolButtonWidth + KeyboardMetrics.toolButtonSpacing == 110)
+        // ★ 기본 도구 수가 바뀌면 위 [4,5,6] 범위도 다시 봐야 한다 — 그 전제를 여기서 잠근다
+        #expect(ToolbarTool.allCases.count == 6, "도구 수가 바뀌었다 — 이 파일의 count 범위를 갱신하라")
     }
 
     /// 조립 지점은 배열에서 곧바로 상한을 얻는다. 배열 → 열 수 → 상한 경로가 이어지는지 본다.

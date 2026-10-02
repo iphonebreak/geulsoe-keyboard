@@ -10,7 +10,7 @@ public enum SettingsChangeNotifier {
     /// 알림 이름 — 번들 접두를 붙여 다른 앱과 충돌하지 않게
     public static let name = "com.charging.tadak.settingsChanged"
 
-    /// 앱이 설정·내 문구를 저장한 직후 호출한다.
+    /// 앱이 설정·내 채움글을 저장한 직후 호출한다.
     public static func post() {
         CFNotificationCenterPostNotification(
             CFNotificationCenterGetDarwinNotifyCenter(),

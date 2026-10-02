@@ -843,6 +843,81 @@ struct SnippetEntryMigrationTests {
     }
 }
 
+/// ★ **편집 시트의 단축어 왕복** (사장님 결정 2026-09-23 — 「내 문구」 편집 진입점).
+///
+/// ## 왜 이 스위트가 지금 생겼나
+///
+/// 「저장하면 `triggers`로 인코딩되는가」가 **두 번 연속 미확인**으로 남아 있었다.
+/// 원인은 단순했다 — **목록 행을 눌러도 시트가 안 열려서** 저장까지 끌고 갈 수가 없었다.
+/// 편집 진입점이 생기며 그 경로가 열렸고, 여기서 **불러오기 → 고치기 → 저장**을 고정한다.
+///
+/// ## 무엇을 고정하나
+///
+/// 시트는 단축어를 **쉼표로 합쳐 보여 주고**(`triggers.joined(separator: ", ")`),
+/// 저장할 때 **`SnippetEntry.parseTriggers`가 쉼표로 나눈다.**
+/// 즉 왕복의 양끝이 **같은 규약**을 탄다 — 그 둘이 갈리면 사용자가 고친 것이 조용히 사라진다.
+/// 시트 자체는 `App/` 타깃이라 `swift test`가 못 보므로, **그 둘이 쓰는 도메인 함수**를 검사한다.
+@Suite("단축어 — 편집 시트 왕복")
+struct SnippetEditorRoundTripTests {
+
+    /// 시트가 불러올 때 쓰는 식 — `SnippetEditorView.init`과 **같은 표현**이다.
+    private func load(_ entry: SnippetEntry) -> String {
+        entry.triggers.joined(separator: ", ")
+    }
+
+    @Test("★ 단축어 3개를 불러 하나 지우고 하나 더해 저장하면 triggers가 기대대로다")
+    func editThreeTriggers() throws {
+        let original = SnippetEntry(
+            triggers: ["우리집주소", "집주소", "우리집"], title: "집", body: "서울시 ...")
+
+        // 1) 불러오기 — 쉼표로 합쳐 보인다
+        let shown = load(original)
+        #expect(shown == "우리집주소, 집주소, 우리집")
+
+        // 2) 사용자가 고친다 — 「집주소」를 빼고 「우리집주소요」를 더한다
+        let edited = "우리집주소, 우리집, 우리집주소요"
+
+        // 3) 저장 — 시트가 쓰는 그 파서다
+        let saved = SnippetEntry.parseTriggers(edited)
+        #expect(saved == ["우리집주소", "우리집", "우리집주소요"])
+
+        // 4) 저장된 항목이 실제로 그 셋을 들고, **새 키로** 인코딩된다
+        let entry = SnippetEntry(triggers: saved, title: original.title, body: original.body)
+        let data = try JSONEncoder().encode(entry)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains("triggers"))
+        #expect(!text.contains("\"trigger\""))
+        #expect(try JSONDecoder().decode(SnippetEntry.self, from: data).triggers == saved)
+    }
+
+    /// 불러온 그대로 저장하면 **하나도 달라지지 않는다.** 왕복의 항등성이다 —
+    /// 여기가 깨지면 사용자가 시트를 열었다 닫기만 해도 단축어가 바뀐다.
+    @Test("★ 고치지 않고 저장하면 그대로다", arguments: [
+        ["우리집주소"],
+        ["우리집주소", "집주소"],
+        ["우리집주소", "집주소", "우리집"]
+    ])
+    func identityRoundTrip(triggers: [String]) {
+        let entry = SnippetEntry(triggers: triggers, title: "집", body: "본문")
+        #expect(SnippetEntry.parseTriggers(load(entry)) == triggers)
+    }
+
+    /// 파서 규약이 왕복에 그대로 걸린다 — **정규화 기준 중복 제거**다.
+    /// 사용자가 「집주소, 집 주소」로 고쳐도 **하나로 접힌다**(둘은 같은 단축어다).
+    @Test("고칠 때 넣은 중복은 정규화 기준으로 접힌다")
+    func duplicatesCollapseOnSave() {
+        #expect(SnippetEntry.parseTriggers("집주소, 집 주소") == ["집주소"])
+        #expect(SnippetEntry.parseTriggers("우리집주소,  , 집주소") == ["우리집주소", "집주소"])
+    }
+
+    /// 빈 시트(추가)에서 아무것도 안 치면 저장 버튼이 막히는 조건 — 파서가 빈 배열을 준다.
+    @Test("빈 입력은 빈 배열이다 — 저장 버튼이 막히는 근거")
+    func emptyInputGivesNothing() {
+        #expect(SnippetEntry.parseTriggers("").isEmpty)
+        #expect(SnippetEntry.parseTriggers("  ,  , ").isEmpty)
+    }
+}
+
 @Suite("단축어 — 띄어쓰기 무시 매칭")
 struct SnippetSpacingTests {
 
@@ -879,6 +954,61 @@ struct SnippetSpacingTests {
         let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "본문")
         let hit = try #require(matcher([entry]).suggestion(forTail: "보내줄게 우리집 주소"))
         #expect(hit.trigger == "우리집 주소", "앞 공백을 먹지 않는다")
+    }
+
+    // MARK: - ★ 줄바꿈은 경계다 (사장님 결정 2026-09-23)
+
+    /// ## 무엇이 문제였나
+    ///
+    /// 「우 리 집 주 소」가 먹는 것과 **같은 규칙으로 줄이 갈려도 붙었다.**
+    /// 꼬리를 뒤에서 앞으로 풀 때 **비공백만 모았고**, 개행도 `isWhitespace`라 공백처럼
+    /// 건너뛰었기 때문이다. 그래서 2~3자 짧은 단축어가 **엉뚱한 줄에서 발동**할 수 있었다.
+    ///
+    /// ## ★ 고친 자리 — `normalizedTrigger`가 **아니다**
+    ///
+    /// 그 함수는 설정의 **중복 판정**과 키보드의 **발동**이 공유하는 단일 출처다
+    /// (`CLAUDE.md`: *"정규화는 이 한 함수뿐"*). 거기를 고치면 중복 판정까지 바뀌고,
+    /// 애초에 **등록된 단축어에 개행이 들어갈 일이 없다.**
+    /// 고친 곳은 **꼬리를 되짚는 쪽**(`SnippetMatcher.suggestion(forTail:)`)이다.
+    @Test("★ 같은 줄의 공백은 그대로 건너뛴다 — 고친 뒤에도 안 깨진다", arguments: [
+        "우리집주소", "우리집 주소", "우 리 집 주 소", "우리집  주소"
+    ])
+    func newlineFixKeepsSameLineSpacing(tail: String) throws {
+        let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "본문")
+        _ = try #require(matcher([entry]).suggestion(forTail: tail), "같은 줄 공백 무시가 깨졌다")
+    }
+
+    /// ★ 줄이 갈리면 **발동하지 않는다.** `\n`·`\r`·`\r\n` 전부.
+    @Test("★ 줄바꿈을 건너뛰어 매칭하지 않는다", arguments: [
+        "우리집\n주소", "우리집\r주소", "우리집\r\n주소", "우리집\n 주소", "우리집 \n 주소"
+    ])
+    func doesNotMatchAcrossNewline(tail: String) throws {
+        let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "본문")
+        #expect(matcher([entry]).suggestion(forTail: tail) == nil,
+                "줄이 갈렸는데 붙었다: \(tail.debugDescription)")
+    }
+
+    /// 경계 **뒤**는 정상이다 — 개행 다음에 온전한 단축어가 오면 발동한다.
+    @Test("개행 뒤에 온전히 있으면 발동한다")
+    func matchesAfterNewline() throws {
+        let entry = SnippetEntry(triggers: ["우리집주소"], title: "집", body: "본문")
+        let hit = try #require(matcher([entry]).suggestion(forTail: "앞줄입니다\n우리집 주소"))
+        #expect(hit.body == "본문")
+        // ★ 지울 길이는 여전히 **꼬리 원문 기준**이고 개행을 먹지 않는다
+        #expect(hit.trigger == "우리집 주소")
+        #expect(hit.triggerLength == 6)
+    }
+
+    /// ★ 짧은 단축어가 **엉뚱한 줄에서** 발동하던 것이 이 결정의 이유다.
+    @Test("★ 짧은 단축어가 줄을 넘어 발동하지 않는다")
+    func shortTriggerDoesNotLeakAcrossLines() throws {
+        let entry = SnippetEntry(triggers: ["ㄱㄴ"], title: "짧은", body: "본문")
+        // 「ㄱ」으로 끝난 줄 + 「ㄴ」으로 시작한 줄 — 고치기 전에는 이것이 붙었다.
+        // ★ 매칭은 **접미사**라 단축어가 꼬리 **끝**에 와야 판정이 성립한다
+        //   (「ㄴ다음줄」처럼 뒤에 글자가 더 있으면 애초에 안 맞아서 시험이 무의미해진다).
+        #expect(matcher([entry]).suggestion(forTail: "안녕ㄱ\nㄴ") == nil)
+        // 같은 줄이면 그대로 발동한다
+        _ = try #require(matcher([entry]).suggestion(forTail: "안녕 ㄱ ㄴ"))
     }
 
     @Test("단축어 여러 개 — 어느 쪽으로 쳐도 매칭된다", arguments: ["우리집주소", "집주소", "집 주소"])

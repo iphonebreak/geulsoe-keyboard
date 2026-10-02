@@ -19,6 +19,15 @@ public enum KeyEvent: Equatable, Sendable {
     /// 천지인 이동(→) 키 — 공백 없이 조합만 확정한다.
     /// 같은 자음을 순환 없이 이어 칠 때 쓴다 (학 + → + ㄱ = "학ㄱ")
     case advance
+    /// 키패드형 페이지 넘김 — 다음(숫자 → 기호1 → 기호2 → 기호3 → 숫자). 페이지 키의 **탭**이다
+    /// (PDR `number-symbol-keypad.md` 4-3절)
+    case keypadPageNext
+    /// 키패드형 페이지 넘김 — 이전. 같은 페이지 키를 **길게** 누르면 나간다(`Key.alternate`)
+    case keypadPagePrevious
+    /// 연타 순환 키 — 키패드형 숫자 페이지의 `.,*/`·`-+`(삼성 3×4 선례, 키패드 개정 2026-09-28). 탭 = 첫 글자.
+    /// **같은 키를 제한 시간 안에 다시 누르면** 방금 넣은 글자를 다음 글자로 바꾼다(마지막 다음은 처음).
+    /// 시간·끊김 규칙은 `InputController`(`multiTapTimeout`)가 정한다 — 키캡은 이 이벤트만 낸다
+    case multiTap([String])
     /// 빈 자리(스페이서) — 아무 동작 없음. 행 폭을 맞춰 글자 열을 가운데 정렬할 때 쓴다
     /// (단모음 3행). UI는 키 표면을 그리지 않는다.
     case spacer
@@ -44,6 +53,10 @@ public enum InputMode: Equatable, Sendable {
     case symbolsAlternate
     /// 숫자 패드 — 입력란이 숫자 전용일 때 (`keyboardType`). 문자가 바로 커밋된다
     case numberPad(NumberPadKind)
+    /// 키패드형 숫자·기호 자판(설정 `symbolKeyboardStyle == .keypad`) — 0 = 숫자, 1~3 = 기호.
+    /// **`numberPad`와 별개다** — 그쪽은 숫자 전용 입력란이 자동으로 띄우는 것이고(리턴 없음),
+    /// 이쪽은 일반 입력란에서 「123」으로 들어온다(PDR 3-2절).
+    case keypadPad(page: Int)
 
     /// 기호 자판인가 (두 페이지 공통 처리용)
     public var isSymbols: Bool {
@@ -52,6 +65,13 @@ public enum InputMode: Equatable, Sendable {
 
     public var isNumberPad: Bool {
         if case .numberPad = self { return true }
+        return false
+    }
+
+    /// 키패드형 자판(어느 페이지든)인가. `isSymbols`는 **쿼티형 두 페이지**만 뜻한다 — 그 뜻을 넓히지 않고
+    /// 따로 둔다(쿼티형 사용자 경로도 `isSymbols`를 지나므로, PDR 4-1절·반론자1 급소⑥-2)
+    public var isKeypadPad: Bool {
+        if case .keypadPad = self { return true }
         return false
     }
 

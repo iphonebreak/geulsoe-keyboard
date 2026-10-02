@@ -20,8 +20,8 @@ settings:
     DEVELOPMENT_TEAM: "7B5W35XPMW"
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
-    MARKETING_VERSION: "1.0.1"
-    CURRENT_PROJECT_VERSION: "2"
+    MARKETING_VERSION: "1.2.0"
+    CURRENT_PROJECT_VERSION: "3"
 
 packages:
   # 이 저장소의 첫 외부 의존성 (2026-09-11, 사용자 결정). 나머지는 전부 로컬 경로다.
@@ -149,6 +149,17 @@ targets:
     platform: iOS
     sources:
       - path: UITests
+      # ★ 테마 목록 SSOT를 **리소스로만** 복사한다 (v1.2.0 ⑩-4).
+      #
+      # 형광펜 8조합 시험(`testHighlightAcrossThemes`)이 테마 이름을 하드코딩해, `Themes.json`에
+      # 5번째 테마를 넣으면 **조용히 커버리지에서 빠졌다**(늘어나는 경우는 아무도 모른다 —
+      # `docs/release/verify-v110-8combo-final.md` H). CLAUDE.md의 「새 테마 = JSON 항목 추가,
+      # 코드 변경 없음」과 충돌한다. 그래서 시험이 이 파일을 읽어 그 수만큼 돈다.
+      #
+      # **TadakData를 링크하지 않는다** — 그러면 `bible.tdb`까지 테스트 번들로 끌려온다.
+      # 파일 하나만 복사하고, 디코딩은 이미 링크한 `TadakDomain.ThemeSpec`(앱과 같은 타입)으로 한다.
+      - path: Packages/TadakData/Sources/TadakData/Resources/Themes.json
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.charging.tadak.uitests
@@ -156,6 +167,12 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: Tadak
+      # ★ 도구 이름을 **UITests가 계산해서** 쓰기 위해서다 (2026-09-22).
+      #
+      # 배지를 접근성 라벨로 찾는 술어가 문자열 박기였고, 이름이 두 번 바뀌는 동안
+      # UITests만 안 따라와 **형광펜 8조합을 못 쟀고 XCTAssertFalse 한 자리의 검사력이 0**이 됐다.
+      # `TadakDomain`은 의존성 0인 순수 Swift라 테스트 번들에 링크해도 딸려 오는 것이 없다.
+      - package: TadakDomain
 
 schemes:
   Tadak:

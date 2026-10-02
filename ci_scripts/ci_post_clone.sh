@@ -84,18 +84,62 @@ fi
 # ---------------------------------------------------------------------------
 # 3. 서명 팀 — Xcode Cloud가 `CI_TEAM_ID`로 알려 준다
 #
-# `project.yml:13`의 `DEVELOPMENT_TEAM`은 로컬에서 빈 문자열이다(팀 ID를 저장소에 두지 않는다).
-# CI에서는 환경 변수 값으로 채워 넣는다 — 저장소를 고치지 않고도 서명이 선다.
+# ★ 지금 `project.yml`의 `DEVELOPMENT_TEAM`에는 **팀 ID가 이미 들어 있다**(2026-09-14 사용자 제공값,
+#   `project.yml` settings.base). 처음 이 단계를 쓸 때는 빈 문자열이었고 그 빈 값을 `CI_TEAM_ID`로 채우는
+#   것이 목적이었다. 값이 박힌 뒤로 아래 치환은 **맞는 줄이 없어 아무것도 바꾸지 않는다.** 예전 로그는
+#   그래도 「CI_TEAM_ID로 채운다」를 찍어 사실과 달랐다(v1.2.0 검증자 지적) — 지금은 **실제로 일어난 일**을 찍는다.
+# ★ 동작은 그대로 둔다 — 빈 값으로 되돌리는 날(팀 ID를 저장소에서 빼는 날) 다시 제 몫을 한다.
 # 값이 없으면 **막지 않는다.** Xcode Cloud가 서명을 스스로 관리하는 구성일 수 있어서,
-# 여기서 실패시키면 멀쩡한 빌드를 막게 된다. 대신 로그에 크게 남긴다.
+# 여기서 실패시키면 멀쩡한 빌드를 막게 된다.
 # ---------------------------------------------------------------------------
 if [ -n "${CI_TEAM_ID:-}" ]; then
-    echo "DEVELOPMENT_TEAM: CI_TEAM_ID로 채운다"
+    if grep -q 'DEVELOPMENT_TEAM: ""' project.yml; then
+        echo "DEVELOPMENT_TEAM: project.yml이 빈 값이다 — CI_TEAM_ID로 채운다"
+    elif grep -q "DEVELOPMENT_TEAM: \"$CI_TEAM_ID\"" project.yml; then
+        echo "DEVELOPMENT_TEAM: project.yml에 이미 값이 있고 CI_TEAM_ID와 같다 — 치환할 것이 없다"
+    else
+        echo "주의: project.yml의 DEVELOPMENT_TEAM이 CI_TEAM_ID와 **다르다** — 치환하지 않는다(project.yml 값으로 서명한다)."
+        echo "      서명 단계에서 실패하면 이 줄을 먼저 의심하라."
+    fi
     /usr/bin/sed -i '' "s/DEVELOPMENT_TEAM: \"\"/DEVELOPMENT_TEAM: \"$CI_TEAM_ID\"/" project.yml
     grep -n "DEVELOPMENT_TEAM" project.yml || true
 else
-    echo "주의: CI_TEAM_ID가 없다. project.yml의 DEVELOPMENT_TEAM이 빈 값 그대로다."
-    echo "      서명 단계에서 실패하면 이 줄을 먼저 의심하라."
+    echo "CI_TEAM_ID가 없다 — project.yml의 DEVELOPMENT_TEAM 값을 그대로 쓴다(로컬 실행이면 정상)."
+    grep -n "DEVELOPMENT_TEAM" project.yml || true
+fi
+
+# ---------------------------------------------------------------------------
+# 3-1. 빌드 번호 — Xcode Cloud가 `CI_BUILD_NUMBER`로 알려 준다 (v1.2.0 ⑧)
+#
+# `project.yml`의 `CURRENT_PROJECT_VERSION`은 로컬 고정값이다. 그대로 두면 같은 버전을 두 번
+# 아카이브할 때 번호가 겹친다(`docs/release/submission-state.md` 「빌드 번호 자동화」).
+# 위 3단계와 같은 모양으로 CI에서만 채운다 — **xcodegen이 읽기 전**이어야 반영된다.
+# 로컬에는 `CI_BUILD_NUMBER`가 없어 이 분기를 타지 않는다.
+#
+# 이 값은 최상위 `settings.base` 한 곳에만 있고 앱·익스텐션 타깃은 덮어쓰지 않는다 —
+# 두 타깃의 `Info.plist`가 같은 `$(CURRENT_PROJECT_VERSION)`을 읽으므로 한 번 바꾸면 둘 다 바뀐다.
+#
+# 3단계와 다른 점 둘 — 번호가 틀리면 조용히 넘어가는 것이 더 나쁘기 때문이다:
+#   - 숫자가 아니면 실패시킨다(`CFBundleVersion`에 들어갈 값이다).
+#   - 치환 뒤 되읽어 실제로 바뀌었는지 확인한다. `project.yml`의 표기가 바뀌어 패턴이 안 맞으면
+#     옛 번호로 아카이브돼 업로드에서야 충돌이 드러난다.
+# ---------------------------------------------------------------------------
+if [ -n "${CI_BUILD_NUMBER:-}" ]; then
+    case "$CI_BUILD_NUMBER" in
+        *[!0-9]*)
+            echo "실패: CI_BUILD_NUMBER가 숫자가 아니다: $CI_BUILD_NUMBER" >&2
+            exit 1
+            ;;
+    esac
+    echo "CURRENT_PROJECT_VERSION: CI_BUILD_NUMBER($CI_BUILD_NUMBER)로 채운다"
+    /usr/bin/sed -i '' "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"$CI_BUILD_NUMBER\"/" project.yml
+    if ! /usr/bin/grep -q "CURRENT_PROJECT_VERSION: \"$CI_BUILD_NUMBER\"" project.yml; then
+        echo "실패: project.yml의 CURRENT_PROJECT_VERSION을 바꾸지 못했다 — 표기가 바뀌었는지 확인하라." >&2
+        exit 1
+    fi
+    grep -n "CURRENT_PROJECT_VERSION\|MARKETING_VERSION" project.yml || true
+else
+    echo "CURRENT_PROJECT_VERSION: CI_BUILD_NUMBER가 없다 — project.yml 값 그대로 쓴다(로컬 실행)"
 fi
 
 # ---------------------------------------------------------------------------

@@ -4,7 +4,9 @@ import TadakData
 
 /// 채움글 화면 상단의 안내 애니메이션 카드 — iOS 설정 > 제어 센터 상단의 반복 애니메이션과 같은 역할.
 ///
-/// 장면: "생일축하" 타이핑을 확대 → 축소 → 툴바에 뜬 채움글 칩을 확대 → 탭 → 전문으로 치환 → 반복.
+/// 장면 다섯이 순환한다(`SnippetIntroScenario.loop`) — 생일축하(인사말 칩) → 사랑(「단어로 구절 찾기」 배지 → 구절 목록,
+/// v1.2.0 ⑦) → 오늘 날짜 → 사흘 후 날짜 → 지금 시간(날짜·시간 팩, v1.2.0 ②). 각 장면은 같은 카메라 안무다:
+/// 타이핑 확대 → 축소 → 툴바 반응 확대 → 탭 → 결과 → 페이드.
 /// 캔버스(모형 화면 360×336)는 고정 레이아웃이고 **카메라 변환(scaleEffect + offset)만** 움직인다 —
 /// 루프 중 레이아웃 재계산이 없다. 화면을 떠나면(`.task` 취소) 멈추고, 돌아오면 처음부터 다시 돈다.
 /// 동작 줄이기(접근성)가 켜져 있으면 마지막 장면 정지 화면만 보인다.
@@ -22,7 +24,7 @@ struct SnippetIntroAnimationView: View {
     static let canvasSize = CGSize(width: MockKeyboardView.width, height: hostHeight + MockKeyboardView.height)
     static let cornerRadius: CGFloat = 10
 
-    @State private var scene: SnippetIntroScene = .initial
+    @State private var scene: SnippetIntroScene = .initial(.birthday)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
@@ -60,7 +62,9 @@ struct SnippetIntroAnimationView: View {
         .clipShape(RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("채움글 사용 예")
-        .accessibilityValue("입력란에 생일축하를 치면 툴바에 [생일 축하] 칩이 뜨고, 칩을 누르면 축하 인사 전문으로 바뀌어요.")
+        // 장면이 다섯이라 한 문장에 담는다 — 카드 전체가 한 요소라 장면마다 값을 바꾸면 VoiceOver가 계속 새로 읽는다
+        .accessibilityValue("생일축하를 치면 칩이 뜨고 누르면 축하 인사 전문으로 바뀌어요. 사랑을 치면 성경 구절 찾기 배지가 뜨고, "
+            + "오늘 날짜·사흘 후 날짜·지금 시간을 치면 계산한 날짜와 시각을 넣어요.")
         .accessibilityAddTraits(.isImage)
         .task(id: TimelineKey(isActive: scenePhase == .active, reduceMotion: reduceMotion)) {
             guard !reduceMotion, scenePhase == .active else {
@@ -69,14 +73,16 @@ struct SnippetIntroAnimationView: View {
             }
             do {
                 while true {
-                    try Task.checkCancellation()
-                    try await SnippetIntroScript.run { animation, mutate in
-                        if let animation {
-                            withAnimation(animation) { mutate(&scene) }
-                        } else {
-                            var transaction = Transaction()
-                            transaction.disablesAnimations = true
-                            withTransaction(transaction) { mutate(&scene) }
+                    for scenario in SnippetIntroScenario.loop {
+                        try Task.checkCancellation()
+                        try await SnippetIntroScript.run(scenario) { animation, mutate in
+                            if let animation {
+                                withAnimation(animation) { mutate(&scene) }
+                            } else {
+                                var transaction = Transaction()
+                                transaction.disablesAnimations = true
+                                withTransaction(transaction) { mutate(&scene) }
+                            }
                         }
                     }
                 }
@@ -96,6 +102,7 @@ private struct MockPhoneCanvas: View {
     let showsKeyPreview: Bool
     let showsLongPressHints: Bool
 
+    /// 입력란을 2줄로 키우는가 — 긴 인사말 전문이 들어왔을 때만(날짜·시각 결과는 한 줄)
     private var showsBody: Bool { scene.text == SnippetIntroDemo.body }
 
     var body: some View {
@@ -151,7 +158,7 @@ private struct MockPhoneCanvas: View {
             RoundedRectangle(cornerRadius: 1)
                 .fill(palette.accent)
                 .frame(width: 2, height: 18)
-                .opacity(showsBody ? 0 : 1)
+                .opacity(scene.showsResult ? 0 : 1)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 14)

@@ -167,6 +167,20 @@ public enum BibleReferenceParser {
         "요한삼서", "유다서", "요한계시록"
     ]
 
+    /// 책 번호(1~66) → 정식 명칭. 범위를 벗어나면 nil.
+    ///
+    /// 검색 패널의 책 필터 탭이 쓴다 — **표를 두 벌 두지 않기 위해** 여기서 공개한다.
+    public static func fullName(ofBook book: Int) -> String? {
+        guard (1...fullNames.count).contains(book) else { return nil }
+        return fullNames[book - 1]
+    }
+
+    /// 책 번호(1~66) → 관용 약칭(`창`·`고전`). 검색 결과 행의 「창 13:30」 표기가 쓴다.
+    public static func abbreviation(ofBook book: Int) -> String? {
+        guard (1...abbreviations.count).contains(book) else { return nil }
+        return abbreviations[book - 1]
+    }
+
     /// 관용 약칭 (개역 표준 약어). 순서는 fullNames와 동일.
     private static let abbreviations: [String] = [
         "창", "출", "레", "민", "신",

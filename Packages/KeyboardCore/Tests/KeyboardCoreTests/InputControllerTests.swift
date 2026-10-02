@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import HangulEngine
+import TadakDomain
 @testable import KeyboardCore
 
 /// 문서에 가해진 조작을 그대로 기록하는 fake.
@@ -776,5 +777,449 @@ struct InputControllerMultiCharacterKeyTests {
         #expect(output.text == "가.com@")
         controller.handle(.character(","))
         #expect(output.text == "가.com@,")
+    }
+}
+
+// MARK: - 키패드형 숫자·기호 자판 (v1.2.0 ⑥, PDR `docs/design-reviews/number-symbol-keypad.md` 5·8절)
+
+/// 모드 전환·복귀가 사는 자리가 여기다 — HangulEngine은 `KeyEvent`·`InputMode`를 모른다(PDR 5절 정정).
+@MainActor
+@Suite("InputController — 키패드형 자판")
+struct InputControllerKeypadTests {
+
+    private func keypadController(
+        source: JamoSource = DubeolsikSource(), clock: (() -> TimeInterval)? = nil
+    ) -> (RecordingOutput, InputController) {
+        let output = RecordingOutput()
+        let controller = clock.map { InputController(output: output, hangulSource: source, clock: $0) }
+            ?? InputController(output: output, hangulSource: source)
+        controller.symbolKeyboardStyle = .keypad
+        return (output, controller)
+    }
+
+    @Test("기본은 쿼티형 — 「123」은 지금처럼 기호 자판으로 간다 (수용 기준 1)")
+    func defaultStaysQwerty() {
+        let controller = InputController(output: RecordingOutput())
+        #expect(controller.symbolKeyboardStyle == .qwerty)
+        controller.handle(.symbols)
+        #expect(controller.mode == .symbols)
+    }
+
+    @Test("(1) 키패드형이면 「123」이 숫자 페이지로 들어간다")
+    func entersNumberPage() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        #expect(controller.mode == .keypadPad(page: 0))
+    }
+
+    @Test("(2) 페이지 키 — 탭은 다음(0→1→2→3→0), 길게는 이전(0→3→2)")
+    func pagesCycle() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        var seen: [InputMode] = []
+        for _ in 0..<4 {
+            controller.handle(.keypadPageNext)
+            seen.append(controller.mode)
+        }
+        #expect(seen == [.keypadPad(page: 1), .keypadPad(page: 2), .keypadPad(page: 3), .keypadPad(page: 0)])
+        controller.handle(.keypadPagePrevious)
+        #expect(controller.mode == .keypadPad(page: 3), "처음에서 이전 = 마지막")
+        controller.handle(.keypadPagePrevious)
+        #expect(controller.mode == .keypadPad(page: 2))
+    }
+
+    @Test("(3) 어느 페이지에서든 「ABC」는 들어오기 전 문자 모드로 돌아간다 (수용 기준 5)", arguments: [0, 1, 2, 3])
+    func abcReturnsFromEveryPage(page: Int) {
+        let (_, controller) = keypadController()
+        controller.handle(.toggleLanguage)          // 영어에서 들어간다
+        controller.handle(.symbols)
+        for _ in 0..<page { controller.handle(.keypadPageNext) }
+        #expect(controller.mode == .keypadPad(page: page))
+        controller.handle(.symbols)                 // ABC
+        #expect(controller.mode == .english, "키패드에서도 문자 자판으로 돌아간다 — 쿼티형 기호로 새지 않는다")
+        controller.handle(.symbols)                 // 다시 123
+        #expect(controller.mode == .keypadPad(page: 0), "다시 들어가면 숫자 페이지부터")
+    }
+
+    @Test("(4) 조합 중 「123」은 조합을 확정하고, 돌아와 친 글자와 섞이지 않는다 (수용 기준 6)")
+    func entryCommitsComposition() {
+        let (output, controller) = keypadController()
+        controller.handle(.character("r"))
+        controller.handle(.character("k"))          // 가 (조합 중)
+        controller.handle(.symbols)
+        #expect(output.text == "가")
+        controller.handle(.character("1"))          // 숫자는 오토마타를 거치지 않는다
+        controller.handle(.symbols)                 // ABC
+        controller.handle(.character("r"))          // ㄱ — 새 글자
+        #expect(output.text == "가1ㄱ")
+    }
+
+    /// ★ 검증자 비차단 지적(2026-09-28): 확정을 **들어갈 때가 아니라 나올 때**로 미루는 변형이 위 (4)를 통과했다 —
+    /// 조합 글자는 이미 문서에 들어가 있어 문서만 보면 차이가 없고, 키패드에서 글자를 치면 `handleCharacter`가
+    /// 그때 확정해 버리기 때문이다. **글자 대신 ⌫**를 누르면 드러난다: 키패드의 ⌫는 조합 상태를 보지 않고 문서에서
+    /// 한 글자를 지우므로(`handleBackspace` 비한글 경로), 확정이 안 된 채면 **지운 「가」가 조합 상태에 남아 꼬리에
+    /// 계속 잡힌다** — 문서는 비었는데 꼬리는 「가」다. 그 꼬리로 채움글 칩이 뜨면 탭이 문서를 훼손한다.
+    @Test("조합 중 「123」 → ⌫ — 문서와 꼬리가 함께 비고, 돌아와 친 글자와 어긋나지 않는다", arguments: SymbolKeyboardStyle.allCases)
+    func backspaceRightAfterEntry(style: SymbolKeyboardStyle) {
+        let output = RecordingOutput()
+        let controller = InputController(output: output)
+        controller.symbolKeyboardStyle = style
+        controller.handle(.character("r"))
+        controller.handle(.character("k"))          // 가 (조합 중)
+        controller.handle(.symbols)
+        controller.handle(.backspace)
+        #expect(output.text == "")
+        #expect(controller.textTail == "", "확정이 진입 때 일어났으면 꼬리도 비어 있다")
+        controller.handle(.symbols)                 // ABC
+        controller.handle(.character("r"))
+        #expect(output.text == "ㄱ")
+        #expect(controller.textTail == output.text, "꼬리가 문서와 같아야 한다")
+    }
+
+    @Test("(5) 천지인 미확정 ㆍ도 쿼티형과 같은 경로로 리셋된다")
+    func cheonjiinPendingDotResets() {
+        func run(_ style: SymbolKeyboardStyle) -> String {
+            let output = RecordingOutput()
+            var now: TimeInterval = 0
+            let controller = InputController(output: output, hangulSource: CheonjiinSource(timeout: 0.8),
+                                             clock: { now })
+            controller.symbolKeyboardStyle = style
+            for key in ["ㄱ", "ㆍ"] { now += 0.1; controller.handle(.character(key)) }   // ㄱ + 미확정 ㆍ
+            controller.handle(.symbols)
+            controller.handle(.symbols)             // ABC
+            now += 0.1
+            controller.handle(.character("ㅣ"))      // 남은 ㆍ와 합쳐져 ㅏ(가)가 되면 안 된다
+            return output.text
+        }
+        let keypad = run(.keypad)
+        #expect(keypad == run(.qwerty), "진입 시 확정은 `.symbols` 처리 한 곳 — 두 스타일이 같다")
+        #expect(!keypad.hasSuffix("가"))
+    }
+
+    @Test("페이지 키 이벤트는 키패드 밖에서는 무시된다")
+    func pageEventsIgnoredElsewhere() {
+        let (_, controller) = keypadController()
+        controller.handle(.keypadPageNext)
+        #expect(controller.mode == .hangul)
+        let qwerty = InputController(output: RecordingOutput())
+        qwerty.handle(.symbols)
+        qwerty.handle(.keypadPagePrevious)
+        #expect(qwerty.mode == .symbols, "쿼티형 기호 자판은 `.symbolsAlternate`만 탄다")
+    }
+
+    @Test("숫자 전용 입력란을 거쳐 나오면 키패드가 아니라 문자 모드로 돌아간다")
+    func numberPadFieldRestoresLetterMode() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        controller.setNumberPad(.plain)
+        #expect(controller.mode == .numberPad(.plain))
+        controller.setNumberPad(nil)
+        #expect(controller.mode == .hangul, "복귀 목적지는 키패드에 오염되지 않는다")
+    }
+
+    @Test("설정을 쿼티형으로 바꿔도 키패드 안에서 ABC로 나올 수 있다")
+    func styleChangeWhileInsideKeypad() {
+        let (_, controller) = keypadController()
+        controller.handle(.symbols)
+        controller.symbolKeyboardStyle = .qwerty
+        controller.handle(.symbols)
+        #expect(controller.mode == .hangul)
+        controller.handle(.symbols)
+        #expect(controller.mode == .symbols)
+    }
+
+    /// ★ 길게 누르기 기호는 **쿼티형 `symbols`에 고정**이다(PDR 1절, 수용 기준 4).
+    ///
+    /// **두 스타일끼리 비교하지 않는다** (검증자 비차단 지적 2026-09-28) — `layout(for:)`는 스타일을 입력으로
+    /// 받지 않아 두 결과는 **구조상 항상 같다**(파생을 키패드 쪽으로 돌려도 둘 다 똑같이 틀려 통과했다).
+    /// 대신 스타일마다 123 → ABC 왕복 뒤 문자 자판의 기호를 **쿼티형 기호 자판에서 나와야 할 기대값**과 비교하고,
+    /// 그 기대값이 **키패드 기호 1페이지에서 파생했을 때와 다르다**는 것부터 확인한다(검사가 무력하지 않다는 전제).
+    @Test("문자 키 길게 누르기는 두 스타일 모두 쿼티형 기호 자판에서 온다", arguments: [
+        (HangulLayout.dubeolsik, false, [
+            ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+            ["-", "/", ":", ";", "(", ")", "₩", "&", "@"],
+            [".", ",", "?", "!", "'", "\"", nil]
+        ] as [[String?]]),
+        (.danmoeum, false, [
+            ["[", "]", "{", "}", "#", "%", "^", "*"],
+            ["-", "/", ":", ";", "(", ")", "₩", "&"],
+            [".", ",", "?", "!", "'", "@"]
+        ]),
+        (.dubeolsik, true, [          // 영어(쿼티) — 두벌식과 자리가 같다
+            ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
+            ["-", "/", ":", ";", "(", ")", "₩", "&", "@"],
+            [".", ",", "?", "!", "'", "\"", nil]
+        ])
+    ])
+    func letterAlternatesComeFromQwertySymbols(hangul: HangulLayout, english: Bool, expected: [[String?]]) {
+        // 전제 — 키패드 기호 1페이지에서 파생했다면 첫 행이 `~ ♡ ☆ …`로 시작한다. 기대값과 달라야 이 테스트가 이를 가른다
+        let keypadFirstRow = LayoutDefinition.keypadSymbolPages[0].rows[0].map(\.label)
+        #expect(keypadFirstRow.first != expected[0].first ?? nil)
+
+        for style in SymbolKeyboardStyle.allCases {
+            let controller = InputController(output: RecordingOutput())
+            controller.symbolKeyboardStyle = style
+            if english { controller.handle(.toggleLanguage) }
+            controller.handle(.symbols)
+            controller.handle(.symbols)
+            let layout = LayoutDefinition.layout(for: controller.mode, hangulLayout: hangul, longPressSymbols: true)
+            let rows = layout.rows.prefix(3).map { row in
+                row.filter { !$0.isFunctionKey && $0.event != .spacer }.map(\.alternateLabel)
+            }
+            #expect(Array(rows) == expected, "\(style) — 스타일과 무관하게 쿼티형 기호 자판에서 온다")
+        }
+    }
+
+    // MARK: 문자 복귀 라벨 — 돌아갈 문자 모드 (2026-09-28 개정)
+
+    @Test("letterMode — 한글에서 들어오면 한글, 영어에서 들어오면 영어, 복귀 목적지 그대로", arguments: [false, true])
+    func letterModeIsExposed(english: Bool) {
+        let (_, controller) = keypadController()
+        if english { controller.handle(.toggleLanguage) }
+        controller.handle(.symbols)
+        let expected: InputMode = english ? .english : .hangul
+        #expect(controller.letterMode == expected)
+        let layout = LayoutDefinition.layout(for: controller.mode, hangulLayout: .dubeolsik,
+                                             letterMode: controller.letterMode)
+        #expect(layout.rows.flatMap { $0 }.first { $0.event == .symbols }?.label == (english ? "ABC" : "가"))
+        controller.handle(.keypadPageNext)
+        #expect(controller.letterMode == expected, "페이지를 넘겨도 그대로")
+        controller.handle(.symbols)
+        #expect(controller.mode == expected)
+    }
+
+    // MARK: .,*/ · +- 연타 키 (2026-09-28 개정, 2차 개정에서 `.,-/` → `.,*/` + `+-` 추가)
+
+    /// 숫자 페이지의 두 연타 키 — 2차 개정(폰 세션 4-1 2차)에서 `-`가 `+-` 키로 옮겨 가고 그 자리에 `*`가 들어왔다.
+    /// 연타 규칙은 키와 무관하다(`InputController`는 글자 목록만 본다) — 아래 테스트는 대부분 `.,*/`로 규칙을 고정한다
+    private static let cycle: KeyEvent = .multiTap([".", ",", "*", "/"])
+    /// 부호 키 — 3차 개정(반론 뒤 사장님 결정 A안)에서 `+-` → **`-+`**: 탭 = `-`(가장 잦은 기호), 연타 = `+`
+    private static let sign: KeyEvent = .multiTap(["-", "+"])
+
+    /// 숫자 페이지에 들어가 `12`를 친 상태 — 시계는 손으로 넘긴다
+    private func multiTapSetup() -> (RecordingOutput, InputController, (TimeInterval) -> Void) {
+        var now: TimeInterval = 100
+        let (output, controller) = keypadController(clock: { now })
+        controller.handle(.symbols)
+        controller.handle(.character("1"))
+        controller.handle(.character("2"))
+        return (output, controller, { now += $0 })
+    }
+
+    @Test("연타 — . → , → - → / → . 순환, 꼬리는 문서와 늘 같다")
+    func multiTapCycles() {
+        let (output, controller, advance) = multiTapSetup()
+        var seen: [String] = []
+        for _ in 0..<5 {
+            advance(0.3)
+            controller.handle(Self.cycle)
+            seen.append(output.text)
+            #expect(controller.textTail == output.text, "꼬리 정합 — 마지막 글자를 바꾼다")
+        }
+        #expect(seen == ["12.", "12,", "12*", "12/", "12."])
+        #expect(output.operations.suffix(2) == [.delete(1), .insert(".")], "교체는 ⌫ 1 + 삽입")
+    }
+
+    @Test("연타 — 제한 시간(0.8초)을 넘기면 새 「.」부터")
+    func multiTapTimesOut() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        advance(0.8)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12,", "경계값 0.8초는 연타로 본다")
+        advance(0.81)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12,.")
+        #expect(controller.textTail == output.text)
+    }
+
+    @Test("연타 — 다른 키가 끼면 끊긴다", arguments: [
+        KeyEvent.character("3"), .space, .backspace, .keypadPageNext
+    ])
+    func multiTapBreaksOnOtherKey(other: KeyEvent) {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        advance(0.1)
+        controller.handle(other)
+        if other == .keypadPageNext { controller.handle(.keypadPagePrevious) }   // 숫자 페이지로 되돌아온다
+        let before = output.text
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == before + ".", "\(other) 뒤에는 새로 「.」")
+        #expect(controller.textTail == output.text)
+    }
+
+    @Test("연타 뒤 ⌫ — 바뀐 글자 하나만 지워지고 꼬리도 같이")
+    func multiTapThenBackspace() {
+        let (output, controller, advance) = multiTapSetup()
+        for _ in 0..<3 { advance(0.2); controller.handle(Self.cycle) }   // 12*
+        controller.handle(.backspace)
+        #expect(output.text == "12")
+        #expect(controller.textTail == "12")
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12.", "⌫가 연타를 끊었다")
+    }
+
+    /// ★ 검증자 변이 검사(2026-09-28): 「다른 이벤트면 끊는다」 줄을 지운 변형이 위 ⌫ 테스트를 통과했다 — 문서에 앞선 「.」가
+    /// 없으면 꼬리 정합 검사(`hasSuffix`)만으로도 새로 넣게 되기 때문이다. **앞에 오래된 「.」가 있으면** 드러난다:
+    /// 끊기지 않은 연타가 ⌫ 뒤에 남은 그 「.」를 「,」로 바꿔 버린다.
+    @Test("연타 → ⌫ → 0.8초 안 재탭 — 앞에 있던 「.」를 건드리지 않고 새 「.」")
+    func multiTapBreaksOnBackspaceBeforeOldPeriod() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(.character("."))          // 오래된 「.」 — 연타로 넣은 것이 아니다
+        advance(0.1)
+        controller.handle(Self.cycle)               // 12..
+        advance(0.1)
+        controller.handle(.backspace)               // 12.
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..", "⌫가 연타를 끊었다 — 남은 「.」가 「,」로 바뀌면 안 된다")
+        #expect(controller.textTail == output.text)
+    }
+
+    /// ★ 검증자 변이 검사(2026-09-28): `commitComposition()`(공개 — 툴바 도구·후보·붙여넣기가 지난다)에서 끊는 줄을 지운
+    /// 변형이 잡히지 않았다. 조립 지점이 그 경로를 부른 뒤 사용자가 0.8초 안에 다시 누르면 새 「.」여야 한다.
+    @Test("연타 → commitComposition() → 0.8초 안 재탭 — 새 「.」")
+    func multiTapBreaksOnCommitComposition() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)               // 12.
+        controller.commitComposition()
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..", "조합 확정 경로가 연타를 끊었다 — 「12,」가 되면 안 된다")
+        #expect(controller.textTail == output.text)
+    }
+
+    @Test("연타 — 모드 전환(ABC)으로 끊긴다")
+    func multiTapBreaksOnModeSwitch() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        controller.handle(.symbols)                 // 문자 자판으로
+        controller.handle(.symbols)                 // 다시 숫자 페이지
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..")
+    }
+
+    /// 메아리만 봐준다(사장님 결정 2026-09-28) — 호스트가 우리 ⌫+삽입에 반응해 보내는 textDidChange가
+    /// 연타를 끊으면 세 번째 탭이 새 「.」가 된다. 문서 꼬리가 방금 넣은 연타 글자로 끝나면 이어 간다.
+    @Test("sync ① 메아리(문서가 연타 글자로 끝남) 뒤 재탭 → 순환 계속")
+    func multiTapSurvivesEchoSync() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        advance(0.2)
+        controller.handle(Self.cycle)               // 12,
+        controller.syncWithDocument(documentTail: output.text)
+        advance(0.2)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12*")
+        #expect(controller.textTail == output.text)
+    }
+
+    @Test("sync ② nil(커서 도구) 뒤 → 새 「.」")
+    func multiTapBreaksOnNilSync() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        controller.syncWithDocument()
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.text == "12..")
+    }
+
+    @Test("sync ③ 다른 꼬리(커서가 딴 데로) 뒤 → 새 「.」")
+    func multiTapBreaksOnOtherTailSync() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)
+        controller.syncWithDocument(documentTail: "12")   // 커서가 「.」 앞으로 갔다
+        advance(0.1)
+        controller.handle(Self.cycle)
+        #expect(output.operations.last == .insert("."))
+        #expect(!output.operations.suffix(2).contains(.delete(1)), "다른 글자를 지우지 않는다")
+    }
+
+    @Test("-+ 연타 — - → + → -, 꼬리는 문서와 같다(로직 추가 없이 데이터만)")
+    func signKeyCycles() {
+        let (output, controller, advance) = multiTapSetup()
+        var seen: [String] = []
+        for _ in 0..<3 {
+            advance(0.3)
+            controller.handle(Self.sign)
+            seen.append(output.text)
+            #expect(controller.textTail == output.text)
+        }
+        #expect(seen == ["12-", "12+", "12-"])
+    }
+
+    @Test("연타 키 둘은 서로의 글자를 바꾸지 않는다 — 다른 키면 새로 넣는다")
+    func twoMultiTapKeysDoNotCross() {
+        let (output, controller, advance) = multiTapSetup()
+        controller.handle(Self.cycle)               // 12.
+        advance(0.1)
+        controller.handle(Self.sign)                // 12.- — 「.」를 「-」로 바꾸지 않는다
+        advance(0.1)
+        controller.handle(Self.sign)                // 12.+
+        advance(0.1)
+        controller.handle(Self.cycle)               // 12.+. — 「+」를 「.」로 바꾸지 않는다
+        #expect(output.text == "12.+.")
+        #expect(controller.textTail == output.text)
+    }
+
+    // MARK: 대표 입력 탭 수 (PDR 2-4절 — 사장님·반론자2 요청)
+
+    /// 문자 자판에서 시작해 `text`를 친다. 지금 떠 있는 페이지에 글자가 없으면 페이지 키를 **탭(다음)**으로
+    /// 넘긴다 — 사람이 하듯. 스페이스는 숫자 페이지 4행에서 바로 친다. 숫자 페이지의 `. , * /`·`+ -`는 **연타 키**다 —
+    /// 그 글자가 나올 때까지 연달아 누른다(0.1초 간격, 제한 시간 안). 반환: (총 탭 수, 페이지 넘김 수).
+    private func type(_ text: String) -> (taps: Int, pageTurns: Int, output: String) {
+        var now: TimeInterval = 0
+        let (output, controller) = keypadController(clock: { now })
+        var taps = 0, turns = 0
+        func tap(_ event: KeyEvent) { now += 0.1; controller.handle(event); taps += 1 }
+        tap(.symbols)
+        for character in text {
+            let event: KeyEvent = character == " " ? .space : .character(String(character))
+            var guardCount = 0
+            while true {
+                let keys = LayoutDefinition.layout(for: controller.mode, hangulLayout: .dubeolsik).rows.flatMap { $0 }
+                if keys.contains(where: { $0.event == event }) {
+                    tap(event)
+                    break
+                }
+                // 연타 키가 둘이다(`.,*/`·`+-`) — 그 글자를 가진 키를 찾는다
+                if let (cycle, index) = keys.lazy.compactMap({ key -> ([String], Int)? in
+                    guard case .multiTap(let characters) = key.event,
+                          let index = characters.firstIndex(of: String(character)) else { return nil }
+                    return (characters, index)
+                }).first {
+                    for _ in 0...index { tap(.multiTap(cycle)) }
+                    break
+                }
+                tap(.keypadPageNext); turns += 1
+                guardCount += 1
+                if guardCount > 4 { return (-1, -1, output.text) }   // 어느 페이지에도 없다
+            }
+        }
+        return (taps, turns, output.text)
+    }
+
+    /// 2026-09-28 개정(연타 키): `-`가 연타 3번이라 「010-1234」가 9 → 11탭이 됐다가, 2차 개정에서 `-`가 `+-` 키의
+    /// 두 번째로 옮겨 10탭, **3차 개정(`-+`, 반론 뒤 A안)에서 `-`가 첫 탭이 되어 9탭** — 원판과 같다.
+    /// `.`·`-`는 1탭, `+`는 2탭, `*`는 3탭, `/`는 4탭이다. 전화번호 「010-1234-5678」은 16 → 14탭(반론자 표와 같다)
+    @Test("대표 입력 — 탭 수와 페이지 넘김이 설계서 표와 같다", arguments: [
+        ("12.5", 5, 0),
+        ("010-1234", 9, 0),
+        ("010-1234-5678", 14, 0),
+        ("2026. 9. 27.", 13, 0),
+        ("12/3", 8, 0),
+        ("2*3", 6, 0),
+        ("+82", 5, 0),
+        ("-5", 3, 0),
+        ("(~♡", 5, 1)
+    ])
+    func representativeInputs(text: String, taps: Int, pageTurns: Int) {
+        let result = type(text)
+        #expect(result.output == text)
+        #expect(result.taps == taps)
+        #expect(result.pageTurns == pageTurns)
     }
 }

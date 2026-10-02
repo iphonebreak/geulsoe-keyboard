@@ -11,7 +11,12 @@ import TadakDomain
 // mirror: KeyboardUI/KeyboardRootView.swift     toolbarHeight 46 · SuggestionToolbar(spacing 10, 좌우 10, 도구 20pt/85%,
 //                                               ✕ 30×38) · SnippetChip(14pt bold 제목 + 14pt 본문, 12/7 패딩, Capsule)
 //                                               · KeyboardLayoutView(행 간격 7, 키 간격 5, 좌우 3, 아래 4)
-// mirror: KeyboardCore/LayoutDefinition.swift   dubeolsik 3행 + bottomRow(languageLabel: "ABC").removingGlobe()
+// mirror: KeyboardCore/LayoutDefinition.swift   dubeolsik 3행(+ shiftedLabel) + bottomRow(languageLabel: "ABC").removingGlobe()
+// mirror: KeyboardUI/KeyboardRootView.swift     bibleBadge(book 12pt semibold + 13pt 숫자, 좌우 8, 높이 28, functionKey Capsule)
+//                                               · 추천단어(17pt, 좌우 6 · 위아래 10, 사이 구분선 1×18 keyText 20%)
+// mirror: KeyboardUI/BibleSearchPanelView.swift 책 칩(13pt, 선택 accent/keyboardBackground, 좌우 10 · 위아래 6, Capsule)
+//                                               · 행(참조 13pt semibold keyText 70% + 미리보기 14pt, 좌우 10, characterKey 배경)
+//                                               · 형광펜(accent, 라이트 0.38 / 다크 0.45) · 돌아가기(PanelBarButton, functionKey)
 
 // MARK: - 팔레트
 
@@ -23,6 +28,8 @@ struct MockKeyboardPalette: Equatable {
     let keyText: Color
     let accent: Color
     let keyCornerRadius: CGFloat
+    /// 어두운 팔레트인가 — 형광펜 불투명도가 갈린다 (mirror: ResolvedTheme.isDark)
+    let isDark: Bool
 
     /// 팔레트 선택 규칙은 키보드와 같다 — 모드가 강제(light/dark)면 그것을, 시스템이면 호스트 colorScheme을 따른다.
     init(spec: ThemeSpec, appearance: Appearance, systemColorScheme: ColorScheme) {
@@ -39,6 +46,7 @@ struct MockKeyboardPalette: Equatable {
         keyText = Color(themeHex: palette.keyText)
         accent = Color(themeHex: palette.accent)
         keyCornerRadius = CGFloat(spec.keyCornerRadius)
+        isDark = usesDarkPalette
     }
 }
 
@@ -59,12 +67,24 @@ enum MockDubeolsikLayout {
         var isFunctionKey = false
         /// 길게 누르기 힌트 (문장부호 키의 ",")
         var hint: String?
+        /// ⇧ 라벨 — mirror: LayoutDefinition.dubeolsik `character(_:_:_:)`의 세 번째 인자(쌍자음·ㅒㅖ)
+        var shiftedLabel: String?
 
         var label: String? {
             if case .label(let text) = face { return text }
             return nil
         }
+
+        /// 지금 보이는 라벨 — ⇧가 켜져 있으면 쌍자음
+        func displayedLabel(isShifted: Bool) -> String? {
+            isShifted ? (shiftedLabel ?? label) : label
+        }
     }
+
+    /// mirror: LayoutDefinition.dubeolsik 1행 시프트 라벨
+    static let shiftedLabels: [Character: String] = [
+        "ㅂ": "ㅃ", "ㅈ": "ㅉ", "ㄷ": "ㄸ", "ㄱ": "ㄲ", "ㅅ": "ㅆ", "ㅐ": "ㅒ", "ㅔ": "ㅖ"
+    ]
 
     /// mirror: KeyboardCore/LayoutDefinition.swift `longPressSymbolRows` — 설정 `longPressSymbolsEnabled`가 켜져 있을 때
     /// 문자 키 귀퉁이에 보이는 기호 = 기호 자판 1페이지 2·3·4행 (1행 `[]{}#%^*+=` · 2행 `-/:;()₩&@"` · 3행 `.,?!'`)
@@ -100,7 +120,7 @@ enum MockDubeolsikLayout {
     }
 
     private static func jamo(_ character: Character) -> Key {
-        Key(id: "hangul-\(character)", face: .label(String(character)))
+        Key(id: "hangul-\(character)", face: .label(String(character)), shiftedLabel: shiftedLabels[character])
     }
 }
 
@@ -128,8 +148,16 @@ struct MockKeyboardView: View {
         VStack(spacing: 0) {
             MockToolbar(scene: scene, palette: palette)
                 .frame(height: Self.toolbarHeight)
-            MockKeyGrid(pressedKeyLabel: scene.pressedKeyLabel, palette: palette, showsKeyPreview: showsKeyPreview,
-                        showsLongPressHints: showsLongPressHints)
+            Group {
+                if scene.showsBiblePanel {
+                    // 배지를 누르면 자판 자리를 구절 목록이 차지한다 (v1.2.0 ⑦ 시나리오의 결과)
+                    MockBiblePanel(palette: palette)
+                        .transition(.opacity)
+                } else {
+                    MockKeyGrid(pressedKeyLabel: scene.pressedKeyLabel, isShifted: scene.isShifted, palette: palette,
+                                showsKeyPreview: showsKeyPreview, showsLongPressHints: showsLongPressHints)
+                }
+            }
                 .frame(height: Self.keysHeight)
                 .padding(.horizontal, 3)
                 .padding(.bottom, Self.bottomPadding)
@@ -155,17 +183,45 @@ private struct MockToolbar: View {
                 toolIcon("chevron.right")
                 toolIcon("face.smiling")
             case .chip:
-                MockSnippetChip(palette: palette, isPressed: scene.chipPressed, showsTapIndicator: scene.showsTapIndicator)
-                    .transition(.move(edge: .bottom).combined(with: .scale(scale: 0.85)).combined(with: .opacity))
+                if case .chip(let title, let body) = scene.scenario.reaction {
+                    MockSnippetChip(title: title, bodyText: body, palette: palette, isPressed: scene.chipPressed,
+                                    showsTapIndicator: scene.showsTapIndicator)
+                        .transition(.move(edge: .bottom).combined(with: .scale(scale: 0.85)).combined(with: .opacity))
+                }
                 Spacer(minLength: 0)
-                Image(systemName: "xmark")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(palette.keyText.opacity(0.6))
-                    .frame(width: 30, height: 38)
-                    .transition(.opacity)
+                dismissMark
+            case .bible:
+                // mirror: SuggestionToolbar 후보 + 배지 — 추천단어가 남은 폭을 나누고 배지·✕가 오른쪽 끝
+                ForEach(Array(SnippetIntroBibleDemo.words.enumerated()), id: \.offset) { index, word in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(palette.keyText.opacity(0.2))
+                            .frame(width: 1, height: 18)
+                    }
+                    Text(word)
+                        .font(.system(size: 17))
+                        .foregroundStyle(palette.keyText)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 10)
+                        .frame(maxWidth: .infinity)
+                        .transition(.opacity)
+                }
+                MockBibleBadge(palette: palette, isPressed: scene.chipPressed, showsTapIndicator: scene.showsTapIndicator)
+                    .transition(.move(edge: .bottom).combined(with: .scale(scale: 0.85)).combined(with: .opacity))
+                dismissMark
             }
         }
         .padding(.horizontal, 10)
+    }
+
+    private var dismissMark: some View {
+        Image(systemName: "xmark")
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundStyle(palette.keyText.opacity(0.6))
+            .frame(width: 30, height: 38)
+            .transition(.opacity)
     }
 
     private func toolIcon(_ symbol: String) -> some View {
@@ -180,17 +236,20 @@ private struct MockToolbar: View {
 /// mirror: KeyboardUI/KeyboardRootView.swift `SnippetChip` — 제목 굵게 + 본문 첫 줄(폭에 맞춰 … 절단)
 private struct MockSnippetChip: View {
 
+    let title: String
+    /// 칩 미리보기 = 본문 첫 줄 (실제 칩도 `body`가 미리보기이자 삽입값이다)
+    let bodyText: String
     let palette: MockKeyboardPalette
     let isPressed: Bool
     let showsTapIndicator: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("[\(SnippetIntroDemo.title)]")
+            Text("[\(title)]")
                 .font(.system(size: 14, weight: .bold))
                 .lineLimit(1)
                 .fixedSize()
-            Text(SnippetIntroDemo.body)
+            Text(bodyText)
                 .font(.system(size: 14))
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -213,10 +272,113 @@ private struct MockSnippetChip: View {
     }
 }
 
+/// mirror: KeyboardUI/KeyboardRootView.swift `bibleBadge` · `badgeCapsule` — 책 아이콘 + 건수, functionKey 캡슐
+private struct MockBibleBadge: View {
+
+    let palette: MockKeyboardPalette
+    let isPressed: Bool
+    let showsTapIndicator: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "book")
+                .font(.system(size: 12, weight: .semibold))
+            Text(SnippetIntroBibleDemo.count)
+                .font(.system(size: 13, weight: .semibold))
+                .monospacedDigit()
+        }
+        .foregroundStyle(palette.keyText)
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(palette.functionKey.opacity(isPressed ? 0.6 : 1), in: Capsule())
+        .fixedSize()
+        .overlay {
+            // 손가락 표시 — 칩과 같은 표현
+            Circle()
+                .fill(palette.keyText.opacity(0.3))
+                .overlay(Circle().strokeBorder(palette.keyText.opacity(0.6), lineWidth: 1))
+                .frame(width: 30, height: 30)
+                .scaleEffect(showsTapIndicator ? 1 : 0.6)
+                .opacity(showsTapIndicator ? 1 : 0)
+                .offset(y: 6)
+        }
+    }
+}
+
+/// mirror: KeyboardUI/BibleSearchPanelView.swift — 책 필터 줄 + 결과 행 + 돌아가기.
+/// 자판 높이(180)에 맞춰 줄였다(실제 216) — 행은 3개만 보인다. 데모 값은 `SnippetIntroBibleDemo`(실데이터 복제).
+private struct MockBiblePanel: View {
+
+    let palette: MockKeyboardPalette
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 6) {
+                ForEach(Array(SnippetIntroBibleDemo.filters.enumerated()), id: \.offset) { index, label in
+                    let selected = index == 0   // 「전체」
+                    Text(label)
+                        .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                        .monospacedDigit()
+                        .foregroundStyle(selected ? palette.keyboardBackground : palette.keyText)
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(selected ? palette.accent : palette.functionKey, in: Capsule())
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(height: 30, alignment: .leading)
+            .clipped()
+            Rectangle()
+                .fill(palette.keyText.opacity(0.15))
+                .frame(height: 1)
+            ForEach(Array(SnippetIntroBibleDemo.rows.enumerated()), id: \.offset) { _, row in
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(row.reference)
+                        .font(.system(size: 13, weight: .semibold))
+                        .monospacedDigit()
+                        .foregroundStyle(palette.keyText.opacity(0.7))
+                        .lineLimit(1)
+                        .fixedSize()
+                    Text(highlighted(row.preview))
+                        .font(.system(size: 14))
+                        .foregroundStyle(palette.keyText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(.horizontal, 10)
+                .frame(height: 30)
+                .background(palette.characterKey, in: RoundedRectangle(cornerRadius: palette.keyCornerRadius))
+            }
+            Text("돌아가기")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(palette.keyText)
+                .frame(maxWidth: .infinity, minHeight: 30)
+                .background(palette.functionKey, in: RoundedRectangle(cornerRadius: palette.keyCornerRadius))
+        }
+        .padding(.horizontal, 1)
+    }
+
+    /// mirror: BibleSearchPanelView.highlighted — 검색어 자리에만 accent 배경(라이트 0.38 / 다크 0.45)
+    private func highlighted(_ preview: String) -> AttributedString {
+        var attributed = AttributedString(preview)
+        let opacity = palette.isDark ? 0.45 : 0.38
+        var searchStart = attributed.startIndex
+        while let range = attributed[searchStart...].range(of: SnippetIntroBibleDemo.query) {
+            attributed[range].backgroundColor = palette.accent.opacity(opacity)
+            searchStart = range.upperBound
+        }
+        return attributed
+    }
+}
+
 /// mirror: KeyboardUI/KeyboardRootView.swift `KeyboardLayoutView` — 행 간격 7, 키 간격 5, 폭은 행 단위 합 비례
 private struct MockKeyGrid: View {
 
     let pressedKeyLabel: String?
+    let isShifted: Bool
     let palette: MockKeyboardPalette
     let showsKeyPreview: Bool
     let showsLongPressHints: Bool
@@ -240,7 +402,10 @@ private struct MockKeyGrid: View {
             ForEach(row) { key in
                 MockKeyCap(
                     key: key,
-                    isPressed: key.label != nil && key.label == pressedKeyLabel,
+                    // 문자 키는 **보이는 라벨**로, 기능 키(⇧)는 id로 찾는다 — ⇧가 켜지면 ㅈ 키가 ㅉ로 보인다
+                    isPressed: pressedKeyLabel != nil
+                        && (key.displayedLabel(isShifted: isShifted) == pressedKeyLabel || key.id == pressedKeyLabel),
+                    isShifted: isShifted,
                     showsPreview: showsKeyPreview,
                     palette: palette
                 )
@@ -256,8 +421,11 @@ private struct MockKeyCap: View {
 
     let key: MockDubeolsikLayout.Key
     let isPressed: Bool
+    let isShifted: Bool
     let showsPreview: Bool
     let palette: MockKeyboardPalette
+
+    private var labelText: String { key.displayedLabel(isShifted: isShifted) ?? "" }
 
     var body: some View {
         face
@@ -286,10 +454,11 @@ private struct MockKeyCap: View {
     private var face: some View {
         switch key.face {
         case .symbol(let name):
-            Image(systemName: name)
+            // mirror: KeyCapView — ⇧ 한 번이면 `shift.fill`
+            Image(systemName: key.id == "shift" && isShifted ? "shift.fill" : name)
                 .font(.system(size: 22, weight: .medium))
-        case .label(let text):
-            Text(text)
+        case .label:
+            Text(labelText)
                 .font(.system(size: key.isFunctionKey ? 16 : 22))
                 .lineLimit(1)
         }
@@ -302,7 +471,7 @@ private struct MockKeyCap: View {
 
     /// mirror: KeyCapView.preview — 34pt, 최소 46×52, characterKey 모서리 8, 그림자 2, 위로 56
     private var preview: some View {
-        Text(key.label ?? "")
+        Text(labelText)
             .font(.system(size: 34))
             .lineLimit(1)
             .fixedSize()

@@ -37,8 +37,10 @@ public final class KeyboardViewState {
     public var visibleTools: [ToolbarTool]
     /// 자판 대신 이모지 그리드를 보여줄지.
     public var showsEmojiPanel: Bool
-    /// 이모지 그리드의 최근 사용 행 — 세션 메모리 (조립 지점 관리).
+    /// 이모지 그리드의 최근 사용 — 조립 지점이 **키보드 전용 컨테이너**에서 읽어 넣는다(v1.2.0 ⑤).
     public var recentEmojis: [String]
+    /// 설정 「최근 사용 이모지 기억」 — 꺼져 있으면 최근 탭이 빈 이유를 다르게 말한다.
+    public var recentEmojisEnabled: Bool
     /// 자판 대신 클립보드 기록 패널을 보여줄지.
     public var showsClipboardPanel: Bool
     /// 클립보드 기록 (최근순) — 조립 지점이 App Group에서 읽어 넣는다.
@@ -47,6 +49,21 @@ public final class KeyboardViewState {
     public var clipboardHistoryEnabled: Bool
     /// 입력란 `returnKeyType`에 따른 리턴 키 표시 (nil = 기본 ⏎). 배열은 그대로 두고 UI가 덮어쓴다.
     public var returnKey: ReturnKeyFace?
+
+    // MARK: - 성경 검색 (v1.1.0 ①)
+
+    /// 툴바 성경 배지에 띄울 결과 건수. **nil이면 배지 없음**(0건 포함).
+    ///
+    /// 조립 지점이 우선순위(채움글 칩 > 붙여넣기 칩 > 배지)를 이미 적용해 넣는다 —
+    /// 뷰는 이 값이 있으면 그린다. **추천단어 개수 분기도 조립 지점이 같은 값으로 한다**
+    /// (계획서 2-1: 두 곳에서 따로 계산하면 "배지는 없는데 추천단어는 2개"가 된다).
+    public var bibleMatchCount: Int?
+    /// 자판 대신 성경 검색 패널을 보여줄지.
+    public var showsBibleSearchPanel: Bool
+    /// 패널 머리 칩에 보이는 검색어 — 캐스케이드가 실제로 맞춘 구절이다.
+    public var bibleSearchQuery: String
+    /// 패널에 그릴 결과 행들 (랭킹 순). 조립 지점이 본문을 읽어 미리보기까지 만들어 넣는다.
+    public var bibleSearchRows: [BibleSearchRow]
 
     public init(
         layout: LayoutDefinition,
@@ -62,10 +79,15 @@ public final class KeyboardViewState {
         visibleTools: [ToolbarTool] = [],
         showsEmojiPanel: Bool = false,
         recentEmojis: [String] = [],
+        recentEmojisEnabled: Bool = true,
         showsClipboardPanel: Bool = false,
         clipboardEntries: [String] = [],
         clipboardHistoryEnabled: Bool = true,
-        returnKey: ReturnKeyFace? = nil
+        returnKey: ReturnKeyFace? = nil,
+        bibleMatchCount: Int? = nil,
+        showsBibleSearchPanel: Bool = false,
+        bibleSearchQuery: String = "",
+        bibleSearchRows: [BibleSearchRow] = []
     ) {
         self.layout = layout
         self.isShifted = isShifted
@@ -80,10 +102,15 @@ public final class KeyboardViewState {
         self.visibleTools = visibleTools
         self.showsEmojiPanel = showsEmojiPanel
         self.recentEmojis = recentEmojis
+        self.recentEmojisEnabled = recentEmojisEnabled
         self.showsClipboardPanel = showsClipboardPanel
         self.clipboardEntries = clipboardEntries
         self.clipboardHistoryEnabled = clipboardHistoryEnabled
         self.returnKey = returnKey
+        self.bibleMatchCount = bibleMatchCount
+        self.showsBibleSearchPanel = showsBibleSearchPanel
+        self.bibleSearchQuery = bibleSearchQuery
+        self.bibleSearchRows = bibleSearchRows
     }
 }
 

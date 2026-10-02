@@ -7,10 +7,16 @@ import SwiftUI
 /// 찾지 못해 실기에서 반응이 없었다 — 2026-09-02 사용자 피드백. 탭 방식은 결정적이고
 /// 한 번에 그리는 셀도 한 카테고리(≤300)로 줄어 메모리에도 유리하다.)
 /// 순서: 최근 사용 → 자주 쓰는 → 유니코드 블록별 카테고리(`EmojiCatalog`).
-/// 최근 사용은 조립 지점의 세션 메모리다 (App Group 저장은 실사용 확인 후 별도 결정).
+/// 최근 사용은 조립 지점이 **키보드 전용 컨테이너**에서 읽어 넣는다(v1.2.0 ⑤, PDR `emoji-recent-persist.md`).
+///
+/// ★ 「최근 사용」 탭은 **비어 있어도 보인다**(PDR 5-1절, 반론자2) — 예전에는 비면 탭 자체가 사라져
+/// 「버그로 사라졌나」와 「원래 비었다」를 구분할 수 없었다. 첫 표시는 그대로 **비어 있으면 자주 쓰는**이다
+/// (빈 화면으로 열지 않는다). 사용자가 빈 최근 탭을 누르면 이유를 한 줄로 말한다.
 struct EmojiGridView: View {
 
     let recentEmojis: [String]
+    /// 설정 「최근 사용 이모지 기억」 — 꺼져 있으면 빈 이유가 다르다
+    let recentEmojisEnabled: Bool
     let theme: ResolvedTheme
     let onEmojiTap: (String) -> Void
     let onBackspace: () -> Void
@@ -67,8 +73,18 @@ struct EmojiGridView: View {
     @State private var selectedID: String?
 
     private var effectiveID: String {
-        if let selectedID, selectedID != Self.recentID || !recentEmojis.isEmpty { return selectedID }
+        // 사용자가 고른 탭은 비어 있어도 그대로 — 빈 이유를 안내한다. 처음 열 때만 비었으면 자주 쓰는
+        if let selectedID { return selectedID }
         return recentEmojis.isEmpty ? Self.frequentID : Self.recentID
+    }
+
+    /// 빈 최근 탭의 안내 — 꺼져 있을 때와 아직 없을 때를 가른다.
+    /// 저장이 전체 접근과 무관하므로(전용 컨테이너) 권한 문구는 없다 — 실기 확인에서 후퇴안으로 가면
+    /// 그때 「전체 접근이 꺼져 있어 일시적으로만 유지돼요」 갈래를 더한다(PDR 5-1절).
+    private var emptyRecentMessage: String {
+        recentEmojisEnabled
+            ? "아직 최근 사용 이모지가 없어요.\n이모지를 누르면 여기에 모여요."
+            : "최근 사용 이모지 기억이 꺼져 있어요.\n글쇠 앱 > 툴바에서 켤 수 있어요."
     }
 
     private var currentEmojis: [String] {
@@ -97,29 +113,37 @@ struct EmojiGridView: View {
             GeometryReader { geometry in
                 let columns = Self.columnCount(forWidth: geometry.size.width)
                 let glyph = Self.glyphSize(forWidth: geometry.size.width, columns: columns)
-                ScrollView {
-                    LazyVGrid(
-                        columns: Array(repeating: GridItem(.flexible(), spacing: Self.cellSpacing),
-                                       count: columns),
-                        spacing: Self.cellSpacing
-                    ) {
-                        ForEach(currentEmojis, id: \.self) { emoji in
-                            Button {
-                                onEmojiTap(emoji)
-                            } label: {
-                                Text(emoji)
-                                    .font(.system(size: glyph))
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 3)
-                                    .contentShape(Rectangle())
+                if effectiveID == Self.recentID, recentEmojis.isEmpty {
+                    Text(emptyRecentMessage)
+                        .font(.system(size: 14))
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(theme.keyText.opacity(0.6))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVGrid(
+                            columns: Array(repeating: GridItem(.flexible(), spacing: Self.cellSpacing),
+                                           count: columns),
+                            spacing: Self.cellSpacing
+                        ) {
+                            ForEach(currentEmojis, id: \.self) { emoji in
+                                Button {
+                                    onEmojiTap(emoji)
+                                } label: {
+                                    Text(emoji)
+                                        .font(.system(size: glyph))
+                                        .frame(maxWidth: .infinity)
+                                        .padding(.vertical, 3)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
+                        .padding(.top, 2)
                     }
-                    .padding(.top, 2)
+                    // 카테고리를 바꾸면 스크롤을 맨 위로 — 새 ScrollView 인스턴스
+                    .id(effectiveID)
                 }
-                // 카테고리를 바꾸면 스크롤을 맨 위로 — 새 ScrollView 인스턴스
-                .id(effectiveID)
             }
 
             HStack(spacing: 8) {
@@ -142,9 +166,8 @@ struct EmojiGridView: View {
         let metrics = Self.categoryMetrics(cellWidth: cellWidth)
         return ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 2) {
-                if !recentEmojis.isEmpty {
-                    categoryButton(id: Self.recentID, symbol: "clock", label: "최근 사용", metrics: metrics)
-                }
+                // 비어 있어도 보인다 — 위 타입 주석 ★
+                categoryButton(id: Self.recentID, symbol: "clock", label: "최근 사용", metrics: metrics)
                 categoryButton(id: Self.frequentID, symbol: "star", label: "자주 쓰는", metrics: metrics)
                 ForEach(EmojiCatalog.categories) { category in
                     categoryButton(id: category.id, symbol: category.symbol,

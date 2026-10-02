@@ -92,6 +92,9 @@ public enum SnippetPack {
     public static let anthem = "anthem"
     /// 인사·상용구 — 명절 인사, 축하, 조의, 감사, 사과 (자체 작성 문구, 2026-09-07)
     public static let greetings = "greetings"
+    /// 날짜·시간 — 「오늘 날짜」·「3일 후 날짜」·「지금 시간」처럼 치면 **그 순간** 계산한 값 (v1.2.0).
+    /// 문구 JSON이 없는 **계산 팩**이다 — 매처의 `DateSnippetParser` 분기가 이 id로 켜지고 꺼진다.
+    public static let date = "date"
 }
 
 /// 채움글 목록 경계 — 내장 팩과 사용자 문구가 이 프로토콜로 합쳐진다.
@@ -138,6 +141,103 @@ public extension SnippetEntry {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && seen.insert(Self.normalizedTrigger($0)).inserted }
     }
+
+    /// 편집·추가 결과를 **내 채움글 목록에 반영한다.**
+    ///
+    /// ## ★ 왜 도메인에 있나
+    ///
+    /// 이 규칙은 설정 화면(`App/`)의 `save`에 있었는데 **`swift test`가 닿지 않는다.**
+    /// 그래서 「고치면 자리가 뒤로 튄다」를 **아무도 못 잡았다**(검증자 2026-09-23 실측).
+    /// 합성 게이트·`mergingHiddenTools`와 같은 이유로 여기로 내렸다.
+    ///
+    /// ## 규칙
+    ///
+    /// | | |
+    /// |---|---|
+    /// | **추가**(`editing == nil`) | **맨 뒤**에 붙인다 — 방금 만든 것이 끝에 오는 것이 자연스럽다 |
+    /// | **편집**(`editing != nil`) | **원본이 있던 자리**를 지킨다 |
+    ///
+    /// ## ★ 두 번 지우는 구조와 인덱스가 부딪히는 자리
+    ///
+    /// 지워야 할 것이 둘이다 — **원본**(단축어를 통째로 바꿨을 때 옛 항목이 남지 않게)과
+    /// **단축어가 겹치는 기존 항목**(한쪽만 겹쳐도 어느 쪽이 발동할지 사용자가 알 수 없다).
+    ///
+    /// 그런데 겹쳐서 지워지는 항목이 **원본보다 앞에 있으면 자리가 그만큼 당겨진다.**
+    /// 그래서 원본 인덱스를 그대로 쓰면 안 되고, **앞에서 지워진 개수만큼 빼야** 한다
+    /// (`removedBefore`). 이 보정을 빠뜨리면 항목이 지워진 수만큼 뒤로 밀린다.
+    ///
+    /// 원본을 목록에서 못 찾으면(있을 수 없는 입력) **맨 뒤**로 간다 — 잃어버리지는 않는다.
+    ///
+    /// - Parameter editing: 고치는 중인 원본. nil이면 추가다.
+    static func applying(
+        _ entry: SnippetEntry, editing original: SnippetEntry?, to list: [SnippetEntry]
+    ) -> [SnippetEntry] {
+        let originalIndex = original.flatMap { target in
+            list.firstIndex { $0.snippetListID == target.snippetListID }
+        }
+        let incoming = Set(entry.triggers.map(Self.normalizedTrigger))
+
+        var kept: [SnippetEntry] = []
+        var removedBefore = 0
+        for (index, existing) in list.enumerated() {
+            let isOriginal = original.map { $0.snippetListID == existing.snippetListID } ?? false
+            let overlaps = existing.triggers.contains { incoming.contains(Self.normalizedTrigger($0)) }
+            guard isOriginal || overlaps else {
+                kept.append(existing)
+                continue
+            }
+            if let originalIndex, index < originalIndex { removedBefore += 1 }
+        }
+
+        guard let originalIndex else {
+            kept.append(entry)      // 추가 — 맨 뒤
+            return kept
+        }
+        kept.insert(entry, at: min(originalIndex - removedBefore, kept.count))
+        return kept
+    }
+
+    /// ★ 단축어에 **쉼표**가 들어 있는가 — 편집 왕복에서 **쪼개지는** 항목이다.
+    ///
+    /// ## 왜 이것이 존재할 수 있나 (2026-09-23 `git log` 확인)
+    ///
+    /// v1.0.1까지 편집기는 단축어 칸이 **하나**였고 검증이 *공백 trim + 40자*뿐이었다 —
+    /// **쉼표를 막지 않았다**(`d3707be:App/Settings/SnippetSettingsView.swift` 139·173행).
+    /// 그리고 `triggers` 스키마로 올라올 때 디코더는 옛 단일 값을 **그대로 한 원소로** 싣는다
+    /// (`triggers = [single]`) — 쪼개지 않는다.
+    ///
+    /// 그래서 `"가,나"` 같은 단축어가 **저장분에 있을 수 있다.**
+    /// 지금 편집기는 불러올 때 `joined(", ")`, 저장할 때 `parseTriggers`가 쉼표로 나누므로
+    /// **열었다 저장만 해도 둘로 갈린다** — 게다가 발동 범위가 넓어진다
+    /// (`"가,나"` 하나가 `"가"`·`"나"` 둘이 되어 아무 데서나 뜬다).
+    ///
+    /// ## ★ 그래서 고치지 않고 **알린다**
+    ///
+    /// 마이그레이션으로 조용히 바꾸는 것이 더 위험하다 — 사용자가 등록한 값을 우리가
+    /// 해석해서 덮어쓰는 것이고, 되돌릴 근거도 남지 않는다.
+    /// **편집기가 경고를 띄우고 사용자가 정한다.** 저장을 막지도 않는다.
+    var hasCommaInTrigger: Bool {
+        triggers.contains { $0.contains(",") }
+    }
+
+    /// ★ 내장 **날짜·시간 팩과 겹칠 수 있는** 단축어인가 — 「날짜」·「시간」·「시각」으로 끝난다.
+    ///
+    /// 매처는 사용자 문구를 날짜 계산보다 **먼저** 본다(PDR `date-snippet-pack.md` 3-5절 —
+    /// 「사용자 문구 > 내장 팩」 원칙). 그래서 사용자가 `날짜`나 `오늘 날짜`를 자기 단축어로 등록하면
+    /// 내장 날짜 칩이 **가려진다.** 버그가 아니라 확정 동작이고, 대신 편집기가 **알린다** —
+    /// `hasCommaInTrigger`와 같은 자리·같은 톤이다. **저장은 막지 않는다.**
+    ///
+    /// 판정은 **정규화 기준**이다(`날 짜`로 쳐도 걸린다 — 매처가 띄어쓰기를 안 보므로).
+    /// 뷰가 **지금 입력 중인** 단축어로 부를 수 있게 목록을 받는 정적 함수로 둔다.
+    static func mayOverlapDateSnippets(_ triggers: [String]) -> Bool {
+        triggers.contains { trigger in
+            let normalized = Self.normalizedTrigger(trigger)
+            return Self.dateSnippetEndings.contains { normalized.hasSuffix($0) }
+        }
+    }
+
+    /// 날짜·시간 팩의 끝말 (PDR 3-1절). 매처(`DateSnippetParser`)의 끝말과 같아야 한다.
+    static let dateSnippetEndings = ["날짜", "시간", "시각"]
 
     /// 목록 `ForEach` 의 안정된 id. 단축어가 여럿이라 하나만 쓰면 서로 다른 항목이 같은 id 를
     /// 가질 수 있다. 정규화한 단축어를 이어 붙여 쓴다.

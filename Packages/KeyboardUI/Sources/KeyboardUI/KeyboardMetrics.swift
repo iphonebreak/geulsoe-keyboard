@@ -37,6 +37,42 @@ public enum KeyboardMetrics {
 
     // MARK: - 계산
 
+    /// 한 행의 키 폭(pt) — **화면(`KeyboardLayoutView.rowView`)이 쓰는 유일한 함수**다. 키는 `HStack(spacing: keySpacing)`으로 놓인다.
+    ///
+    /// 열 정렬 여부는 **배열(`layout.alignsColumns`)이 정한다** — 화면은 따로 boolean을 끼우지 않는다. 예전에는 `rowView`가
+    /// `alignsColumns:` 인자를 넘겨서, 그 인자를 `false`로 바꿔도 테스트가 전부 녹색이었다(3차 개정, 반론자2 변이 M2).
+    /// 그린 화면이 이 함수를 쓰는지는 `KeyboardRowRenderTests`가 픽셀로 본다.
+    public static func keyWidths(row: [LayoutDefinition.Key], in layout: LayoutDefinition,
+                                 totalWidth: CGFloat) -> [CGFloat] {
+        keyWidths(units: row.map(\.width), totalWidth: totalWidth, alignsColumns: layout.alignsColumns)
+    }
+
+    /// 위 함수의 계산부 — 밖에서 boolean을 골라 부르지 못하게 감춘다.
+    ///
+    /// - `alignsColumns == false`(기본 — 두벌식·쿼티·천지인·단모음·쿼티형 기호): **옛 식 그대로**. 행마다 `간격 × (키 수 − 1)`을
+    ///   먼저 빼고 남은 폭을 단위 비율로 나눈다. 키 수가 다른 행끼리는 경계가 조금씩 어긋나지만, 이 자판들의 키 폭을
+    ///   바꾸는 것은 요청받지 않은 변화라 그대로 둔다.
+    /// - `alignsColumns == true`(키패드 4페이지·자동 숫자 패드 — `LayoutDefinition.alignsColumns`): 키마다
+    ///   **자리 = (W + 간격) × 단위 ÷ 행 단위 합**, 키 폭 = 자리 − 간격. 키 수와 무관하게 **같은 단위 경계가 같은 x**에 온다 —
+    ///   반 칸 둘이 한 칸과 정확히 맞물려 숫자 4행의 `0`이 위 `2 5 8` 열에 선다(사장님 폰 세션 4-1 2차 2026-09-28). 키 폭 합 +
+    ///   간격 합 = W 그대로다. 옛 식에서 밀린 양은 **배치마다 다르다**(반론자2 계산): 1차 숫자 4행 지구본 없음 왼쪽 **+5pt**
+    ///   (@3x 15px — 사장님 폰), 지구본 있음 왼쪽 +3.75pt(중심 +3.125pt), 자동 숫자 패드(지구본 있음) 왼쪽 +3⅓pt.
+    ///
+    /// **음수 방어**: 등장 첫 레이아웃 패스에서는 `totalWidth`가 0으로 온다. 그대로 계산하면 음수 폭이 SwiftUI로 들어가
+    /// `Invalid frame dimension`을 수십 줄 뱉고 자판이 빈 회색으로 떴다(2026-09-09) — 두 방식 모두 0으로 눌러 둔다.
+    /// 폭이 확정되면 다음 패스에서 제대로 그려진다.
+    private static func keyWidths(units: [Double], totalWidth: CGFloat, alignsColumns: Bool) -> [CGFloat] {
+        let totalUnits = units.reduce(0, +)
+        guard totalUnits > 0 else { return units.map { _ in 0 } }
+        if alignsColumns {
+            return units.map { unit in
+                max(0, (totalWidth + keySpacing) * CGFloat(unit) / CGFloat(totalUnits) - keySpacing)
+            }
+        }
+        let available = max(0, totalWidth - keySpacing * CGFloat(max(0, units.count - 1)))
+        return units.map { available * CGFloat($0) / CGFloat(totalUnits) }
+    }
+
     /// 주어진 자판 폭에서 문자 키 하나의 폭. `KeyboardLayoutView.rowView`와 같은 식이다.
     public static func keyWidth(availableWidth: CGFloat, units: Double) -> CGFloat {
         guard units > 0 else { return 0 }
@@ -80,14 +116,39 @@ public enum KeyboardMetrics {
     /// **커서 ◀ 와 ▶ 사이가 181pt(약 4.8cm)까지 벌어진다** — 한 글자를 고치려고 손이 화면을
     /// 가로지르게 된다 (검증자 실측 REQ-4). 아이폰에서는 같은 두 버튼이 약 98pt다.
     ///
-    /// 100pt는 **아이폰에서 실제로 나오는 버튼 폭의 상한보다 크다**(폭 320~440pt · 도구 4~5개에서
-    /// 67.5~97.5pt). 그래서 아이폰 도구 행은 이 상한에 걸리지 않고 지금 모습 그대로다 —
-    /// 합의된 아이폰 레이아웃을 건드리지 않는다.
+    /// 100pt는 **아이폰에서 실제로 나오는 버튼 폭의 상한보다 크다.** 그래서 아이폰 도구 행은
+    /// 이 상한에 걸리지 않고 지금 모습 그대로다 — 합의된 아이폰 레이아웃을 건드리지 않는다.
+    ///
+    /// ## ★ 도구가 **6개**가 됐다 — 다시 계산했다 (2026-09-22, 검증자 #11)
+    ///
+    /// 예전 주석은 「도구 4~5개에서 67.5~97.5pt」라고 적었다. `.bibleSearch`가 들어와
+    /// 최대 6칸이 됐으므로 다시 잰다(`(화면 폭 − padding 20 − 간격 10×(n−1)) ÷ n`):
+    ///
+    /// | 도구 수 | 폭 320pt | 폭 440pt |
+    /// |---|---|---|
+    /// | 4개 | 67.5 | 97.5 |
+    /// | 5개 | 52.0 | 76.0 |
+    /// | **6개(아이콘 5 + 배지 999+)** | **36.4** | **60.4** |
+    ///
+    /// **칸이 늘수록 버튼은 좁아지므로 6개는 상한에서 더 멀어진다** — 결론이 바뀌지 않고
+    /// **더 강해진다.** (6칸일 때 여섯 번째는 아이콘이 아니라 **배지**다. 배지는 고유 폭 +
+    /// `layoutPriority(1)`이라 균등 분배에 끼지 않으므로 나머지 다섯이 남은 폭을 나눈다.
+    /// 배지 폭 **44.5pt**(한 자리)~68.1pt(`999+`)를 빼고 계산한 값이 위 표다.
+    /// 44.5는 검증자 CoreText 계산 44.45pt를 반올림한 것이고, 같은 모형이 517건에 준 61.36pt가
+    /// **실기 실측 61.0pt**와 0.36pt로 맞았다 — `KeyboardRootView.bibleBadge` 주석 참조.)
+    ///
+    /// ★ **상한이 실제로 걸리는 경우는 따로 있다** — 도구 수가 적을 때다.
+    /// `w ≥ 100`은 `n ≤ (화면 폭 − 10) ÷ 110`에서 참이므로 **폭 320pt에서 n ≤ 2,
+    /// 폭 440pt에서 n ≤ 3**이다. 즉 사용자가 도구를 두셋만 남겼을 때 상한이 일한다.
+    /// 그것은 예전부터 그랬고 6개가 되며 달라진 것이 없다.
     public static let maxToolButtonWidth: CGFloat = 100
     /// 도구 버튼 사이 간격 (툴바 `HStack`의 spacing).
     public static let toolButtonSpacing: CGFloat = 10
 
     /// 도구 `count`개가 차지할 수 있는 최대 폭. 넘으면 가운데로 모은다.
+    ///
+    /// 6칸이면 **650pt**다 — 아이폰 자판 폭(최대 420pt)은 한참 아래라 아이폰에서는 안 걸리고,
+    /// 아이패드 가로에서만 일한다(이 상한을 둔 본래 이유).
     public static func toolRowMaxWidth(count: Int) -> CGFloat {
         guard count > 0 else { return .greatestFiniteMagnitude }
         return CGFloat(count) * maxToolButtonWidth + CGFloat(count - 1) * toolButtonSpacing
@@ -108,6 +169,42 @@ public enum KeyboardMetrics {
     /// 아이폰은 36pt 그대로다 — 아이폰만의 문제가 아니고, 아이폰 레이아웃은 합의된 값이다.
     public static func listRowMinHeight(panelWidth: CGFloat) -> CGFloat {
         panelWidth > phonePanelWidthCeiling ? 44 : 36
+    }
+
+    // MARK: - 툴바 후보 행 규칙 (테스트가 닿게 여기 둔다)
+
+    /// 후보 닫기 ✕를 그리는가. 도구 행은 이 값의 **반대**일 때 그린다.
+    ///
+    /// ## ★ 배지는 보지 않는다 (사용자 결정 2026-09-21)
+    ///
+    /// 배지만 떠 있을 때는 ✕가 없어야 한다. 기획서가 *"✕를 없애면 도구 행에 못 돌아간다"* 며
+    /// 유지를 권고했는데 **전제가 틀렸다** — 도구 행 조건이 배지를 보지 않으므로 배지 단독
+    /// 상태에서는 `[도구 4개] [📖 N]`이 **한 줄에 함께** 그려진다. 커서·클립보드·이모지가
+    /// 이미 화면에 있어 갇히지 않는다.
+    ///
+    /// 추천단어·채움글 칩·붙여넣기 칩의 ✕는 **그대로**다(2026-09-03 사용자 요청) —
+    /// 그때는 후보가 도구 행 자리를 차지하므로 내릴 길이 ✕뿐이다.
+    public static func showsDismissButton(
+        hasSnippet: Bool, hasWords: Bool, hasPaste: Bool
+    ) -> Bool {
+        hasSnippet || hasWords || hasPaste
+    }
+
+    /// 추천단어를 몇 개까지 띄울까 — **실제 배지 유무**로 갈린다.
+    ///
+    /// ## ★ 자리 예약을 되돌렸다 (2026-09-21 저녁 → 밤)
+    ///
+    /// 낮에는 성경 검색이 **켜져 있기만 하면** 배지 자리를 비워 두고 추천단어를 2개로 고정했다.
+    /// 자리가 안 움직이는 대신 **배지가 없을 때 오른쪽이 비어 보였고**, 사용자가 실기에서
+    /// 그것을 보고 되돌리라고 했다:
+    ///
+    /// > 「성경 키워드 개수가 0개일떄 … **기본적으로 3개가 나오도록** 하자
+    /// >  성경 키워드 갯수가 1개 이상일떄에는 **추천단어 2개** 나오도록 하자」
+    ///
+    /// 그래서 **게이트가 아니라 배지 유무**로 정한다. 켠 사용자라도 결과가 0건이면 3개다.
+    /// 되살아난 위험(배지가 뜰 때 자리가 움직인다)은 `KeyboardRootView.bibleBadge` 주석의 표에 있다.
+    public static func wordSuggestionLimit(hasBadge: Bool) -> Int {
+        hasBadge ? 2 : 3
     }
 
     /// 자판 배열의 기준 열 수에서 곧바로 최대 폭을 낸다.

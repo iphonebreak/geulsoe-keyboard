@@ -21,7 +21,47 @@ final class KeyboardViewController: UIInputViewController {
 
     private let settingsRepository: SettingsRepository = AppGroupSettingsRepository()
     private let themeRepository: ThemeRepository = BundledThemeRepository()
-    private let bibleRepository: BibleVerseRepository = BundledBibleRepository()
+    /// 조회·검색이 **같은 인스턴스(같은 mmap)** 를 쓴다. 둘로 나누면 4.4MB 매핑과
+    /// 바이트 빈도표가 두 벌 생긴다.
+    private let bibleRepository = BundledBibleRepository()
+    /// 성경 검색 캐스케이드 — **낱말 창만** 쓴다(계획서 3-1).
+    /// 말끝 떼기는 2026-09-21 제거 — `docs/design-reviews/bible-suffix-strip-removal.md`.
+    ///
+    /// ★ **`makeSearcher()`가 여기서 처음 불린다** — 그 순간 본문 4.4MB를 훑어 바이트 빈도표가
+    /// 만들어진다. 이 `lazy`가 **꺼 둔 사용자에게 그 비용을 안 내게 하는 자리**다(반론자1 A-6).
+    /// 아래 `bibleSearchScheduler`를 **게이트가 참일 때만** 건드려야 이 lazy가 의미를 갖는다.
+    private lazy var bibleSearchCascade = BibleSearchCascade(searcher: bibleRepository.makeSearcher())
+
+    /// 120ms 디바운스 — **키를 칠 때마다가 아니라 손이 멈출 때마다** 캐스케이드를 돈다
+    /// (계획서 3-2가 「필수」로 정한 항목, 반론자2 F-1).
+    ///
+    /// 만료 시점에 `isStillValid`로 **꼬리와 게이트를 다시 본다** — 지연 동안 사용자가 더 쳤거나
+    /// secure로 바뀌었거나 칩이 떴을 수 있다. 결과가 갱신되면 `updateSuggestionBar()`를 한 번
+    /// 다시 돌려 **배지와 추천단어 개수를 함께** 낸다(둘이 같은 값을 쓰는 규율, 계획서 2-1).
+    /// ★ **게이트가 참일 때만 만든다.** `lazy var`로 두면 꺼진 경로의 `cancel()` 한 번에
+    /// 캐스케이드·스캐너·빈도표가 전부 만들어져 A-6이 되살아난다.
+    private var bibleSearchScheduler: BibleSearchScheduler?
+
+    /// 검색이 필요해진 순간 스케줄러를 만들어 들고 있는다 — **여기서 처음 빈도표가 생긴다.**
+    private func bibleSearchSchedulerMakingIfNeeded() -> BibleSearchScheduler {
+        if let bibleSearchScheduler { return bibleSearchScheduler }
+        let scheduler = BibleSearchScheduler(
+            cascade: bibleSearchCascade,
+            isStillValid: { [weak self] tail in
+                guard let self, let inputController else { return false }
+                // 사용자가 계속 쳤으면 옛 꼬리다 — 버린다
+                guard inputController.textTail == tail else { return false }
+                return canSearchBibleNow(tail: tail)
+            },
+            onResultChanged: { [weak self] in self?.updateSuggestionBar() }
+        )
+        bibleSearchScheduler = scheduler
+        return scheduler
+    }
+
+    /// 마지막 스캔 결과. 배지 건수·패널 내용·✕ 삭제 길이가 전부 여기서 나온다.
+    /// **스케줄러가 들고 있는 그 값 하나**다 — 조립 지점은 읽기만 한다.
+    private var bibleSearchResult: BibleSearchResult? { bibleSearchScheduler?.result }
     private let bundledSnippetRepository: SnippetRepository = BundledSnippetRepository()
     private let greetingsSnippetRepository: SnippetRepository = BundledSnippetRepository(resourceName: "Greetings")
     private let userSnippetRepository: SnippetRepository = AppGroupSnippetRepository()
@@ -30,6 +70,9 @@ final class KeyboardViewController: UIInputViewController {
     private var inputController: InputController?
     private var viewState: KeyboardViewState?
     private var snippetMatcher: SnippetMatcher?
+    /// 날짜·시간 채움글의 달력 — 그레고리력·`autoupdatingCurrent`·월요일 시작(PDR `date-snippet-pack.md` 4-5·4-6·6-2절).
+    /// 계산(파서)과 탭 시점 신선도 판정(`handleSnippetTap`)이 **같은 달력**을 쓴다.
+    private let dateSnippetCalendar = DateSnippetParser.makeCalendar()
     /// 추천단어 엔진. 익스텐션 프로세스 수명 동안 유지한다 — 매 등장마다 다시 만들면
     /// Full Access 없는 기기의 세션 학습이 필드 전환마다 날아간다.
     private var suggestionEngine: SuggestionEngine?
@@ -83,6 +126,11 @@ final class KeyboardViewController: UIInputViewController {
     /// 클립보드 기록 — 키보드가 쓰는 App Group 데이터 (FA 필요, PDR clipboard-history).
     /// 메모리에 들고 있지 않고 필요할 때 읽는다 — 설정 앱이 끄기/지우기로 비운 것을 놓치지 않게.
     private let clipboardHistoryRepository: ClipboardHistoryRepository = AppGroupClipboardHistoryRepository()
+    /// 이모지 「최근 사용」 — **키보드 전용 컨테이너**(App Group 아님, 전체 접근 무관, v1.2.0 ⑤).
+    /// ★ 실기에서 재시작 뒤 값이 남지 않는 것으로 밝혀지면 **이 한 줄만** `InMemoryEmojiHistoryRepository.shared`로
+    ///   바꾼다(PDR `emoji-recent-persist.md` 6-3절 후퇴안 — 판정·테스트는 그대로 쓴다).
+    ///   확인 절차: `docs/release/v1.2.0-emoji-recent-device-check.md`
+    private let emojiHistoryRepository: EmojiHistoryRepository = KeyboardOwnEmojiHistoryRepository()
     /// 기록에 넣은 마지막 클립보드 changeCount — 등장마다 읽어도 같은 복사를 두 번 읽지 않는다.
     ///
     /// **위 `consumedPasteboardChangeCount`와 같은 이유로 타입에 둔다** (2026-09-15).
@@ -125,6 +173,8 @@ final class KeyboardViewController: UIInputViewController {
         let clickable = ClickableInputView(frame: .zero, inputViewStyle: .default)
         clickable.preferredHeight = totalKeyboardHeight   // 창이 없어도 세로 기준값은 지금 알 수 있다
         inputView = clickable
+        // SwiftUI 호스트를 붙이거나 무거운 준비 작업을 하기 전에 크기 응답부터 준비한다.
+        updateHeight()
 
         let controller = InputController(
             output: ProxyTextOutput(controller: self),
@@ -132,6 +182,8 @@ final class KeyboardViewController: UIInputViewController {
             startsInHangul: true
         )
         controller.doubleSpacePeriod = settings.doubleSpacePeriod
+        // 「123」이 들어갈 자판(쿼티형/키패드형) — 컨트롤러는 들어갈 모드만 고른다(PDR number-symbol-keypad 4-2절)
+        controller.symbolKeyboardStyle = settings.symbolKeyboardStyle
         inputController = controller
 
         let state = KeyboardViewState(
@@ -147,8 +199,8 @@ final class KeyboardViewController: UIInputViewController {
             clipboardHistoryEnabled: settings.clipboardHistoryEnabled
         )
         viewState = state
-        rebuildSnippetMatcher()
-        rebuildSuggestionEngineIfNeeded()
+        // 매처·추천 엔진과 등장 상태는 viewWillAppear에서 한 번 준비한 뒤 호스트에 싣는다.
+        // 여기서 기본 상태를 먼저 렌더하면 입력란 특성·툴바가 확정될 때 다시 그리게 된다.
         // 학습 연결 — secure 필드는 학습에서 뺀다 (보안 규칙)
         controller.onWordCommitted = { [weak self] word in
             guard let self, self.textDocumentProxy.isSecureTextEntry != true else { return }
@@ -163,12 +215,8 @@ final class KeyboardViewController: UIInputViewController {
             }
             self.suggestionEngine?.learn(word: word)
         }
-        installKeyboardView(state: state)
         clearSystemContainerBackground()   // 조상이 이미 붙어 있으면 여기서 먼저 잡는다
         applyBackdropColor()
-        // 높이 제약은 여기서 미리 건다 — viewWillAppear에서 처음 걸면 시스템 기본 높이로 한 번 뜬 뒤
-        // 우리 높이로 바뀌어 등장할 때 깜빡인다 (실기 피드백 2026-09-04). viewWillAppear는 값만 갱신한다
-        updateHeight()
         // 설정 앱이 값을 저장하면 Darwin 알림이 온다 — 키보드가 떠 있는 채로 즉시 반영
         // (PDR field-traits-and-live-settings). 값은 App Group에서 다시 읽는다 (FA 불필요).
         settingsChangeObserver = SettingsChangeObserver { [weak self] in
@@ -264,35 +312,42 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // **수정 C의 안전장치.** `viewWillDisappear`에서 호스트를 떼어 두는데,
-        // 같은 인스턴스가 `viewDidLoad` 없이 다시 등장하면(아이패드 다중 창 — 위 주석과 같은 경우)
-        // `installKeyboardView`가 다시 돌지 않아 **자판이 통째로 비어 버린다.**
-        // 그 경우 여기서 다시 설치한다. `viewDidLoad` 경로에서는 이미 설치돼 있어 걸리지 않는다.
-        if Self.releaseHostOnDisappear, hostingController == nil, let viewState {
-            installKeyboardView(state: viewState)
-        }
+        // 최초 등장·재등장 모두 화면을 붙이기 전에 설정과 입력란 상태를 준비한다.
+        // 재사용 호스트는 viewWillDisappear에서 떼어 둔 채로 갱신해 중간 상태를 렌더하지 않는다.
         clearSystemContainerBackground()
         reloadSettingsIfChanged()
+        // 이모지 최근 사용 — 저장소에서 다시 읽고, 설정 앱이 껐으면 여기서 비운다(설정이 그대로여도 매번)
+        refreshEmojiHistory()
         // 설정이 그대로여도 사용자 문구는 설정 앱에서 바뀌었을 수 있다 — 항상 다시 만든다
         rebuildSnippetMatcher()
         rebuildSuggestionEngineIfNeeded()
-        // needsInputModeSwitchKey는 viewDidLoad 시점엔 미확정일 수 있다
-        viewState?.needsInputModeSwitchKey = needsInputModeSwitchKey
-        updateHeight()
+        // 같은 값 대입도 Observation에 통지되므로 바뀐 경우에만 갱신한다.
+        // 최종 확인은 기존대로 viewWillLayoutSubviews에서 한다.
+        let needs = needsInputModeSwitchKey
+        if let viewState, viewState.needsInputModeSwitchKey != needs {
+            viewState.needsInputModeSwitchKey = needs
+        }
         // 키보드가 내려갔다 다시 뜨는 사이 앱이 텍스트를 바꿨을 수 있다 —
         // 이전 세션의 꼬리·후보를 문서 기준으로 다시 세운다 (textDidChange가 안 오는 호스트 방어)
         inputController?.syncWithDocument(documentTail: documentTailForSync)
         // 입력란 특성(숫자 패드·리턴 라벨·ASCII 시작)은 등장마다 다시 적용한다
         applyFieldTraits(force: true)
+        applyKeyboardHeight(layoutNow: false)
         // 새 필드에서는 자판부터 (@Observable은 같은 값 대입도 통지하므로 가드)
         if viewState?.showsEmojiPanel == true { viewState?.showsEmojiPanel = false }
         if viewState?.showsClipboardPanel == true { viewState?.showsClipboardPanel = false }
+        // 검색 패널도 같은 줄에 포함한다 (계획서 2-8) — 안 닫으면 앱 전환 뒤
+        // 자판 없이 패널만 떠 있는 상태가 남는다
+        if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
         dismissedSuggestionWord = nil  // ✕ 억제는 그 표시 세션에서만 (채움글 칩은 예외 — 편집 전까지 유지)
         suppressesWordSuggestionsAfterCursorMove = false
         updateVisibleTools()
-        updateSuggestionBar()
         pasteboardRetryCount = 0        // 등장마다 재시도 예산을 새로 준다
+        // probePasteboard의 defer가 후보 행을 갱신한다 — 프로브 직전의 중간 상태는 싣지 않는다.
         probePasteboard()
+        if hostingController == nil, let viewState {
+            installKeyboardView(state: viewState)
+        }
         // 첫 진동·첫 클릭음이 지연·약화되지 않게 미리 준비한다 (Apple 권고)
         if settings.hapticEnabled, hasFullAccess { hapticGenerator.prepare() }
         prepareClickPlayerIfNeeded()
@@ -397,7 +452,8 @@ final class KeyboardViewController: UIInputViewController {
             numberRow: settings.numberRowEnabled,
             inputModeSwitchKey: viewState.needsInputModeSwitchKey,  // 지구본 불필요 시 하단 행 재배치
             punctuation: fieldPunctuation,                          // 입력란 종류별 문장부호 키
-            longPressSymbols: settings.longPressSymbolsEnabled)     // 문자 키 길게 → 기호 (설정)
+            longPressSymbols: settings.longPressSymbolsEnabled,     // 문자 키 길게 → 기호 (설정)
+            letterMode: inputController.letterMode)                 // 키패드 문자 복귀 키 「가」/「ABC」
         if viewState.layout != layout {
             // 자판이 바뀌면 **기준 열 수가 바뀔 수 있다**(두벌식 10 ↔ 천지인 4 ↔ 숫자 패드 3).
             // 높이는 그 열 수에서 나오므로 여기서 다시 걸지 않으면 이전 자판의 높이가 남는다.
@@ -428,7 +484,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func applySettingsLive() {
         reloadSettingsIfChanged()
-        rebuildSnippetMatcher()            // 내 문구 저장도 같은 알림을 쓴다
+        rebuildSnippetMatcher()            // 내 채움글 저장도 같은 알림을 쓴다
         rebuildSuggestionEngineIfNeeded()  // 학습 초기화 토큰
         updateHeight()
         refreshLayout()
@@ -481,6 +537,9 @@ final class KeyboardViewController: UIInputViewController {
                                             // 사라진 칩의 클립보드를 소비하지 못하게 한다
         viewState?.pasteSuggestion = nil
         if viewState?.clipboardEntries.isEmpty == false { viewState?.clipboardEntries = [] }
+        // 예약된 성경 검색은 버린다 — 내려간 키보드를 위해 본문을 훑을 이유가 없고,
+        // 다음 등장에서 꼬리가 다시 서면 그때 새로 예약된다.
+        bibleSearchScheduler?.cancel()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -532,7 +591,12 @@ final class KeyboardViewController: UIInputViewController {
         snippetMatcher = SnippetMatcher(
             bible: disabled.contains(SnippetPack.bible) ? nil : bibleRepository,
             entries: entries,
-            biblePrefix: settings.bibleSnippetPrefixEnabled
+            biblePrefix: settings.bibleSnippetPrefixEnabled,
+            // 날짜·시간 팩 — 문구 JSON이 없는 **계산 팩**이다. 끄면 파서를 아예 싣지 않는다(세 갈래 전부 빠진다).
+            // 값은 미리 계산하지 않는다 — 매처가 적중한 순간 `now()`를 읽는다(PDR 1절).
+            dates: disabled.contains(SnippetPack.date)
+                ? nil
+                : DateSnippetParser(style: settings.dateSnippetStyle, calendar: dateSnippetCalendar)
         )
     }
 
@@ -567,9 +631,8 @@ final class KeyboardViewController: UIInputViewController {
         // 비밀번호 필드에서는 매칭·표시·학습 모두 하지 않는다 (보안 규칙)
         let secure = textDocumentProxy.isSecureTextEntry == true
 
-        let matched: SnippetSuggestion? = secure
-            ? nil
-            : snippetMatcher?.suggestion(forTail: inputController.textTail)
+        // secure 게이트는 매처 안에 있다 — 날짜 팩 수용 기준 8을 `swift test`로 잠그려고 옮겼다(규칙은 같다)
+        let matched = snippetMatcher?.suggestion(forTail: inputController.textTail, isSecureTextEntry: secure)
         // ✕로 내린 추천단어는 같은 단어를 이어 치는 동안(접두 유지) 다시 띄우지 않는다.
         // 해제 판정은 사용자 편집 때만 — 커서 이동으로 꼬리가 바뀐 것은 "이어 치기"가 아니다.
         let currentWord = inputController.currentWord
@@ -582,21 +645,19 @@ final class KeyboardViewController: UIInputViewController {
         if userEdited, let dismissedTail = Self.dismissedSnippetTail, dismissedTail != inputController.textTail {
             Self.dismissedSnippetTail = nil
         }
+        // 배지도 같은 규칙 — 사용자 편집으로 꼬리가 바뀌면 다시 뜬다
+        if userEdited, let dismissedTail = Self.dismissedBibleTail, dismissedTail != inputController.textTail {
+            Self.dismissedBibleTail = nil
+        }
         let snippet = (Self.dismissedSnippetTail == nil) ? matched : nil
 
         // 채움글 후보가 있으면 툴바는 채움글 칩만 보인다 — 추천단어("절대"·"저를")는 함께
         // 띄우지 않는다 (사용자 결정 2026-09-03: 단축어를 쳤을 땐 "붙여넣을지"만 묻는다).
         // 커서 이동(◀▶·트랙패드) 뒤에는 다음 키 입력까지 추천단어를 띄우지 않는다 — 커서가 단어
         // 중간에 있으면 후보 탭이 커서 앞만 바꿔 "안녕하세요요"처럼 뒤 글자가 남는다.
-        var words: [String] = []
-        if !secure, snippet == nil, dismissedSuggestionWord == nil,
-           !suppressesWordSuggestionsAfterCursorMove, let suggestionEngine {
-            words = suggestionEngine.suggestions(forWord: currentWord, limit: 3)
-        }
-        if viewState.snippetSuggestion != snippet { viewState.snippetSuggestion = snippet }
-        if viewState.wordSuggestions != words { viewState.wordSuggestions = words }
-
         // 사용자가 키를 누른 뒤에는 일반 붙여넣기 칩을 내린다 (아래 게이트 참조).
+        // **붙여넣기 칩 판정을 추천단어보다 먼저 한다** — 성경 배지가 칩 유무에 걸려 있고,
+        // 배지 유무가 다시 추천단어 개수를 정하기 때문이다(아래 참조).
         if userEdited { pasteChipSuppressedByTyping = true }
 
         // 붙여넣기 칩 — **두 종류가 같은 게이트를 쓴다** (2026-09-16 통일).
@@ -626,10 +687,215 @@ final class KeyboardViewController: UIInputViewController {
             guard !secure, let paste = pasteSuggestion else { return nil }
             return pasteChipSuppressedByTyping ? nil : paste
         }()
+
+        // MARK: 성경 검색 배지 (계획서 2-1·2-6)
+        //
+        // **우선순위**: 채움글 칩 > 붙여넣기 칩 > 배지 + 추천단어 2개 > 추천단어 3개/도구 행.
+        // 칩이 있으면 배지를 숨긴다 — 칩 하나가 이미 287~321pt를 쓴다.
+        // 붙여넣기 칩을 이기게 두는 이유는 4차 A3-4의 재현 경로다: 「믿음」을 쳐 둔 채 앱을
+        // 전환했다 돌아오면 꼬리가 다시 서고(배지 조건) 같은 등장에서 억제가 풀려(칩 조건)
+        // 둘이 한 줄에 같이 떴다.
+        //
+        // ★ **값 하나를 배지와 추천단어 개수가 함께 쓴다** (계획서 2-1).
+        //   두 곳에서 따로 계산하면 "배지는 없는데 추천단어는 2개"인 어긋남이 생긴다.
+        //
+        // ## 디바운스를 넣고도 그 규율이 유지되는 이유
+        //
+        // 여기서 캐스케이드를 **직접 부르지 않는다.** 예약만 걸고 `scheduler.result`를 읽는다 —
+        // 배지도 추천단어 개수도 그 한 값에서 나오므로 **어느 순간에도 둘이 어긋날 수 없다.**
+        // 지연이 끝나면 스케줄러가 이 함수를 한 번 다시 돌려 둘을 **함께** 다시 낸다.
+        // (그때 `schedule`은 같은 꼬리라 아무 것도 하지 않는다 — 재진입이 끊긴다.)
+        //
+        // ## 패널이 열려 있는 동안은 **얼린다**
+        //
+        // 패널은 자판 자리를 차지하므로 그동안 사용자는 칠 수 없다. 그런데 호스트가 보내는
+        // `textDidChange` 메아리로 꼬리는 흔들릴 수 있고, 그러면 옛 결과가 버려져 **읽고 있던
+        // 목록이 사라지거나 다시 그려진다.** 사용자가 손대지 않은 화면이 저절로 바뀌면 안 된다.
+        // 그래서 패널이 열린 동안에는 예약도 취소도 하지 않고 지금 값을 그대로 둔다 —
+        // 패널은 열릴 때의 결과를 닫을 때까지 유지한다.
+        // ★ **게이트를 얼림보다 먼저 본다** (계획서 4절 · 반론자2 4-2).
+        //
+        // 설정이 OFF로 바뀌면 Darwin 알림 → 120ms 뒤 `updateSuggestionBar()`가 불린다.
+        // 그때 패널이 열려 있으면 아래 「얼림」 분기로 먼저 들어가 **OFF가 무시된다.**
+        // 그래서 게이트 검사가 앞에 있어야 한다 — 꺼지면 **열린 패널이 즉시 닫히고 결과가 비워진다.**
+        if !canSearchBible {
+            // ★ 옵셔널 체인이다 — 꺼진 사용자에게 스케줄러(=빈도표)를 만들지 않는다
+            bibleSearchScheduler?.cancel()
+            if viewState.showsBibleSearchPanel { closeBibleSearchPanel() }
+        } else if viewState.showsBibleSearchPanel {
+            // 얼림 — 아무 것도 하지 않는다.
+            //
+            // ## ★ 다만 꼬리가 결과와 어긋나면 닫는다 (2026-09-21)
+            //
+            // 자판이 가려져 **사용자는** 칠 수 없지만 **호스트는** 커서를 옮기거나 글자를 바꿀 수
+            // 있고, `textDidChange`가 그 문맥으로 꼬리를 다시 세운다.
+            //
+            // **검색어 칩과 ✕가 사라진 뒤로도 이 가드는 남긴다** — 막는 대상이 바뀌었다.
+            // 이제 `typedText`를 쓰는 곳은 **구절 삽입**뿐인데, 꼬리가 어긋나면
+            // `insertSnippet`의 정합 검사가 **조용히 거절한다**(문서는 안전하지만 탭이 먹통이 된다).
+            // 사용자에게는 *눌러도 아무 일이 안 일어나는 패널*로 보인다 — 그 상태로 두느니 닫는다.
+            if let result = bibleSearchScheduler?.result,
+               !inputController.textTail.hasSuffix(result.typedText) {
+                closeBibleSearchPanel()
+            }
+        } else if canSearchBibleNow(tail: inputController.textTail), snippet == nil, chip == nil {
+            bibleSearchSchedulerMakingIfNeeded().schedule(tail: inputController.textTail)
+        } else {
+            bibleSearchScheduler?.cancel()
+        }
+        let searchResult = bibleSearchScheduler?.result
+        // 0건이면 배지 없음 — 캐스케이드가 이미 nil을 준다
+        let badgeCount = searchResult?.matches.count
+
+        // 열려 있던 패널은 결과가 사라지면 함께 닫는다 — 빈 패널만 남으면 나갈 길이 칩뿐이다
+        if badgeCount == nil, viewState.showsBibleSearchPanel {
+            closeBibleSearchPanel()
+        }
+
+        // ★ 추천단어 개수는 **실제 배지 유무**로 갈린다 (2026-09-21 밤 — 자리 예약 되돌림).
+        //
+        // 낮에는 게이트가 켜져 있기만 하면 자리를 비워 두고 2개로 고정했는데, 배지가 없을 때
+        // **오른쪽이 비어 보인다**고 사용자가 실기에서 판정했다. 그래서 전처럼 되돌린다 —
+        // 결과 0건이면 3개, 1건 이상이면 2개다. 규칙과 근거는 `KeyboardMetrics.wordSuggestionLimit`.
+        var words: [String] = []
+        if !secure, snippet == nil, dismissedSuggestionWord == nil,
+           !suppressesWordSuggestionsAfterCursorMove, let suggestionEngine {
+            words = suggestionEngine.suggestions(
+                forWord: currentWord,
+                limit: KeyboardMetrics.wordSuggestionLimit(hasBadge: badgeCount != nil)
+            )
+        }
+
+        // 날짜 칩은 키마다 새로 계산돼 계산 시각(`computedAt`)만 바뀐다 — 내용이 같으면 다시 싣지 않는다
+        // (뷰 갱신 낭비 방지). 값이 같다 = 같은 분/일이라 옛 계산 시각으로도 신선도 판정은 같다.
+        if snippet.map({ !$0.hasSameContent(as: viewState.snippetSuggestion) })
+            ?? (viewState.snippetSuggestion != nil) {
+            viewState.snippetSuggestion = snippet
+        }
+        if viewState.wordSuggestions != words { viewState.wordSuggestions = words }
+        if viewState.bibleMatchCount != badgeCount { viewState.bibleMatchCount = badgeCount }
         if viewState.pasteSuggestion != chip {
             viewState.pasteSuggestion = chip
         }
+        // ★ 배지 유무가 **도구 칸 하나를 여닫으므로** 여기서도 도구 목록을 다시 낸다 (v1.1.0).
+        //   예전에는 등장(`viewWillAppear`)과 설정 재로드 두 곳에서만 불렀다 —
+        //   그대로 두면 0건 → 1건이 돼도 📖 칸이 안 생긴다.
+        //   `updateVisibleTools`의 `!=` 가드가 있어 값이 같으면 무효화가 안 난다.
+        updateVisibleTools()
     }
+
+    // MARK: - 성경 검색 (v1.1.0 ①)
+
+    /// ★ **합성 게이트** — 성경 검색이 지금 동작해도 되는가 (계획서 4절).
+    ///
+    /// 넷이 **모두 참**이어야 한다. 하나라도 거짓이면 스캔 0회·배지 없음·열린 패널 즉시 닫힘.
+    ///
+    /// | 게이트 | 왜 |
+    /// |---|---|
+    /// | `settings.bibleSearchEnabled` | 사용자 스위치. **기본 꺼짐**(사용자 결정 2026-09-19) |
+    /// | `settings.snippetsEnabled` | 성경 검색은 채움글의 성경 팩 위에 선다 — 채움글을 끄면 함께 꺼진다 |
+    /// | 성경 팩이 켜져 있음 | `disabledSnippetPacks`에 `bible`이 없어야 한다. 팩을 껐는데 검색이 돌면 어긋난다 |
+    /// | `!isSecureTextEntry` | 비밀번호 칸에서는 매칭·표시를 하지 않는다(보안 규칙) |
+    ///
+    /// 2026-09-21까지 이 자리는 `true` 하드코딩이었다 — 「기본 꺼짐」 결정이 코드에 없어
+    /// **전원에게 켜져 있었다**(반론자1 A-2). 그것이 출하 차단 항목이었고 여기서 닫힌다.
+    /// 식은 `KeyboardSettings.allowsBibleSearch(isSecureTextEntry:)`에 있다 —
+    /// **익스텐션 타깃은 `swift test`가 닿지 않아서** 여기 두면 테스트가 식을 복제하게 되고,
+    /// 그러면 프로덕션을 고쳐도 테스트가 전부 통과한다(검증자 2절). 도메인에서 24조합을 돈다.
+    private var canSearchBible: Bool {
+        settings.allowsBibleSearch(isSecureTextEntry: textDocumentProxy.isSecureTextEntry)
+    }
+
+    private func canSearchBibleNow(tail: String) -> Bool {
+        guard canSearchBible, Self.dismissedBibleTail == nil else { return false }
+        return !tail.isEmpty
+    }
+
+    /// 배지 탭 — 패널을 열고 닫는다.
+    private func handleBibleBadgeTap() {
+        playToolbarHaptic()
+        // 도구 사용 = 조합 확정 (천지인 pending이 패널을 관통하지 않게 — 다른 패널과 같은 규칙)
+        inputController?.commitComposition()
+        if viewState?.showsBibleSearchPanel == true {
+            closeBibleSearchPanel()
+        } else {
+            openBibleSearchPanel()
+        }
+        updateSuggestionBar()
+    }
+
+    /// 결과 주소마다 본문을 **그때 한 번** 읽어 미리보기를 만든다.
+    /// 스캔 중에는 절대 `String`을 만들지 않는다는 계약(`BibleByteScanner`)은 그대로다 —
+    /// 여기는 사용자가 패널을 연 순간뿐이고 최대 **1,000행**이다(`BibleSearchCascade.defaultResultLimit`).
+    private func openBibleSearchPanel() {
+        guard let viewState, let result = bibleSearchResult, !result.matches.isEmpty else { return }
+        viewState.bibleSearchQuery = result.matchedQuery
+        viewState.bibleSearchRows = result.matches.compactMap { match in
+            guard let text = bibleRepository.text(
+                book: match.book, chapter: match.chapter, verse: match.verse
+            ) else { return nil }
+            return BibleSearchRow(
+                match: match,
+                // ★ 머리부터 자르지 않는다 — 「사랑」 결과의 68%는 앞 12자 안에 검색어가 없다
+                preview: BibleVersePreview.window(of: text, matching: result.matchedQuery)
+            )
+        }
+        if viewState.showsEmojiPanel { viewState.showsEmojiPanel = false }
+        if viewState.showsClipboardPanel { viewState.showsClipboardPanel = false }
+        viewState.showsBibleSearchPanel = true
+    }
+
+    private func closeBibleSearchPanel() {
+        guard let viewState else { return }
+        viewState.showsBibleSearchPanel = false
+        viewState.bibleSearchRows = []
+        viewState.bibleSearchQuery = ""
+    }
+
+    /// 구절 탭 — **기존 채움글 삽입 경로**를 그대로 탄다.
+    /// 꼬리 정합 검사(QA BLOCK-2)·이중 탭 방어·학습 차단이 전부 딸려 온다.
+    private func handleBibleRowTap(_ row: BibleSearchRow) {
+        playToolbarHaptic()
+        guard let inputController, let result = bibleSearchResult else { return }
+        let match = row.match
+        guard let body = bibleRepository.text(
+            book: match.book, chapter: match.chapter, verse: match.verse
+        ) else { return }
+
+        // 머리말은 **정규 표기**다 — 사용자가 친 것(「사랑해」)은 절 주소가 아니다.
+        // 채움글 성경 경로가 쓰는 모양(`[창 1:1] `)을 그대로 따른다.
+        let reference = row.reference(includingBook: true)
+        let suggestion = SnippetSuggestion(
+            // 지울 구간은 문서에 실제로 있는 원문이다 (계획서 2-7 N-4)
+            trigger: result.typedText,
+            title: reference,
+            body: body,
+            prefix: settings.bibleSnippetPrefixEnabled ? "[\(reference)] " : nil
+        )
+        _ = inputController.insertSnippet(suggestion)
+        closeBibleSearchPanel()
+        refreshLayout()
+        suppressesWordSuggestionsAfterCursorMove = false
+        updateSuggestionBar(userEdited: true)
+    }
+
+
+    /// ✕로 내린 성경 배지의 꼬리 — 사용자가 편집해 꼬리가 바뀌기 전까지 배지를 숨긴다.
+    /// 숨어 있는 동안은 **스캔도 돌지 않는다.**
+    ///
+    /// ## ★ 인스턴스가 아니라 타입에 둔다 — 되돌리지 마라 (2026-09-21)
+    ///
+    /// 이 파일 위쪽 `consumedPasteboardChangeCount` 주석이 실기 계측 근거와 함께 적어 둔 그대로다:
+    /// **키보드 등장마다 이 VC가 새로 만들어지고 이전 것은 해제된다**
+    /// (`docs/release/flicker-evidence/device-frameprobe-2026-09-11.csv`).
+    /// 인스턴스 변수면 ✕ 억제가 **그 등장 한 번만 살아서**, 키보드를 내렸다 올리면 방금 내린
+    /// 배지가 그대로 되살아난다. 채움글 칩이 `dismissedSnippetTail`을 타입으로 올려 피한 함정을
+    /// 성경 배지만 다시 밟고 있었다(검증자 3-2 지적).
+    ///
+    /// **채움글의 `dismissedSnippetTail`과 충돌하지 않는다** — 둘은 **별개의 키**다.
+    /// 같은 꼬리 문자열이 들어가더라도 하나는 채움글 칩을, 다른 하나는 성경 배지를 숨길 뿐이고
+    /// 해제 조건(사용자 편집으로 꼬리가 바뀜)도 각자 따로 본다.
+    private static var dismissedBibleTail: String?
 
     /// ✕로 내린 추천단어 — 그 단어(접두)를 이어 치는 동안 억제되고, 단어가 끝나면 자동 해제
     /// (사용자 요청 2026-09-03). 키보드 재표시 시 초기화.
@@ -658,6 +924,12 @@ final class KeyboardViewController: UIInputViewController {
             Self.consumedPasteboardChangeCount = probedPasteboardChangeCount
             pasteSuggestion = nil
         }
+        // 배지도 함께 내린다 — 후보 행을 통째로 내리는 버튼인데 배지만 남으면
+        // 도구 행으로 영영 못 돌아간다(배지가 있으면 후보 행이 유지된다).
+        if viewState.bibleMatchCount != nil {
+            Self.dismissedBibleTail = inputController.textTail
+            if viewState.showsBibleSearchPanel { closeBibleSearchPanel() }
+        }
         updateSuggestionBar()
     }
 
@@ -668,6 +940,13 @@ final class KeyboardViewController: UIInputViewController {
     private func handleSnippetTap(_ suggestion: SnippetSuggestion) {
         guard let viewState, viewState.snippetSuggestion == suggestion else { return }
         viewState.snippetSuggestion = nil  // 애니메이션 중 재탭 차단
+        // ★ 날짜·시간 칩 — 탭하는 순간 **표시 단위(분/일)가 바뀌었으면 넣지 않고 칩을 갱신한다**
+        //   (PDR `date-snippet-pack.md` 7-2절). 「보여 준 값 = 넣는 값」을 지키려면 몰래 새 값을 넣지 않고
+        //   새 칩을 다시 보여 줘 사용자가 다시 누르게 한다. 문구·성경 칩은 계산 시각이 없어 여기를 지나친다.
+        if suggestion.isStale(at: Date(), calendar: dateSnippetCalendar) {
+            updateSuggestionBar()
+            return
+        }
         playToolbarHaptic()
         inputController?.insertSnippet(suggestion)
         refreshLayout()  // 삽입으로 꼬리가 바뀌면 자동 대문자 시프트가 바뀔 수 있다
@@ -677,13 +956,18 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: - 클립보드 읽기 (PDR verification-code-paste · clipboard-history)
 
-    /// 키보드 등장 시 1회 클립보드를 읽는다 — 인증번호 칩(값 그대로 표시, 사용자 결정
-    /// 2026-09-01)과 클립보드 기록이 **같은 읽기를 공유**한다. 두 기능이 모두 꺼져 있거나,
+    /// 키보드 등장 시 1회 클립보드를 읽는다 — 인증번호·텍스트 칩(값 그대로 표시, 사용자 결정
+    /// 2026-09-01)과 클립보드 기록이 **같은 읽기를 공유**한다. 세 스위치가 모두 꺼져 있거나,
     /// FA가 없거나, secure 필드거나, 이 changeCount를 이미 소비·기록했으면 읽지 않는다
     /// (최소 접근). 주기 폴링이 아니고, 읽은 내용은 칩 표시·삽입·App Group 기록 외로
     /// 나가지 않는다. iOS가 첫 회 붙여넣기 확인을 띄울 수 있으며 이는 수용된 트레이드오프다.
     /// (탭 시에만 읽는 이전 방식은 detectPatterns 콜백의 @MainActor 격리 상속 크래시
     /// 이력이 있다 — 지금은 전부 메인 스레드 동기 경로라 해당 문제 자체가 없다.)
+    ///
+    /// ★ 2026-09-29 수정(검증자 발견, 출시 차단): 예전에는 `string`을 스위치 게이트보다 **먼저** 불러
+    /// 셋 다 꺼도·이미 소비·기록했어도 등장마다 내용을 읽었다(`4e4fe5a`부터). 지금은 판정과 읽는 순서를
+    /// `PasteboardProbe`(KeyboardCore)가 쥐고, **`string`은 그 `read`에 넘기는 클로저 안에서만** 부른다 —
+    /// 여기서 `pasteboard.string`을 직접 부르지 마라(스파이 테스트가 닿지 않는다).
     private func probePasteboard(isRetry: Bool = false) {
         defer { updateSuggestionBar() }
         pasteSuggestion = nil
@@ -692,21 +976,25 @@ final class KeyboardViewController: UIInputViewController {
         if !isRetry { pasteChipSuppressedByTyping = false }   // 등장마다 다시 띄운다
         guard hasFullAccess, textDocumentProxy.isSecureTextEntry != true else { return }
         let pasteboard = UIPasteboard.general
-        let changeCount = pasteboard.changeCount
+        let changeCount = pasteboard.changeCount   // 정수 — 내용을 가져오지 않는다
         seenPasteboardChangeCount = changeCount
-        // 스위치 둘 중 하나라도 켜져 있으면 칩 후보를 만든다 — 어느 쪽이 뜰지는
+        // 스위치 셋(인증번호·텍스트 제안, 기록) 중 필요한 것이 있을 때만 읽는다 — 칩으로 어느 쪽이 뜰지는
         // `PasteSuggestion.make`가 정한다(인증번호 우선, 그 다음 일반 텍스트).
-        let needsCode = (settings.verificationCodeSuggestionsEnabled || settings.pasteSuggestionEnabled)
-            && changeCount != Self.consumedPasteboardChangeCount
-        let needsHistory = settings.clipboardHistoryEnabled
-            && changeCount != Self.recordedPasteboardChangeCount
+        let plan = PasteboardProbe.plan(
+            codeSuggestionsEnabled: settings.verificationCodeSuggestionsEnabled,
+            pasteSuggestionsEnabled: settings.pasteSuggestionEnabled,
+            historyEnabled: settings.clipboardHistoryEnabled,
+            changeCount: changeCount,
+            consumedChangeCount: Self.consumedPasteboardChangeCount,
+            recordedChangeCount: Self.recordedPasteboardChangeCount)
         // 알려진 한계: 다른 기기에서 복사 직후(Universal Clipboard)에는 이 동기 읽기가
         // 전송 완료까지 지연될 수 있다 — PDR 개정 섹션·실기 체크리스트 항목.
         //
-        // **`hasStrings`를 먼저 본다** — 내용을 가져오지 않아 붙여넣기 확인 창을 띄우지 않는다.
-        // 참일 때만 `string`으로 실제 읽기를 한 번 한다(최소 접근).
-        let hasStrings = pasteboard.hasStrings
-        let probed = hasStrings ? pasteboard.string : nil
+        // **게이트 → `hasStrings` → `string`** — 게이트가 닫히면 클립보드를 건드리지 않고, `hasStrings`(확인 창 없음)가
+        // 참일 때만 `string`으로 실제 읽기를 한 번 한다(최소 접근). 순서는 `PasteboardProbe.read`가 지킨다.
+        let probed = PasteboardProbe.read(plan,
+                                          hasStrings: { pasteboard.hasStrings },
+                                          readString: { pasteboard.string })
         // ★ **읽기가 빈손으로 돌아오면 짧게 다시 시도한다** (2026-09-15 실기 확인)
         //
         // 앱을 옮겨 온 직후에는 익스텐션이 `changeCount`는 최신으로 받는데 **내용은 아직 못 받는다**
@@ -716,16 +1004,17 @@ final class KeyboardViewController: UIInputViewController {
         //
         // `hasStrings`는 **확인 창을 띄우지 않는다** — 내용이 올 때까지의 재시도는 조용하고,
         // `string`은 실제로 내용이 생긴 그 한 번에만 불린다.
-        if needsCode || needsHistory, probed == nil { scheduleProbeRetry() }
-        guard needsCode || needsHistory, let text = probed else { return }
-        if needsCode {
+        // 재시도도 같은 게이트를 지난다 — 원하는 게 없으면 재시도하지 않는다.
+        if plan.retries(afterReading: probed) { scheduleProbeRetry() }
+        guard let text = probed else { return }
+        if plan.needsSuggestion {
             pasteSuggestion = PasteSuggestion.make(
                 from: text,
                 allowsCode: settings.verificationCodeSuggestionsEnabled,
                 allowsText: settings.pasteSuggestionEnabled)
             probedPasteboardChangeCount = changeCount
         }
-        if needsHistory {
+        if plan.needsHistory {
             recordClipboardHistory(text)
             Self.recordedPasteboardChangeCount = changeCount
         }
@@ -805,13 +1094,33 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: - 툴바 도구 (PDR toolbar-tools)
 
     /// 설정(disabledTools)과 권한(FA)으로 거른 도구 목록을 뷰에 반영한다.
+    ///
+    /// ## ★ `.bibleSearch`만 `disabledTools`를 타지 않는다 (v1.1.0)
+    ///
+    /// 그 도구의 on/off는 **채움글 > 성경 > 「단어로 구절 찾기」**(합성 게이트)가 정한다.
+    /// `disabledTools`는 옵트아웃이라(끈 것만 담는다) 여기에 얹으면 **스위치를 끈 사용자에게도
+    /// 📖 자리가 생긴다** — 「기본 꺼짐」 결정과 정면으로 어긋난다.
+    ///
+    /// 거기에 **배지 유무**를 더 본다. 0건이면 칸을 **없앤다**(자리를 비워 두지 않는다) —
+    /// 사용자가 같은 날 추천단어 줄에서 빈 칸을 직접 물렸기 때문이다
+    /// (`docs/design-reviews/bible-badge-slot-revert.md`).
+    /// **그 대가로 도구 자리가 입력마다 움직인다.** 알고 고른 것이고, 대안(빈 칸 유지)은
+    /// `bible-badge-tool-order.md`에 후보로 남아 있다.
+    ///
+    /// ★ 어긋난 저장분(`bibleSearchEnabled`가 참인데 `disabledTools`에 `bibleSearch`)은
+    /// **무해하게 둔다** — 디코더가 조용히 지우면 나중에 복구할 근거가 사라진다.
+    /// 대신 쓰는 쪽을 막는다(`ToolbarOrderPreview.toggle`이 이 도구를 무시한다).
     private func updateVisibleTools() {
         guard let viewState else { return }
         // 사용자 편집 순서(orderedTools — 신규 도구는 뒤에 보정) → 설정·권한 필터
-        let tools = settings.orderedTools.filter { tool in
-            !settings.disabledTools.contains(tool)
-                && (tool.worksWithoutFullAccess || hasFullAccess)
-        }
+        //
+        // 식은 `KeyboardSettings.visibleTools(hasFullAccess:isSecureTextEntry:hasBibleBadge:)`에 있다 —
+        // 합성 게이트와 **같은 이유**로 도메인에 둔다(익스텐션 타깃은 `swift test`가 닿지 않는다).
+        let tools = settings.visibleTools(
+            hasFullAccess: hasFullAccess,
+            isSecureTextEntry: textDocumentProxy.isSecureTextEntry,
+            hasBibleBadge: viewState.bibleMatchCount != nil
+        )
         if viewState.visibleTools != tools { viewState.visibleTools = tools }
     }
 
@@ -823,12 +1132,18 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func handleToolTap(_ tool: ToolbarTool) {
+        // ★ `.bibleSearch`는 여기로 오지 않는다 — 도구 행에서도 **배지 뷰**로 그려지고
+        //   탭은 `handleBibleBadgeTap()`으로 간다(오른쪽 끝 고정일 때와 같은 경로).
+        //   두 자리가 같은 뷰·같은 동작을 쓰는 것이 이 설계의 요점이다.
         playToolbarHaptic()
         switch tool {
         case .dismiss:
             dismissKeyboard()
         case .clipboard:
             inputController?.commitComposition()
+            // 성경 패널이 열려 있으면 먼저 닫는다 — 패널 분기에서 성경이 앞에 있어
+            // 그냥 두면 클립보드를 켜도 성경 패널이 계속 보인다
+            if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
             if viewState?.showsClipboardPanel == true {
                 viewState?.showsClipboardPanel = false
             } else {
@@ -838,11 +1153,14 @@ final class KeyboardViewController: UIInputViewController {
         case .emoji:
             // 도구 사용 = 조합 확정 (천지인 연타·pending 상태가 패널을 관통하지 않게)
             inputController?.commitComposition()
+            if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
             if viewState?.showsClipboardPanel == true { viewState?.showsClipboardPanel = false }
             viewState?.showsEmojiPanel.toggle()
             updateSuggestionBar()
         case .cursorLeft, .cursorRight:
             break  // UI가 onCursorMove로 보낸다
+        case .bibleSearch:
+            break  // UI가 onBibleBadgeTap으로 보낸다 (위 주석)
         }
     }
 
@@ -861,44 +1179,73 @@ final class KeyboardViewController: UIInputViewController {
     private func handleEmojiTap(_ emoji: String) {
         playToolbarHaptic()
         inputController?.insertProvidedText(emoji)
-        recentEmojis.removeAll { $0 == emoji }
-        recentEmojis.insert(emoji, at: 0)
-        if recentEmojis.count > 16 { recentEmojis.removeLast(recentEmojis.count - 16) }
-        viewState?.recentEmojis = recentEmojis
+        // ★ 기록은 **쓰기 직전에 설정을 다시 읽어** 판정한다(학습 단어의 토큰 재확인과 같은 방어) —
+        //   아이패드 병렬 사용 중 설정 앱이 껐다면 옛 목록을 되살리지 않는다(PDR 3-2절).
+        //   secure 입력란은 **입력은 그대로, 기록만** 건너뛴다 — v1.2.0에 새로 생긴 규칙(PDR 5절).
+        //   판정은 도메인 `EmojiHistory.afterTap`에 있다(`swift test`로 고정).
+        let latest = settingsRepository.load()
+        if let updated = EmojiHistory.afterTap(
+            emoji,
+            stored: emojiHistoryRepository.load(),
+            enabled: latest.emojiHistoryEnabled,
+            resetToken: latest.emojiHistoryResetToken,
+            isSecureTextEntry: textDocumentProxy.isSecureTextEntry == true
+        ) {
+            emojiHistoryRepository.save(updated)
+            viewState?.recentEmojis = updated.entries
+        }
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
         updateSuggestionBar(userEdited: true)
     }
 
-    /// 이모지 최근 사용 — 세션 메모리만 (App Group 저장은 실사용 확인 후, PDR).
-    private var recentEmojis: [String] = []
+    /// 이모지 「최근 사용」을 설정과 맞춰 싣는다 — 등장마다·설정이 바뀔 때.
+    ///
+    /// **저장소가 정본이고 뷰 상태는 매번 다시 읽는 복사본이다**(PDR 4절 — 옛 인스턴스 변수는 VC가 새로 만들어질
+    /// 때마다 비었다). 설정 앱은 이 컨테이너를 못 지우므로, 꺼져 있거나 초기화 토큰이 바뀌었으면 **여기서 비운다** —
+    /// 그래서 「끄면 삭제」는 **키보드가 다음에 뜰 때** 일어난다(PDR 3-3절의 정직한 문구).
+    private func refreshEmojiHistory() {
+        let stored = emojiHistoryRepository.load()
+        let current = stored.reconciled(
+            enabled: settings.emojiHistoryEnabled, resetToken: settings.emojiHistoryResetToken)
+        if current != stored { emojiHistoryRepository.save(current) }
+        if viewState?.recentEmojis != current.entries { viewState?.recentEmojis = current.entries }
+        if viewState?.recentEmojisEnabled != settings.emojiHistoryEnabled {
+            viewState?.recentEmojisEnabled = settings.emojiHistoryEnabled
+        }
+    }
 
     // MARK: - 클립보드 기록 패널 (PDR clipboard-history)
 
     /// 도구 열기 = 현재 클립보드 1회 읽기 ("도구를 열었을 때만 읽는다" 조항의 원형).
-    /// 기록이 켜져 있으면 저장분 전체를, 꺼져 있으면 현재 내용만 세션 목록으로 보여준다
-    /// (저장 없음). secure 필드에서는 읽지도 기록하지도 않고 저장분만 보여준다.
+    /// 기록이 켜져 있으면 현재 내용을 기록한 뒤 저장분 전체를 보여준다. **꺼져 있으면 읽지도
+    /// 보여주지도 않는다** — 빈 패널에 「기록이 꺼져 있어요」 안내만 뜬다(2026-09-27 사장님 지적).
+    /// (옛 설계는 꺼져 있을 때 현재 내용을 세션 목록 1개로 보여줬다 — 저장은 안 했지만 기록과
+    /// 똑같이 보여 「껐는데 왜 뜨지」 오해를 샀다. 그 붙여넣기 길은 붙여넣기 칩이 대신한다.)
+    /// secure 필드에서는 읽지도 기록하지도 않고 저장분만 보여준다.
     /// 같은 changeCount는 프로브와 동일하게 다시 기록하지 않는다 — 사용자가 ✕로 지운 현재
     /// 클립보드가 재오픈마다 되살아나지 않게 (리뷰 반영). changeCount는 읽기 **전에** 취한다.
+    /// 판정 표는 `ClipboardPanelContent`(KeyboardCore — `swift test`가 닿는다).
     private func openClipboardPanel() {
         guard let viewState, hasFullAccess else { return }
-        var entries: [String] = []
         let pasteboard = UIPasteboard.general
         let secure = textDocumentProxy.isSecureTextEntry == true
-        if clipboardHistoryEnabledNow() {
-            let changeCount = pasteboard.changeCount
-            if !secure, changeCount != Self.recordedPasteboardChangeCount,
-               pasteboard.hasStrings, let current = pasteboard.string {
-                recordClipboardHistory(current)
-                Self.recordedPasteboardChangeCount = changeCount
-            }
-            entries = clipboardHistoryRepository.load().entries
-        } else if !secure, pasteboard.hasStrings, let current = pasteboard.string {
-            var session = ClipboardHistory()
-            session.record(current)
-            entries = session.entries
+        let historyEnabled = clipboardHistoryEnabledNow()
+        var stored: [String] = []
+        // `changeCount`·`hasStrings`는 내용을 가져오지 않는다 — 실제 읽기는 `string` 한 번뿐이고,
+        // 기록이 꺼져 있으면 `readsPasteboard`가 거짓이라 거기까지 가지 않는다.
+        let changeCount = pasteboard.changeCount
+        if ClipboardPanelContent.readsPasteboard(
+            historyEnabled: historyEnabled,
+            isSecureTextEntry: secure,
+            alreadyRecorded: changeCount == Self.recordedPasteboardChangeCount
+        ), pasteboard.hasStrings, let text = pasteboard.string {
+            recordClipboardHistory(text)
+            Self.recordedPasteboardChangeCount = changeCount
         }
-        viewState.clipboardEntries = entries
+        if historyEnabled { stored = clipboardHistoryRepository.load().entries }
+        viewState.clipboardEntries = ClipboardPanelContent.entries(
+            historyEnabled: historyEnabled, stored: stored)
         if viewState.showsEmojiPanel { viewState.showsEmojiPanel = false }
         viewState.showsClipboardPanel = true
     }
@@ -1145,6 +1492,12 @@ final class KeyboardViewController: UIInputViewController {
             onDismissSuggestions: { [weak self] in
                 DispatchQueue.main.async { self?.handleDismissSuggestions() }
             },
+            onBibleBadgeTap: { [weak self] in
+                DispatchQueue.main.async { self?.handleBibleBadgeTap() }
+            },
+            onBibleRowTap: { [weak self] row in
+                DispatchQueue.main.async { self?.handleBibleRowTap(row) }
+            },
             fillsContainer: Self.fillInputViewWithHost,   // 14차 H1 — 상자 전체 채움 + 하단 정렬
             transparentAbove: Self.transparentAboveContent  // 16차 — 자판 사각형 뒤에만 칠한다
         )
@@ -1190,6 +1543,10 @@ final class KeyboardViewController: UIInputViewController {
             }
             isFresh = true
         }
+        // 최초 강제 레이아웃부터 투명도·테마가 맞아야 한다. 새 호스트에도 배경을 다시 적용한다.
+        hostingController = host
+        appliedBackdropKey = nil
+        applyBackdropColor()
         // **presize 여부는 여기서 정한다** — 아래 `preAdd` 단계가 이 값을 보기 때문이다.
         // (2026-09-11 정정: 예전에는 `addSubview` **뒤에** 정해서 `preAdd`가 영영 돌지 않았다.)
         needsFreshHostPresize = Self.presizeFreshHost && (Self.presizeAllHostInstalls || isFresh)
@@ -1214,7 +1571,6 @@ final class KeyboardViewController: UIInputViewController {
             }
         }
         host.view.translatesAutoresizingMaskIntoConstraints = false
-        host.view.backgroundColor = .clear  // applyBackdropColor가 테마 색으로 덮는다
 
         addChild(host)
         view.addSubview(host.view)
@@ -1244,7 +1600,6 @@ final class KeyboardViewController: UIInputViewController {
             hostHeight.isActive = true
             hostHeightConstraint = hostHeight
         }
-        hostingController = host
         if needsFreshHostPresize { presizeFreshHostIfNeeded(tag: "install") }
     }
 
@@ -1312,6 +1667,10 @@ final class KeyboardViewController: UIInputViewController {
                 inputController.setHangulSource(Self.makeHangulSource(for: latest))
             }
             inputController.doubleSpacePeriod = latest.doubleSpacePeriod
+            // 키패드 안에 있는 동안 쿼티형으로 바꿔도 「ABC」로 나올 수 있다 — 다음 「123」부터 새 모양
+            inputController.symbolKeyboardStyle = latest.symbolKeyboardStyle
+            // 떠 있는 키보드에서 이모지 기록을 끄면(아이패드 병렬 사용) 즉시 비운다
+            refreshEmojiHistory()
             applyAutoCapitalizationPolicy()
             refreshLayout()  // 배열(자판·숫자 줄) + 시프트(자동 대문자 정책 변화)
         }
@@ -1645,7 +2004,38 @@ private final class ClickableInputView: UIInputView, UIInputViewAudioFeedback {
             // 15차는 여기서 불투명 테마색을 칠했고, 그것이 검증자가 실측한 555pt 단색의 한 축이다.
             let paint: UIColor?
             if KeyboardViewController.transparentAboveContent {
+                // ★★★ **17라운드를 닫은 자리다 (2026-09-22). 여기를 고치려는 사람은 먼저 읽어라.**
+                //
+                // 2026-09-09~11에 10~16차로 일곱 번 연속 실패했고, 마지막 판정은
+                // 「16차도 실패, 1.0.1로 내리고 출시」였다. 그런데 **그 판정이 틀렸다.**
+                //
+                // ## 어떻게 알았나 — 마젠타 센티널 (2026-09-22 실기)
+                //
+                // 17라운드 내내 못 가른 것이 하나 있었다: **과대 구간(852pt)의 그 판이
+                // 우리가 칠한 것인가, 시스템 백드롭인가.** 눈으로는 26~150ms 사건의 투과
+                // 여부를 판별할 수 없어서 아무도 답하지 못했다.
+                //
+                // 그래서 이 줄을 `paint = .magenta` 하나로 바꿔 실기(iPhone 15 Pro)에 설치했다.
+                //
+                //   결과 ① 자홍색이 **보였다** → 이 분기가 그 555pt를 **칠하는 자리**다.
+                //          (같은 결과로 「SwiftUI `KeyboardRootView`의 배경이 새어 칠한다」는
+                //           가설이 죽었다 — 그렇다면 UIKit 자홍색이 뒤에 깔려 안 보였을 것이다)
+                //   결과 ② `paint = nil`인 빌드에서는 그 자리에 **뒤 글자가 흐릿하게 비쳤다.**
+                //          → 반투명 → **iOS 키보드 백드롭** → Gboard가 보여 주는 그 정상 등장이다.
+                //
+                // ## 결론 — 여기에 **칠할 것이 없다**
+                //
+                // 852pt 과대 구간 자체는 OS 공통이라 없앨 수 없다(글쇠·Gboard·네이버 셋 다
+                // 과대 목표가 정확히 「최종 +228pt」이고, 시작은 우리가 오히려 빠르다 — 실기 계측).
+                // 그 구간에 **아무 불투명 표면도 내놓지 않는 것**이 정답이고, 그러면 컴포지터가
+                // 그 자리에 시스템 백드롭을 그린다. 그것이 지금 상태다.
+                //
+                // ★ **그러므로 `nil` 말고 다른 것을 칠하지 마라.** 15차가 여기에 불투명 테마색을
+                // 칠했고 그것이 검증자가 실측한 555pt 단색의 한 축이었다. 되돌아가는 길이다.
+                //
+                // 근거 전문: docs/release/flicker-resolved-2026-09-22.md
                 paint = nil                                   // 진짜 투명 — 단색 금지
+
             } else {
                 paint = opaqueThemePaint                      // 15차 동작
             }

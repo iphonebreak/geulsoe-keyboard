@@ -17,7 +17,9 @@ struct ClipboardPanelView: View {
     private var emptyMessage: String {
         historyEnabled
             ? "복사한 내용이 여기에 쌓여요.\n복사한 뒤 키보드를 열면 기록돼요."
-            : "클립보드가 비어 있어요.\n설정에서 기록을 켜면 복사한 내용이 쌓여요."
+            // 꺼져 있으면 클립보드를 읽지 않으므로 「비어 있어요」는 거짓이다 (2026-09-27).
+            // 경로는 설정 앱 탭 이름 그대로 — `RootView`의 「툴바」 탭 · `ToolbarTab`의 「클립보드 기록」 토글
+            : "클립보드 기록이 꺼져 있어요.\n글쇠 앱 > 툴바에서 켜면 복사한 내용이 쌓여요."
     }
 
     var body: some View {
