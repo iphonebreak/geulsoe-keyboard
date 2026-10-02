@@ -59,6 +59,7 @@ App/GoogleService-Info.plist
 !/tools/convert_bible.py
 !/tools/convert_words.py
 !/tools/convert_constitution.py
+!/tools/convert_emoji.py
 !/tools/generate_click.py
 # 설날·추석 표(LunarHolidayTable.swift, 추적됨)의 생성기 — 같은 이유. 표 머리가 재생성 명령으로 이 파일을 가리킨다(2026-09-28)
 !/tools/generate_lunar_holidays.swift
