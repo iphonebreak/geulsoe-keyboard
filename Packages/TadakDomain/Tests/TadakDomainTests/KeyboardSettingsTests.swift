@@ -686,3 +686,35 @@ struct SymbolKeyboardStyleSettingTests {
         #expect(SymbolKeyboardStyle.allCases.map(\.displayName) == ["쿼티형", "키패드형"])
     }
 }
+
+/// 「추천단어에 이모지」 (v1.3.0 ⑤, PDR `emoji-word-suggestion.md` Q6·D1·D2) — **기본 켬**.
+/// 출시 게이트(5-2절)를 못 넘으면 기본값을 끔으로 내린다 — 그때 바뀌는 곳은 `init`의 기본값 한 곳이다.
+@Suite("KeyboardSettings — 추천단어에 이모지")
+struct EmojiWordSuggestionsSettingTests {
+
+    @Test("새 설치는 켬이다 (Q6)")
+    func defaultsOn() {
+        #expect(KeyboardSettings().emojiWordSuggestionsEnabled)
+        #expect(KeyboardSettings.default.emojiWordSuggestionsEnabled)
+    }
+
+    @Test("이 키가 없는 옛 저장분은 기본값(켬)으로 읽힌다 — 다른 값은 그대로")
+    func legacyWithoutKey() throws {
+        let legacy = Data(#"{"suggestionsEnabled":false,"emojiHistoryEnabled":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
+        #expect(decoded.emojiWordSuggestionsEnabled == true)
+        #expect(decoded.suggestionsEnabled == false, "추천단어를 꺼 둔 사용자도 값 자체는 켬 — 화면이 흐리게 보여 준다(D2)")
+        #expect(decoded.emojiHistoryEnabled == false)
+    }
+
+    @Test("끈 값은 저장·읽기에서 살아남는다")
+    func roundTripOff() throws {
+        var settings = KeyboardSettings.default
+        settings.emojiWordSuggestionsEnabled = false
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.emojiWordSuggestionsEnabled == false)
+        #expect(decoded == settings)
+        let stored = Data(#"{"emojiWordSuggestionsEnabled":false}"#.utf8)
+        #expect(try JSONDecoder().decode(KeyboardSettings.self, from: stored).emojiWordSuggestionsEnabled == false)
+    }
+}

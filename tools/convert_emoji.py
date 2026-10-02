@@ -11,8 +11,13 @@
 
 역색인: keyword(`|` 분할·trim)와 tts를 모두 키로 삼고, (키, 이모지) 중복은 제거, 값은 XML 파일
 순서(annotations → annotationsDerived)를 지킨다. 키는 한글 음절 2~12자(`^[가-힣]{2,12}$`)만.
-**파일 순서는 대표성과 무관하다**(코드포인트 순 — 「자동차」의 첫 값은 🚕) — 대표 이모지는
-런타임이 손질 목록 > tts 완전 일치 > 검토한 대체로 고른다(KeyboardCore `RepresentativeEmojiResolver`).
+**파일 순서는 대표성과 무관하다**(코드포인트 순 — 「자동차」의 첫 값은 🚕). 칩 이모지는 런타임이
+CLDR 후보 전부 ∪ 손질 목록 값의 묶음에서 랜덤으로 뽑는다(확정 결정 D9 — TadakDomain
+`EmojiCuration.candidates`, KeyboardCore `EmojiCandidateResolver`·`EmojiDraw`).
+
+손질 목록(`EmojiCuration.json`) 검사도 매 실행 한다 — 키는 역색인과 같은 꼴, 값은 iOS 17 카탈로그 안의
+단일 이모지(`override`만 빈 문자열 = 막기 허용). 같은 검사를 `swift test`도 하도록 카탈로그를
+TadakData 테스트 픽스처(`IOS17EmojiBaseline.swift`, 생성물)로 함께 내보낸다.
 
 포맷 (리틀엔디언) — BundledEmojiAnnotationIndex가 mmap으로 읽는다:
   헤더   16B : magic 'TDEM' | version u32 | 키 수 u32 | 블롭 시작 u32
@@ -23,7 +28,7 @@
   블롭   : 키 UTF-8 + 값(이모지 UTF-8을 U+001F로 이은 것) 연속
 
 사용:
-  python3 tools/convert_emoji.py                     # 받기(캐시)·검증·생성 + 손질 목록 검사
+  python3 tools/convert_emoji.py                     # 받기(캐시)·검증·생성 + 손질 목록 검사 + 픽스처
   python3 tools/convert_emoji.py --stats [--ref main-396355a] [--host-catalog FILE]
                                                      # 반론자2 실측 재현표 출력(파일 쓰지 않음)
   python3 tools/convert_emoji.py --curation-csv PATH [--top 300]
@@ -48,9 +53,11 @@ RESOURCES = ROOT / "Packages/TadakData/Sources/TadakData/Resources"
 OUTPUT = RESOURCES / "emoji.tde"
 CURATION = RESOURCES / "EmojiCuration.json"
 WORDS = RESOURCES / "words.tdw"
+BASELINE_FIXTURE = ROOT / "Packages/TadakData/Tests/TadakDataTests/IOS17EmojiBaseline.swift"
 
 VERSION = 1
-KEY_PATTERN = re.compile(r"^[가-힣]{2,12}$")
+# 반드시 fullmatch로 쓴다 — match는 `$`가 끝 개행 앞에서도 맞아 "사과\n"을 통과시킨다
+KEY_PATTERN = re.compile(r"[가-힣]{2,12}")
 SEPARATOR = "\x1f"
 
 # 고정 입력 — 커밋 해시는 불변이다. 태그나 main을 매번 읽지 않는다(안정판과 main은 키 95개가 다르다).
@@ -101,7 +108,11 @@ def fetch(url: str, path: Path, sha256: str) -> bytes:
         path.parent.mkdir(parents=True, exist_ok=True)
         part = path.with_name(path.name + ".part")
         # python.org 배포판 urllib은 macOS 루트 인증서를 못 찾는다 — 시스템 curl을 쓴다
-        subprocess.run(["curl", "-fsSL", "-o", str(part), url], check=True)
+        try:
+            subprocess.run(["curl", "-fsSL", "-o", str(part), url], check=True)
+        except subprocess.CalledProcessError:
+            part.unlink(missing_ok=True)  # 전송 도중 끊긴 조각을 남기지 않는다
+            raise
         data = part.read_bytes()
         if hashlib.sha256(data).hexdigest() == sha256:
             part.rename(path)
@@ -169,7 +180,7 @@ def build_index(records, emojis=None, korean_only=False, include_tts=True, first
             continue
         if emojis is not None and cp not in emojis:
             continue
-        if korean_only and not KEY_PATTERN.match(key):
+        if korean_only and not KEY_PATTERN.fullmatch(key):
             continue
         values = index.setdefault(key, [])
         if cp not in values:
@@ -207,7 +218,8 @@ def encode(index, name_match) -> bytes:
 
 
 def check_curation(catalog: set[str]) -> int:
-    """손질 목록 검사 — 키는 역색인과 같은 꼴, 값은 빈 문자열(띄우지 않음) 또는 iOS 17 카탈로그 이모지."""
+    """손질 목록 검사 — 키는 역색인과 같은 꼴, 값은 iOS 17 카탈로그 이모지(D10: 묶음에 더할 값).
+    빈 문자열은 `override`에서만 「막기」로 허용한다 — `fallback`의 빈 문자열은 뜻이 없어 거부한다."""
     if not CURATION.exists():
         return 0
     data = json.loads(CURATION.read_text(encoding="utf-8"))
@@ -215,14 +227,55 @@ def check_curation(catalog: set[str]) -> int:
         sys.exit(f"손질 목록 형식 오류: 최상위는 override·fallback 객체만 — {CURATION}")
     count = 0
     for section in ("override", "fallback"):
-        for word, emoji in data.get(section, {}).items():
-            if not KEY_PATTERN.match(word):
+        entries = data.get(section, {})
+        if not isinstance(entries, dict):
+            sys.exit(f"손질 목록 형식 오류: {section}는 {{단어: 이모지}} 객체여야 한다 — {type(entries).__name__}")
+        for word, emoji in entries.items():
+            if not isinstance(word, str) or not KEY_PATTERN.fullmatch(word):
                 sys.exit(f"손질 목록 {section}: 키는 한글 2~12자 — {word!r}")
+            if not isinstance(emoji, str):
+                sys.exit(f"손질 목록 {section}: {word} → 값은 문자열 — {emoji!r}")
+            if emoji == "" and section == "fallback":
+                sys.exit(f"손질 목록 fallback: {word} → 빈 문자열은 뜻이 없다 — 막으려면 override에 적는다")
             if emoji != "" and emoji not in catalog:
                 sys.exit(f"손질 목록 {section}: {word} → {emoji!r} — Unicode 15.0 카탈로그 밖"
                          "(iOS 17에서 안 그려지거나 텍스트 기본 이모지)")
             count += 1
     return count
+
+
+def baseline_fixture(catalog: set[str]) -> str:
+    """iOS 17 카탈로그(Unicode 15.0)를 Swift 테스트 픽스처로 — 연속 코드포인트는 범위로 묶는다."""
+    values = sorted(ord(emoji) for emoji in catalog)
+    ranges = []
+    for value in values:
+        if ranges and ranges[-1][1] + 1 == value:
+            ranges[-1][1] = value
+        else:
+            ranges.append([value, value])
+    lines = [f"        0x{low:X}...0x{high:X}," for low, high in ranges]
+    return "\n".join([
+        "// 생성물 — `python3 tools/convert_emoji.py`가 쓴다. 손으로 고치지 않는다.",
+        f"// Unicode 15.0 emoji-data.txt (SHA-256 {EMOJI_DATA_SHA256[:16]}…) 기준 iOS 17 카탈로그 —",
+        "// Emoji_Presentation 단일 스칼라에서 피부색·머리색·지역 표시자를 뺀 것(EmojiCatalog.isCatalogued와 같은 조건).",
+        "// 손질 목록 값 검사를 호스트 런타임(더 새 유니코드)이 아니라 최소 OS 기준으로 하려고 둔다(검증 ⑤-1 주의 1).",
+        "",
+        "enum IOS17EmojiBaseline {",
+        f"    /// {len(values)}개",
+        f"    static let count = {len(values)}",
+        "",
+        "    static let ranges: [ClosedRange<UInt32>] = [",
+        *lines,
+        "    ]",
+        "",
+        "    static func contains(_ emoji: String) -> Bool {",
+        "        let scalars = Array(emoji.unicodeScalars)",
+        "        guard scalars.count == 1 else { return false }",
+        "        return ranges.contains { $0.contains(scalars[0].value) }",
+        "    }",
+        "}",
+        "",
+    ])
 
 
 def read_words() -> list[tuple[str, int]]:
@@ -262,11 +315,13 @@ def generate() -> None:
 
     curated = check_curation(catalog)
     OUTPUT.write_bytes(output)
+    BASELINE_FIXTURE.write_text(baseline_fixture(catalog), encoding="utf-8")
     links = sum(len(values) for values in index.values())
     print(f"완료: {OUTPUT.relative_to(ROOT)} — {PRODUCT_REF}({CLDR_REFS[PRODUCT_REF]['commit'][:9]}), "
           f"Unicode 15.0 카탈로그 {len(catalog)}개, 키 {len(index)}, 연결 {links}, "
           f"이름 일치 {len(name_match)}, {len(output):,}B")
     print(f"손질 목록 검사 통과: {CURATION.name} {curated}항목")
+    print(f"픽스처: {BASELINE_FIXTURE.relative_to(ROOT)} — {len(catalog)}개")
 
 
 def print_stats(ref: str, host_catalog: Path | None) -> None:

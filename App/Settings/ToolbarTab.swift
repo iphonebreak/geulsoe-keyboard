@@ -338,6 +338,20 @@ struct ToolbarTab: View {
     private var suggestionSection: some View {
         Section {
             Toggle("추천단어", isOn: $settings.suggestionsEnabled)
+            // 이모지 칩 (v1.3.0 ⑤, PDR `emoji-word-suggestion.md` D1·D2) — 추천단어 줄 안에 뜨는 기능이라 **바로 아래**.
+            // 추천단어를 끄면 값은 지키고 흐리게 비활성 + 안내 문구로 바꾼다(D2). 전체 접근 불필요 — 번들 사전 읽기뿐.
+            // 설명문은 사장님 결정(2026-10-02)으로 예시 🚗를 뺐다 — 이모지는 묶음에서 랜덤으로 뽑는다(D9).
+            Toggle(isOn: $settings.emojiWordSuggestionsEnabled) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("추천단어에 이모지")
+                    Text(settings.suggestionsEnabled
+                         ? "단어를 다 치면 어울리는 이모지를 함께 보여 줘요. 탭하면 단어가 이모지로 바뀌어요."
+                         : "추천단어가 켜져 있을 때만 동작해요.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!settings.suggestionsEnabled)
             // 추천단어를 꺼도 초기화는 가능해야 한다 — 기능을 끄는 사용자일수록
             // 남은 학습 데이터를 지우고 싶어 한다
             Button("학습 단어 초기화", role: .destructive) {

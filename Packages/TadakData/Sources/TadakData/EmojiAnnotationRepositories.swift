@@ -108,9 +108,12 @@ public struct BundledEmojiAnnotationIndex: EmojiAnnotationIndex {
                         .compactMap { String(bytes: $0, encoding: .utf8) }
                     guard !emojis.isEmpty else { return nil }
                     let nameMatch = u16(entry + 12)
+                    // 값 조각 수가 엔트리의 개수와 다르면(손상된 블롭에서 빈 조각·깨진 UTF-8이 빠짐) 순번이
+                    // 다른 이모지를 가리킬 수 있다 — 그때는 이름 일치를 믿지 않는다(검증 ⑤-1 참고 4)
+                    let intact = u16(entry + 14) == emojis.count
                     return EmojiAnnotation(
                         emojis: emojis,
-                        nameMatch: (1...emojis.count).contains(nameMatch) ? emojis[nameMatch - 1] : nil)
+                        nameMatch: intact && (1...emojis.count).contains(nameMatch) ? emojis[nameMatch - 1] : nil)
                 }
             }
             return nil
@@ -118,8 +121,9 @@ public struct BundledEmojiAnnotationIndex: EmojiAnnotationIndex {
     }
 }
 
-/// 번들 `EmojiCuration.json` — 사람이 고른 대표 이모지(손질 목록, PDR Q7·Q9). 형식은 `EmojiCuration`.
-/// 값 검사(한글 2~12자 키, iOS 17 카탈로그 안의 단일 이모지)는 `tools/convert_emoji.py`가 매 실행 한다.
+/// 번들 `EmojiCuration.json` — 사람이 고른 이모지(손질 목록 v1, 확정 결정 D8 — 119개). 형식과 뜻(묶음에 더할 값,
+/// `override ""` = 막기 — D10)은 `EmojiCuration`. 값 검사(한글 2~12자 키, iOS 17 카탈로그 안의 단일 이모지)는
+/// `tools/convert_emoji.py`가 매 실행 하고, `swift test`도 기준선 픽스처(`IOS17EmojiBaseline`)로 같은 검사를 한다.
 public struct BundledEmojiCurationRepository: EmojiCurationRepository {
 
     private let loaded: EmojiCuration
