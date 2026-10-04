@@ -49,6 +49,16 @@ public enum CSVRecordParser {
     public static func parse(
         _ text: String, delimiter: CSVDelimiter, maxNonBlankRecords: Int? = nil
     ) throws(CSVParseError) -> CSVParseResult {
+        let scanned = scan(text, delimiter: delimiter, maxNonBlankRecords: maxNonBlankRecords)
+        if let failure = scanned.failure { throw failure }
+        return scanned.result
+    }
+
+    /// `parse`와 같되 오류가 나도 **그 앞까지 모은 레코드**를 함께 돌려준다 — 후보 시험이 quote 오류 전에 머리글을
+    /// 인정했는지 보려고 쓴다(재검증 N1). 오류가 났을 때의 `physicalLines`는 그 지점까지의 줄이다
+    static func scan(
+        _ text: String, delimiter: CSVDelimiter, maxNonBlankRecords: Int? = nil
+    ) -> (result: CSVParseResult, failure: CSVParseError?) {
         var records: [CSVRecord] = []
         var nonBlankCount = 0
         var cells: [String] = []
@@ -73,10 +83,14 @@ public enum CSVRecordParser {
             state = .cellStart
         }
 
+        func failed(_ failure: CSVParseError) -> (result: CSVParseResult, failure: CSVParseError?) {
+            (CSVParseResult(records: records, physicalLines: line, strayQuoteCount: strayQuotes), failure)
+        }
+
         for character in text {
             if let maxNonBlankRecords, nonBlankCount >= maxNonBlankRecords { break }
             // 글자가 있는 줄만 센다 — 마지막 줄바꿈 뒤의 빈 자리는 줄이 아니다
-            if line > PackLimits.physicalLines { throw .tooManyLines }
+            if line > PackLimits.physicalLines { return failed(.tooManyLines) }
             let isNewline = character == "\n" || character == "\r" || character == "\r\n"
             switch state {
             case .quoted:
@@ -99,7 +113,7 @@ public enum CSVRecordParser {
                     line += 1
                     recordLine = line
                 } else {
-                    throw .quote(CSVQuoteError(kind: .characterAfterClosingQuote, record: records.count + 1, line: recordLine))
+                    return failed(.quote(CSVQuoteError(kind: .characterAfterClosingQuote, record: records.count + 1, line: recordLine)))
                 }
             case .cellStart, .unquoted:
                 if character == "\"" && state == .cellStart {
@@ -132,15 +146,16 @@ public enum CSVRecordParser {
         if !stopped {
             switch state {
             case .quoted:
-                throw .quote(CSVQuoteError(kind: .unterminated, record: records.count + 1, line: recordLine))
+                return failed(.quote(CSVQuoteError(kind: .unterminated, record: records.count + 1, line: recordLine)))
             case .afterClosingQuote:
                 endRecord()
             case .cellStart, .unquoted:
                 if hasContent || !cell.isEmpty || !cells.isEmpty { endRecord() }
             }
         }
-        return CSVParseResult(records: records, physicalLines: records.isEmpty && text.isEmpty ? 0 : line - (text.last.map(isLineEnd) == true ? 1 : 0),
-                              strayQuoteCount: strayQuotes)
+        let result = CSVParseResult(records: records, physicalLines: records.isEmpty && text.isEmpty ? 0 : line - (text.last.map(isLineEnd) == true ? 1 : 0),
+                                    strayQuoteCount: strayQuotes)
+        return (result, nil)
     }
 
     private static func isLineEnd(_ character: Character) -> Bool {

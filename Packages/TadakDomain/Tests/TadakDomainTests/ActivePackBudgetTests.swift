@@ -324,6 +324,27 @@ struct PackCountGateTests {
         let overLimit = input(packs(16) + [newPack(enabled: false)])
         #expect(PackCommitGate.judge(.importDisabledPack(id: "new"), current: input(packs(16)), proposed: overLimit) == .reject(.tooManyPacks))
     }
+
+    /// 재검증 N2 — 예산을 보지 않는 경로라 전제(새 팩이 **꺼진 채 목록 맨 아래**)를 어기면 기존 팩을 밀어내고도 받았다
+    @Test("꺼 둔 채로 가져오기 — 새 팩이 꺼진 채 맨 아래가 아니면 거부 (N2)")
+    func importDisabledPrecondition() {
+        let a = ActivePackBudget.Candidate(id: "a", isEnabled: true, stats: PackStats(needleCount: 1, needleChars: 50_000, bytes: 10, items: 1))
+        let current = input([a])
+        let enabledAtFront = input([newPack(enabled: true, chars: 20_000), a])     // 검증 재현 — 예전엔 accept(밀림 ["a"])
+        let enabledAtEnd = input([a, newPack(enabled: true)])
+        let disabledAtFront = input([newPack(enabled: false), a])
+        for proposed in [enabledAtFront, enabledAtEnd, disabledAtFront] {
+            #expect(PackCommitGate.judge(.importDisabledPack(id: "new"), current: current, proposed: proposed)
+                    == .reject(.invalidDisabledImport(id: "new")))
+        }
+        // 맨 아래 꺼진 팩이 다른 id
+        #expect(PackCommitGate.judge(.importDisabledPack(id: "other"), current: current, proposed: input([a, newPack(enabled: false)]))
+                == .reject(.invalidDisabledImport(id: "other")))
+        guard case .accept = PackCommitGate.judge(.importDisabledPack(id: "new"), current: current,
+                                                  proposed: input([a, newPack(enabled: false)])) else {
+            Issue.record("꺼진 채 맨 아래는 받아야 한다"); return
+        }
+    }
 }
 
 extension JSONEncoder {

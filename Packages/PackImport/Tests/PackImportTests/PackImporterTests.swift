@@ -430,6 +430,33 @@ struct DelimiterTrialFollowUpTests {
         #expect(throws: PackImportFailure.columnCountMismatch(record: 5, line: 6)) { try PackImporter.read(text: text) }
     }
 
+    /// 재검증 N1 — 쉼표 후보만 시험 창 안 데이터 행의 quote 오류로 탈락하고(`;`·탭은 그 `"`가 셀 중간이라 리터럴 → 머리글 없음)
+    /// 「모든 후보가 quote 오류」가 아니어서 머리글 오류로 나가던 경우. 쉼표를 지정했을 때와 같은 오류를 보고한다
+    @Test("머리글을 인정한 후보가 데이터 행의 따옴표 오류로만 탈락하면 그 따옴표 오류로 거부 — 머리글 오류가 아니다 (N1)", arguments: [
+        ("번호,본문\r\n1,가\r\n2,\"닫은 뒤\"x\r\n3,다", CSVQuoteError(kind: .characterAfterClosingQuote, record: 3, line: 3)),
+        ("번호,본문\r\n1,가\r\n2,\"열고 안 닫음\r\n3,다", CSVQuoteError(kind: .unterminated, record: 3, line: 3)),
+        ("#이름,예시\r\n\r\n번호,본문\r\n1,가\r\n2,\"닫은 뒤\"x", CSVQuoteError(kind: .characterAfterClosingQuote, record: 5, line: 5))
+    ])
+    func quoteErrorAfterRecognizedHeader(testCase: (text: String, error: CSVQuoteError)) {
+        #expect(throws: PackImportFailure.quote(testCase.error)) { try PackImporter.read(text: testCase.text) }
+        #expect(throws: PackImportFailure.quote(testCase.error)) { try PackImporter.read(text: testCase.text, delimiter: .comma) }
+    }
+
+    /// 5-2 #3(어느 후보를 채택하나)은 그대로 — 쉼표는 머리글을 인정한 뒤 quote 오류로 탈락하지만 탭이 채택되면 탭으로 읽는다.
+    /// 머리글 칸 이름은 앞뒤 공백(탭 포함)을 보지 않으므로 이 머리글은 쉼표·탭 둘 다에서 인정된다
+    @Test("다른 후보가 채택되면 그 후보로 읽는다 — 채택 규칙 불변 (N1)")
+    func adoptedCandidateStillWins() throws {
+        let draft = try ImportHelper.draft("단축어\t,\t본문\na\t,\"x\"y\tb")
+        #expect(draft.delimiter == .tab)
+        #expect(draft.entries == [SnippetEntry(triggers: ["a"], title: "a", body: "b")])
+    }
+
+    /// 범위 밖(5-2 #3 글자 그대로) — 머리글을 인정하기 **전**(메타 줄)의 quote 오류는 쉼표 후보만 떨어뜨리면 여전히 머리글 오류다
+    @Test("머리글 앞 메타 줄의 따옴표 오류는 그대로 — 머리글을 인정한 후보가 없다 (N1 경계)")
+    func quoteErrorBeforeHeaderUnchanged() {
+        #expect(throws: PackImportFailure.headerNotRecognized) { try PackImporter.read(text: "#이름,\"예시\"x\r\n번호,본문\r\n1,가") }
+    }
+
     @Test("앞 데이터 5개 중 2개만 틀리면 채택하고 그 행만 건너뛴다 — 규칙 자체는 그대로")
     func minorityMismatchStillAdopted() throws {
         let draft = try ImportHelper.draft("번호,제목,본문\r\n1,가\r\n2,나\r\n3,다,본문\r\n4,라,본문\r\n5,마,본문")

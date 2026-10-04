@@ -158,31 +158,38 @@ public enum PackImporter {
 
     /// 5-2 — 후보마다 첫 논리 레코드들을 시험 파싱해 **머리글 인정 + 필수 열 유일 + 모드 일관 + 다음 데이터 레코드 열 수 일치**를
     /// 보는 후보를 고른다. 시험 중 quote 오류는 **그 후보만 탈락**(명확화 ①) — 시험 결과는 버리므로 데이터가 새지 않는다.
+    ///
+    /// 채택 0일 때 보고: 머리글을 인정한 후보의 실패(규칙 위반·열 수 불일치·**머리글 뒤 데이터 행의 quote 오류**)가 있으면 후보 순서의
+    /// 첫 것 → 모든 후보가 quote 오류면 첫 quote 오류 → 그 밖은 머리글 오류. quote 오류 앞까지 머리글이 인정된 후보는 그 구분자를
+    /// 지정했을 때와 같은 quote 오류를 낸다(재검증 N1 — 예전엔 `;`·탭이 「머리글 없음」이라 머리글 오류로 나갔다). 채택 규칙은 그대로다.
     private static func adoptDelimiters(_ text: String) throws(PackImportFailure) -> [CSVDelimiter] {
         var adopted: [CSVDelimiter] = []
         var quoteErrors: [CSVQuoteError] = []
         var headerFailure: PackImportFailure?
         for candidate in CSVDelimiter.allCases {
-            let trial: CSVParseResult
-            do {
-                trial = try CSVRecordParser.parse(text, delimiter: candidate, maxNonBlankRecords: trialRecords)
-            } catch {
-                switch error {
-                case .quote(let quote): quoteErrors.append(quote)
-                case .tooManyLines: throw .tooManyLines
+            let trial = CSVRecordParser.scan(text, delimiter: candidate, maxNonBlankRecords: trialRecords)
+            switch trial.failure {
+            case .tooManyLines?:
+                throw .tooManyLines
+            case .quote(let quote)?:
+                quoteErrors.append(quote)
+                // 오류 앞까지의 레코드로 머리글을 인정했다면 이 후보의 실패는 데이터 행의 quote 오류다
+                if headerFailure == nil, PackRecordReader.trialVerdict(trial.result.records) != .noHeader {
+                    headerFailure = .quote(quote)
                 }
-                continue
-            }
-            switch PackRecordReader.trialVerdict(trial.records) {
-            case .adopted: adopted.append(candidate)
-            case .rejected(let failure): if headerFailure == nil { headerFailure = failure }
-            case .noHeader: break
+            case nil:
+                switch PackRecordReader.trialVerdict(trial.result.records) {
+                case .adopted: adopted.append(candidate)
+                case .rejected(let failure): if headerFailure == nil { headerFailure = failure }
+                case .noHeader: break
+                }
             }
         }
         if !adopted.isEmpty { return adopted }
+        if let headerFailure { throw headerFailure }
         // 모든 후보가 quote 오류로 탈락 → 「따옴표 오류」를 우선(구조 오류, 5-2 #3)
         if quoteErrors.count == CSVDelimiter.allCases.count, let first = quoteErrors.first { throw .quote(first) }
-        throw headerFailure ?? .headerNotRecognized
+        throw .headerNotRecognized
     }
 
     /// 빈 텍스트이거나 구분자 후보(`,`·`;`·탭)와 줄바꿈만 있다 — 공백 글자는 내용이다(빈 셀이 아니다, 5-4 명확화 ②)
