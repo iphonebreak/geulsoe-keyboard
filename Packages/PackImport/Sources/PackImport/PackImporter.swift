@@ -109,7 +109,8 @@ public enum PackImportOutcome: Equatable, Sendable {
 /// 구조 오류(인코딩·quote·머리글·메타 위치)는 비율과 무관하게 **전체 거부**(throw), 행 오류는 **그 행만 건너뜀**.
 public enum PackImporter {
 
-    /// 후보 시험에 쓰는 「첫 논리 레코드들」 — 메타 3·빈 레코드·머리글·데이터 몇 개가 넉넉히 든다
+    /// 후보 시험에 쓰는 「첫 논리 레코드들」 — **비지 않은** 레코드로 센다(메타 3·머리글·데이터 몇 개가 넉넉히 든다).
+    /// 빈 레코드는 본 파싱이 어디서든 무시하므로 시험 창도 차지하지 않는다(검증 F3)
     static let trialRecords = 32
     /// 후보 채택에 보는 데이터 레코드 수 — 이 안의 열 수가 머리글과 맞아야 한다
     static let trialDataRecords = 5
@@ -119,12 +120,15 @@ public enum PackImporter {
         return try read(decoded.text, delimiter: options.delimiter, encoding: decoded)
     }
 
-    /// 붙여넣기 — 인코딩 단계가 없다
+    /// 붙여넣기 — 인코딩 단계가 없다. 바이트 상한은 파일과 같다(UTF-8 길이, 파싱 전 — 4절 「제한 읽기」, 검증 F5)
     public static func read(text: String, delimiter: CSVDelimiter? = nil) throws(PackImportFailure) -> PackImportOutcome {
-        try read(text, delimiter: delimiter, encoding: nil)
+        guard text.utf8.count <= PackLimits.fileBytes else { throw .fileTooLarge }
+        return try read(text, delimiter: delimiter, encoding: nil)
     }
 
     private static func read(_ text: String, delimiter chosen: CSVDelimiter?, encoding: DecodedPackText?) throws(PackImportFailure) -> PackImportOutcome {
+        // 구분자 판정 앞 — 구분자·줄바꿈뿐이면 어느 구분자로 읽어도 비지 않은 레코드가 없다(검증 F4)
+        guard !containsOnlySeparators(text) else { throw .emptyFile }
         let delimiter: CSVDelimiter
         if let chosen {
             delimiter = chosen
@@ -161,7 +165,7 @@ public enum PackImporter {
         for candidate in CSVDelimiter.allCases {
             let trial: CSVParseResult
             do {
-                trial = try CSVRecordParser.parse(text, delimiter: candidate, maxRecords: trialRecords)
+                trial = try CSVRecordParser.parse(text, delimiter: candidate, maxNonBlankRecords: trialRecords)
             } catch {
                 switch error {
                 case .quote(let quote): quoteErrors.append(quote)
@@ -179,6 +183,16 @@ public enum PackImporter {
         // 모든 후보가 quote 오류로 탈락 → 「따옴표 오류」를 우선(구조 오류, 5-2 #3)
         if quoteErrors.count == CSVDelimiter.allCases.count, let first = quoteErrors.first { throw .quote(first) }
         throw headerFailure ?? .headerNotRecognized
+    }
+
+    /// 빈 텍스트이거나 구분자 후보(`,`·`;`·탭)와 줄바꿈만 있다 — 공백 글자는 내용이다(빈 셀이 아니다, 5-4 명확화 ②)
+    private static func containsOnlySeparators(_ text: String) -> Bool {
+        text.utf8.allSatisfy { byte in
+            switch byte {
+            case UInt8(ascii: ","), UInt8(ascii: ";"), UInt8(ascii: "\t"), UInt8(ascii: "\n"), UInt8(ascii: "\r"): true
+            default: false
+            }
+        }
     }
 }
 
@@ -272,11 +286,15 @@ enum PackRecordReader {
     /// 「다음 데이터 레코드들의 열 수가 머리글과 일치」(5-2 #2)는 **본 데이터 중 절반 이상**으로 읽는다 — 앞쪽에 열 수가 틀린
     /// 행이 하나 있다고 구분자를 버리면 「열 수가 다른 레코드는 그 행만 건너뜀」(5-4)이 성립하지 않는다. 잘못된 구분자는
     /// 머리글부터 인정되지 않거나 대부분의 행에서 열 수가 어긋나 걸러진다.
+    ///
+    /// 머리글은 인정됐는데 과반이 틀리면 그 후보는 `columnCountMismatch`로 탈락한다 — 머리글 오류가 아니다(검증 F2).
+    /// 위치는 시험한 데이터 중 첫 불일치 레코드(파일 기준 번호 — 빈 레코드 포함, 본 파싱과 같다).
     static func trialVerdict(_ records: [CSVRecord]) -> TrialVerdict {
         var header: Header?
         var seen = 0
         var matched = 0
-        for record in records where !record.isBlank {
+        var firstMismatch: (record: Int, line: Int)?
+        for (offset, record) in records.enumerated() where !record.isBlank {
             guard let current = header else {
                 if isMetaKey(record.cells[0]) { continue }
                 switch parseHeader(record.cells) {
@@ -287,11 +305,16 @@ enum PackRecordReader {
                 continue
             }
             seen += 1
-            if columnsMatch(record.cells, width: current.width) { matched += 1 }
+            if columnsMatch(record.cells, width: current.width) {
+                matched += 1
+            } else if firstMismatch == nil {
+                firstMismatch = (offset + 1, record.line)
+            }
             if seen >= PackImporter.trialDataRecords { break }
         }
         guard header != nil else { return .noHeader }
-        return matched * 2 >= seen ? .adopted : .noHeader
+        guard matched * 2 < seen, let firstMismatch else { return .adopted }
+        return .rejected(.columnCountMismatch(record: firstMismatch.record, line: firstMismatch.line))
     }
 
     /// 본 판정 — 구조 오류는 throw, 행 오류는 건너뜀

@@ -28,6 +28,7 @@ public struct DecodedPackText: Equatable, Sendable {
 /// 인코딩 판정(PDR `external-snippet-packs.md` 5-3b, R4·R18).
 ///
 /// - BOM이 인코딩을 말하면 그 인코딩을 **엄격히** 검증한다 — UTF-8 BOM인데 본문이 어긋나면 CP949로 폴백하지 않고 거부(손상).
+///   BOM을 뗀 뒤 남은 첫 `U+FEFF` **하나**는 더 뗀다(BOM이 두 번 붙은 파일, 검증 F8). 본문 가운데의 것은 문자 정리 몫이다.
 /// - BOM이 없으면 엄격 UTF-8, 실패하면 엄격 CP949. **replacement character로 복구하지 않는다** — 엄격성은
 ///   디코드한 문자열을 같은 인코딩으로 되돌려 원본 바이트와 같은지로 확인한다(왕복 검사).
 /// - **자동 판정은 추정이다**(`C3 A9` = UTF-8 `é` = CP949 `챕`) — 그래서 BOM 없는 비ASCII는 확인 화면이 항상 뜬다.
@@ -50,14 +51,14 @@ public enum PackTextDecoder {
         if bytes.starts(with: [0xEF, 0xBB, 0xBF]) {
             guard choice != .cp949 else { throw .encodingDoesNotMatchBOM }
             guard let text = strictUTF8(bytes.dropFirst(3)) else { throw .invalidUTF8AfterBOM }
-            return DecodedPackText(text: text, encoding: .utf8, hadBOM: true, needsConfirmation: false)
+            return DecodedPackText(text: droppingRepeatedBOM(text), encoding: .utf8, hadBOM: true, needsConfirmation: false)
         }
         // 3. UTF-16 BOM — 짝수 바이트·서로게이트 쌍 엄격
         if bytes.starts(with: [0xFF, 0xFE]) || bytes.starts(with: [0xFE, 0xFF]) {
             guard choice == .automatic else { throw .encodingDoesNotMatchBOM }
             let little = bytes[0] == 0xFF
             guard let text = strictUTF16(bytes.dropFirst(2), littleEndian: little) else { throw .invalidUTF16 }
-            return DecodedPackText(text: text, encoding: little ? .utf16LittleEndian : .utf16BigEndian,
+            return DecodedPackText(text: droppingRepeatedBOM(text), encoding: little ? .utf16LittleEndian : .utf16BigEndian,
                                    hadBOM: true, needsConfirmation: false)
         }
         // 4. BOM 없음
@@ -82,10 +83,16 @@ public enum PackTextDecoder {
         }
     }
 
+    /// 표준 라이브러리 디코드(잘못된 바이트 → U+FFFD) 뒤 왕복 비교 — U+FFFD가 생겼으면 원본과 달라진다.
+    /// Foundation `String(data:encoding: .utf8)`은 앞의 `U+FEFF`를 말없이 떼어 BOM 두 번을 「손상」으로 오진했다(F8)
     private static func strictUTF8(_ bytes: ArraySlice<UInt8>) -> String? {
-        let data = Data(bytes)
-        guard let text = String(data: data, encoding: .utf8), Data(text.utf8) == data else { return nil }
+        let text = String(decoding: bytes, as: UTF8.self)
+        guard text.utf8.elementsEqual(bytes) else { return nil }
         return text
+    }
+
+    private static func droppingRepeatedBOM(_ text: String) -> String {
+        text.unicodeScalars.first == "\u{FEFF}" ? String(text.unicodeScalars.dropFirst()) : text
     }
 
     private static func strictCP949(_ bytes: [UInt8]) -> String? {

@@ -412,3 +412,149 @@ struct RealFileTests {
         #expect(draft.items[1].body == "쓴 것이 다하면\n단 것이 온다")
     }
 }
+
+/// 검증(`docs/release/verify-ext-1a.md`) F2·F3 — 5-2 #2 규칙(앞 데이터 5개 중 절반 이상)은 그대로, 실패 보고와 시험 창만 고친다
+@Suite("구분자 시험 보강 (5-2, F2 · F3)")
+struct DelimiterTrialFollowUpTests {
+
+    /// F2 — 머리글은 멀쩡한데 「머리글을 확인하세요」로 거부되던 경우. 위치는 시험 창 안의 첫 불일치 데이터 레코드
+    @Test("머리글은 인정됐는데 앞 데이터 과반의 열 수가 틀리면 열 수 불일치로 거부 — 머리글 오류가 아니다 (F2)")
+    func columnCountMismatchIsNotHeaderError() {
+        let text = "번호,제목,본문\r\n1,가\r\n2,나\r\n3,다\r\n4,라,본문\r\n5,마,본문\r\n6,바,본문"
+        #expect(throws: PackImportFailure.columnCountMismatch(record: 2, line: 2)) { try PackImporter.read(text: text) }
+    }
+
+    @Test("열 수 불일치 위치는 메타·빈 레코드를 포함한 파일 기준 번호")
+    func columnCountMismatchPosition() {
+        let text = "#이름,예시\r\n\r\n번호,제목,본문\r\n1,\"여러\n줄\",본문\r\n2,가\r\n3,나\r\n4,다\r\n5,라,본문"
+        #expect(throws: PackImportFailure.columnCountMismatch(record: 5, line: 6)) { try PackImporter.read(text: text) }
+    }
+
+    @Test("앞 데이터 5개 중 2개만 틀리면 채택하고 그 행만 건너뛴다 — 규칙 자체는 그대로")
+    func minorityMismatchStillAdopted() throws {
+        let draft = try ImportHelper.draft("번호,제목,본문\r\n1,가\r\n2,나\r\n3,다,본문\r\n4,라,본문\r\n5,마,본문")
+        #expect(draft.items.map(\.n) == [3, 4, 5])
+        #expect(ImportHelper.reasons(draft) == [.columnCount, .columnCount])
+    }
+
+    /// F3 — 시험 창 32는 **비지 않은** 레코드로 센다(본 파싱은 빈 레코드를 어디서든 무시한다)
+    @Test("머리글 앞 빈 레코드·빈 줄이 32개를 넘어도 시험 창을 다 쓰지 않는다 (F3)", arguments: [",,\r\n", "\r\n", ",,,,\n"])
+    func blankRecordsDoNotFillTrialWindow(blank: String) throws {
+        let text = String(repeating: blank, count: 40) + "번호,본문\r\n1,가\r\nx,나"
+        let draft = try ImportHelper.draft(text)
+        #expect(draft.items.map(\.n) == [1])
+        #expect(draft.skipped == [SkippedRecord(record: 43, line: 43, reason: .invalidNumber)])
+    }
+
+    @Test("비지 않은 레코드가 32개를 넘은 뒤의 quote 오류는 여전히 본 파싱의 전체 거부 — 빈 레코드가 섞여도 같다")
+    func trialWindowCountsNonBlankOnly() {
+        var lines = ["단축어,본문"]
+        for index in 1...39 { lines.append("문구\(index),본문\(index)"); lines.append(",") }
+        lines.append("문구40,\"닫은 뒤\"글자")
+        #expect(throws: PackImportFailure.quote(CSVQuoteError(kind: .characterAfterClosingQuote, record: 80, line: 80))) {
+            try PackImporter.read(text: lines.joined(separator: "\r\n"))
+        }
+    }
+}
+
+/// 검증 F4·F5 — 빈 파일은 구분자 판정 앞에서, 붙여넣기도 파일과 같은 바이트 상한을 파싱 전에
+@Suite("빈 파일·크기 상한 (F4 · F5 · T6)")
+struct EmptyAndSizeTests {
+
+    @Test("내용 없는 파일은 머리글 오류가 아니라 빈 파일 — 빈 데이터·BOM만·빈 줄만·구분자만 (F4 · T6)", arguments: [
+        [UInt8](), [0xEF, 0xBB, 0xBF], Array("\r\n\n\r".utf8), Array(",,,\r\n,,,".utf8), Array(";\t,\n".utf8),
+        [0xFF, 0xFE, 0x2C, 0x00, 0x0A, 0x00]
+    ])
+    func emptyFile(data: [UInt8]) {
+        #expect(throws: PackImportFailure.emptyFile) { try PackImporter.read(Data(data)) }
+    }
+
+    @Test("붙여넣기·구분자를 고른 경우도 같다")
+    func emptyPasteAndChosenDelimiter() {
+        #expect(throws: PackImportFailure.emptyFile) { try PackImporter.read(text: "") }
+        #expect(throws: PackImportFailure.emptyFile) { try PackImporter.read(text: "\n,,\n", delimiter: .semicolon) }
+        #expect(throws: PackImportFailure.emptyFile) { try PackImporter.read(text: "\"\",\"\"", delimiter: .comma) }
+    }
+
+    @Test("공백 글자만 든 파일은 빈 파일이 아니다 — 공백 셀은 빈 셀이 아니다(5-4 명확화 ②)")
+    func whitespaceIsNotEmpty() {
+        #expect(throws: PackImportFailure.headerNotRecognized) { try PackImporter.read(text: "  \r\n ") }
+    }
+
+    /// F5 — 같은 내용 파일은 `fileTooLarge`인데 붙여넣기는 끝까지 파싱했다(12MB 4.95초)
+    @Test("붙여넣기도 UTF-8 바이트 상한(3,000,000)을 파싱 전에 본다 — 글자 수가 아니라 바이트 (F5)")
+    func pasteByteCap() {
+        #expect(throws: PackImportFailure.fileTooLarge) { try PackImporter.read(text: String(repeating: ",", count: 3_000_001)) }
+        #expect(throws: PackImportFailure.fileTooLarge) { try PackImporter.read(text: String(repeating: "가", count: 1_000_001)) }
+        #expect(throws: PackImportFailure.fileTooLarge) {
+            try PackImporter.read(text: String(repeating: ",", count: 3_000_001), delimiter: .comma)
+        }
+        // 경계 — 3,000,000바이트는 상한을 넘지 않는다(내용이 없어 빈 파일)
+        #expect(throws: PackImportFailure.emptyFile) { try PackImporter.read(text: String(repeating: ",", count: 3_000_000)) }
+    }
+}
+
+/// 검증 T5 — 파서 수준에만 있던 「닫히지 않은 따옴표」·물리 줄 cap을 가져오기 수준에서. ⑪ cap 사유 코드도 여기서 고정
+@Suite("가져오기 수준 구조 오류 (AC-13 · AC-16 · ⑪, T5)")
+struct ImportStructuralErrorTests {
+
+    @Test("모든 후보에서 셀 시작 따옴표가 안 닫히면 「따옴표 오류」(닫히지 않음) (AC-13)")
+    func unterminatedInEveryCandidate() {
+        #expect(throws: PackImportFailure.quote(CSVQuoteError(kind: .unterminated, record: 3, line: 3))) {
+            try PackImporter.read(text: "번호,본문\r\n1,가\r\n\"닫히지 않음\r\n2,나")
+        }
+    }
+
+    @Test("시험 창 뒤에서 안 닫힌 따옴표는 본 파싱의 전체 거부 (AC-13)")
+    func unterminatedAfterTrialWindow() {
+        var lines = ["번호,본문"]
+        for index in 1...40 { lines.append("\(index),본문\(index)") }
+        lines.append("41,\"열고 안 닫음")
+        #expect(throws: PackImportFailure.quote(CSVQuoteError(kind: .unterminated, record: 42, line: 42))) {
+            try PackImporter.read(text: lines.joined(separator: "\r\n"))
+        }
+    }
+
+    @Test("물리 줄 50,000 초과는 `tooManyLines`, 그 안이면 데이터 레코드 cap으로 `tooManyRecords` (AC-16 · ⑪)")
+    func lineCapThenRecordCap() {
+        let header = "번호,본문\r\n"
+        #expect(throws: PackImportFailure.tooManyLines) {
+            try PackImporter.read(text: header + String(repeating: "1,가\r\n", count: 50_000))
+        }
+        #expect(throws: PackImportFailure.tooManyRecords) {
+            try PackImporter.read(text: header + String(repeating: "1,가\r\n", count: 49_999))
+        }
+    }
+
+    @Test("머리글 실효 폭 8 초과는 `tooManyColumns` — trailing 빈 칸은 세지 않는다 (⑪)")
+    func columnCap() throws {
+        #expect(throws: PackImportFailure.tooManyColumns) { try PackImporter.read(text: "번호,본문,a,b,c,d,e,f,g\r\n1,x,,,,,,,") }
+        let padded = try ImportHelper.draft("번호,본문,a,b,c,d,e,f,,\r\n1,x,,,,,,,,")
+        #expect(padded.items.map(\.n) == [1] && padded.ignoredColumnCount == 6)
+    }
+}
+
+/// 검증 T3·F8 — 수동 인코딩 선택이 디코더뿐 아니라 **가져오기 끝(본문)까지** 결과를 바꾸는지
+@Suite("수동 인코딩 — 가져오기 끝까지 (AC-18, T3 · F8)")
+struct ManualEncodingImportTests {
+
+    /// `C3 A9` = UTF-8 「é」 = CP949 「챕」. API가 상태 없음이라 선택마다 원본 바이트에서 전부 다시 읽는다
+    @Test("같은 바이트가 자동·UTF-8이면 본문 é, CP949면 챕 (AC-18 · T3)")
+    func sameBytesDifferentBodies() throws {
+        let data = Data("n,body\n1,caf".utf8) + Data([0xC3, 0xA9]) + Data("\n".utf8)
+        for choice in [PackEncodingChoice.automatic, .utf8] {
+            let draft = try ImportHelper.draft(data: data, options: PackImportOptions(encoding: choice))
+            #expect(draft.encoding == .utf8 && draft.needsEncodingConfirmation)
+            #expect(draft.items.map(\.body) == ["caf\u{E9}"])
+        }
+        let korean = try ImportHelper.draft(data: data, options: PackImportOptions(encoding: .cp949))
+        #expect(korean.encoding == .cp949 && korean.needsEncodingConfirmation)
+        #expect(korean.items.map(\.body) == ["caf\u{CC55}"])
+    }
+
+    @Test("BOM이 두 번 붙은 UTF-8 파일도 머리글을 찾는다 (F8)")
+    func doubleBOMImport() throws {
+        let draft = try ImportHelper.draft(data: Data([0xEF, 0xBB, 0xBF, 0xEF, 0xBB, 0xBF]) + Data("번호,본문\r\n1,가".utf8))
+        #expect(draft.hadBOM && draft.items.map(\.n) == [1])
+    }
+}

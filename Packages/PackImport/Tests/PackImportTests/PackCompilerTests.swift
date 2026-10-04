@@ -65,11 +65,31 @@ struct PackCompilerTests {
         (PackForm(name: "n", license: "l", templateSpecs: []), .templateRequired),
         (PackForm(name: "n", license: "l", templateSpecs: ["가", "나", "다", "라", "마", "바", "사", "아", "자"].map { "별칭\($0) {n}번" }), .tooManyPatterns),
         (PackForm(name: "n", license: "l", templateSpecs: ["사자성어 {n}번", "회차2{n}번"]), .pattern(index: 1, .prefixEndsWithDigit)),
-        (PackForm(name: "n", license: "l", templateSpecs: ["창세기{n}장1절"]), .pattern(index: 0, .collidesWithBible(n: 1)))
+        (PackForm(name: "n", license: "l", templateSpecs: ["창세기{n}장1절"]), .pattern(index: 0, .collidesWithBible(n: 1))),
+        (PackForm(name: "n", license: "l", templateSpecs: ["창 세 기 {n}장 1절"]), .pattern(index: 0, .collidesWithBible(n: 1)))
     ])
     func numberedFormRules(testCase: (form: PackForm, failure: PackCompileFailure)) throws {
         let draft = try numberedDraft()
         #expect(throws: testCase.failure) { try PackCompiler.compile(draft, form: testCase.form) }
+    }
+
+    /// 검증 F7 — 빈 칸을 거른 뒤 순번을 매기면 폼 칸과 어긋난다(`["", "회차2{n}번"]` → 예전 index 0)
+    @Test("틀 오류 순번은 폼의 원래 칸 순번이다 — 빈 칸을 건너뛰어도 당기지 않는다 (F7)", arguments: [
+        (["", "회차2{n}번"], PackCompileFailure.pattern(index: 1, .prefixEndsWithDigit)),
+        (["  ", "사자성어 {n}번", "", "창세기{n}장1절"], .pattern(index: 3, .collidesWithBible(n: 1)))
+    ])
+    func patternIndexIsFormSlot(testCase: (specs: [String], failure: PackCompileFailure)) throws {
+        let draft = try numberedDraft()
+        #expect(throws: testCase.failure) {
+            try PackCompiler.compile(draft, form: PackForm(name: "n", license: "l", templateSpecs: testCase.specs))
+        }
+    }
+
+    @Test("앞 칸이 비어 있으면 제목 형식은 첫 비지 않은 칸")
+    func titleFormatSkipsBlankSlots() throws {
+        let pack = try PackCompiler.compile(try numberedDraft(),
+                                            form: PackForm(name: "n", license: "l", templateSpecs: ["", "사자성어 {n}번"]))
+        #expect(pack.template?.titleFormat == "사자성어 {n}번")
     }
 
     @Test("이름·권리 40·120자 경계는 받는다")

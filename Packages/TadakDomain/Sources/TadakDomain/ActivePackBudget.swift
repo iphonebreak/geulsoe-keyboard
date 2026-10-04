@@ -216,6 +216,8 @@ public enum PackCommitGate {
     public enum Change: Equatable, Sendable {
         /// 가져오기 최종 확정 — 새 팩은 켠 채 맨 아래(U2)
         case importPack(id: String)
+        /// 「꺼 둔 채로 가져오기」(U2) — 꺼진 팩은 예산에 들지 않아 **팩 수 상한만** 본다(v3.6 ⑭)
+        case importDisabledPack(id: String)
         case enablePack(id: String)
         /// 같은 이름 팩 교체(위치·켬/끔 유지) — 켜져 있을 때
         case replaceActivePack(id: String)
@@ -237,8 +239,10 @@ public enum PackCommitGate {
         case packExcluded(id: String, dimensions: [PackBudgetDimension])
         /// 지금 포함된 팩이 밀려난다(R15) — 「먼저 다른 팩을 끄거나 순서를 바꾸세요」
         case displacesPacks([String])
-        /// 내 문구 + 켜진 내장이 하드 한도를 넘는다(R14) — 「문구가 너무 많아요」
+        /// 내 문구 + 켜진 내장이 하드 한도를 넘는 채로 넘은 항목이 늘었다(R14·R21) — 「문구가 너무 많아요」. 담는 것은 넘는 항목 전부
         case baselineOverLimit([PackBudgetDimension])
+        /// 외부 팩 수가 `PackLimits.externalPacks`를 넘는다(꺼진 팩 포함, v3.6 ⑭)
+        case tooManyPacks
     }
 
     public enum Decision: Equatable, Sendable {
@@ -256,25 +260,60 @@ public enum PackCommitGate {
         let newlyExcluded = before.included.filter { excludedAfter.contains($0) }
 
         switch change {
-        case .importPack(let id), .enablePack(let id), .replaceActivePack(let id):
-            guard after.isIncluded(id) else {
-                return .reject(.packExcluded(id: id, dimensions: dimensions(of: id, in: after)))
-            }
-            guard newlyExcluded.isEmpty else { return .reject(.displacesPacks(newlyExcluded)) }
-            return .accept(after, newlyExcluded: [])
+        case .importPack(let id):
+            guard proposed.packs.count <= PackLimits.externalPacks else { return .reject(.tooManyPacks) }
+            return judgeActivation(of: id, after: after, newlyExcluded: newlyExcluded)
+        case .enablePack(let id), .replaceActivePack(let id):
+            return judgeActivation(of: id, after: after, newlyExcluded: newlyExcluded)
+        case .importDisabledPack:
+            guard proposed.packs.count <= PackLimits.externalPacks else { return .reject(.tooManyPacks) }
+            return .accept(after, newlyExcluded: newlyExcluded)
         case .enableBuiltIn:
-            guard newlyExcluded.isEmpty else { return .reject(.displacesPacks(newlyExcluded)) }
-            guard after.baselineOverflow.isEmpty || !before.baselineOverflow.isEmpty else {
-                return .reject(.baselineOverLimit(after.baselineOverflow))
+            if let rejection = baselineRejection(current: current.baseline, proposed: proposed.baseline, after: after) {
+                return .reject(rejection)
             }
+            guard newlyExcluded.isEmpty else { return .reject(.displacesPacks(newlyExcluded)) }
             return .accept(after, newlyExcluded: [])
         case .saveUserSnippets:
-            // R14 — 외부 팩 때문에 막지 않는다. baseline 자체가 넘을 때만 거부
-            guard after.baselineOverflow.isEmpty else { return .reject(.baselineOverLimit(after.baselineOverflow)) }
+            // R14 — 외부 팩 때문에 막지 않는다(밀린 팩은 경고). baseline 판정은 내장 켜기와 같다(R21)
+            if let rejection = baselineRejection(current: current.baseline, proposed: proposed.baseline, after: after) {
+                return .reject(rejection)
+            }
             return .accept(after, newlyExcluded: newlyExcluded)
         case .replaceInactivePack, .disableBuiltIn, .deleteUserSnippets, .disablePack, .deletePack, .reorderPacks:
             // 한도 감소 방향(또는 활성 예산 무관) — 거부 없음. 포함 목록을 다시 계산해 돌려준다(9-1)
             return .accept(after, newlyExcluded: newlyExcluded)
+        }
+    }
+
+    /// 외부 팩을 켜는 쪽(가져오기·켜기·활성 교체) — 자신이 빠지면 거부, 기존 포함 팩이 밀리면 거부(R15)
+    private static func judgeActivation(of id: String, after: ActivePackBudget.Evaluation, newlyExcluded: [String]) -> Decision {
+        guard after.isIncluded(id) else {
+            return .reject(.packExcluded(id: id, dimensions: dimensions(of: id, in: after)))
+        }
+        guard newlyExcluded.isEmpty else { return .reject(.displacesPacks(newlyExcluded)) }
+        return .accept(after, newlyExcluded: [])
+    }
+
+    /// R21(⑬) — 변경 뒤 baseline이 **넘는 항목 중 하나라도 변경 전보다 늘었으면** 거부한다. 줄이거나 같은 변경은 넘은 채로도 받는다
+    /// (옛 초과본을 줄이는 수정은 「신규」가 아니다 — 9-3 자동 삭제 금지 취지). 한도 안에서 새로 넘기는 변경은 넘는 항목이
+    /// 반드시 늘었으므로 같은 규칙으로 거부된다. 새 추가는 네 값이 모두 느는 변경이다.
+    ///
+    /// 「늘었다」는 **넘은 항목에서만** 본다 — 넘은 글자 수를 줄이면서 한도 안의 단축어 수가 는 수정은 초과를 악화시키지 않는다.
+    /// 내 문구 저장과 내장 팩 켜기가 이 한 함수를 쓴다(검증 F6).
+    private static func baselineRejection(current: PackStats, proposed: PackStats, after: ActivePackBudget.Evaluation) -> Rejection? {
+        let grown = after.baselineOverflow.filter { cost(of: $0, in: proposed) > cost(of: $0, in: current) }
+        return grown.isEmpty ? nil : .baselineOverLimit(after.baselineOverflow)
+    }
+
+    /// baseline의 항목별 비용 — 피크는 baseline만으로 잰다(포함 팩 없음, `evaluate`와 같은 모델)
+    private static func cost(of dimension: PackBudgetDimension, in stats: PackStats) -> Int {
+        switch dimension {
+        case .needleCount: stats.needleCount
+        case .needleChars: stats.needleChars
+        case .bytes: stats.bytes
+        case .items: stats.items
+        case .peak: ActivePackBudget.peakEstimateBytes(needleChars: stats.needleChars, largestPackBytes: 0)
         }
     }
 

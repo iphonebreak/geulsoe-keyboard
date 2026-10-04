@@ -205,6 +205,127 @@ struct PackCommitGateTests {
     }
 }
 
+/// R21(⑬) + F6 — 한도를 넘은 상태에서 baseline 비용을 **늘리는** 변경은 거부, 줄이거나 같은 변경은 허용.
+/// 내 문구 저장과 내장 팩 켜기가 **같은 판정**을 쓴다(검증 F6 — 예전에는 내장 켜기만 초과 상태에서 늘리는 켜기를 받았다).
+@Suite("커밋 게이트 — 한도를 넘은 baseline (R21 · F6)")
+struct BaselineOverLimitGateTests {
+
+    private func stats(needles: Int = 1, chars: Int, bytes: Int = 10, items: Int = 1) -> PackStats {
+        PackStats(needleCount: needles, needleChars: chars, bytes: bytes, items: items)
+    }
+
+    private func input(user: PackStats, builtIn: PackStats = .zero, _ packs: [ActivePackBudget.Candidate] = []) -> PackBudgetInput {
+        PackBudgetInput(userSnippets: user, builtIn: builtIn, packs: packs)
+    }
+
+    @Test("옛 초과본을 줄이거나 같게 하는 수정은 저장한다 (R21)", arguments: [60_500, 61_000])
+    func shrinkingOrEqualEditSaves(afterChars: Int) {
+        let current = input(user: stats(chars: 61_000))
+        let proposed = input(user: stats(chars: afterChars))
+        guard case .accept = PackCommitGate.judge(.saveUserSnippets, current: current, proposed: proposed) else {
+            Issue.record("줄이거나 같은 수정은 받아야 한다: \(afterChars)"); return
+        }
+    }
+
+    @Test("옛 초과본을 늘리는 수정·새 추가는 거부한다 (R21)")
+    func growingEditOrAdditionRejected() {
+        let current = input(user: stats(needles: 10, chars: 61_000, bytes: 1_000, items: 10))
+        let grown = input(user: stats(needles: 10, chars: 61_001, bytes: 1_000, items: 10))
+        #expect(PackCommitGate.judge(.saveUserSnippets, current: current, proposed: grown) == .reject(.baselineOverLimit([.needleChars])))
+        // 새 추가는 네 값이 모두 는다
+        let added = input(user: stats(needles: 11, chars: 61_004, bytes: 1_100, items: 11))
+        #expect(PackCommitGate.judge(.saveUserSnippets, current: current, proposed: added) == .reject(.baselineOverLimit([.needleChars])))
+    }
+
+    /// 「늘린다」는 **넘은 항목**에서 본다 — 넘은 글자 수를 줄이면서 한도 안의 단축어 수가 1 늘어난 수정은 초과를 악화시키지 않는다
+    @Test("넘은 항목만 비교한다 — 넘은 글자 수를 줄이고 한도 안의 단축어 수가 는 수정은 저장")
+    func onlyOverflowingDimensionsCompared() {
+        let current = input(user: stats(needles: 100, chars: 61_000))
+        let proposed = input(user: stats(needles: 101, chars: 60_900))
+        guard case .accept = PackCommitGate.judge(.saveUserSnippets, current: current, proposed: proposed) else {
+            Issue.record("받아야 한다"); return
+        }
+    }
+
+    @Test("넘은 항목을 줄여도 다른 항목이 새로 넘으면 거부")
+    func newOverflowElsewhereRejected() {
+        let current = input(user: stats(chars: 61_000, bytes: 2_999_000))
+        let proposed = input(user: stats(chars: 60_900, bytes: 3_000_001))
+        #expect(PackCommitGate.judge(.saveUserSnippets, current: current, proposed: proposed)
+                == .reject(.baselineOverLimit([.needleChars, .bytes])))
+    }
+
+    @Test("한도 안에서 baseline을 새로 넘기는 내장 켜기는 거부 (F6)")
+    func enableBuiltInCrossingLimit() {
+        let current = input(user: stats(chars: 59_000))
+        let proposed = input(user: stats(chars: 59_000), builtIn: stats(needles: 317, chars: 1_724))
+        #expect(PackCommitGate.judge(.enableBuiltIn, current: current, proposed: proposed) == .reject(.baselineOverLimit([.needleChars])))
+    }
+
+    /// 검증 F6 재현 — 61,000 → 62,724는 예전에 받았다
+    @Test("이미 넘은 상태에서 내장 켜기는 거부 — 내 문구 저장과 같은 판정 (F6 · T6)")
+    func enableBuiltInWhileOver() {
+        let current = input(user: stats(chars: 61_000))
+        let proposed = input(user: stats(chars: 61_000), builtIn: stats(needles: 317, chars: 1_724))
+        #expect(PackCommitGate.judge(.enableBuiltIn, current: current, proposed: proposed) == .reject(.baselineOverLimit([.needleChars])))
+    }
+
+    @Test("이미 넘은 상태에서 내장 끄기·내 문구 삭제는 받는다(줄이는 방향)", arguments: [
+        PackCommitGate.Change.disableBuiltIn, .deleteUserSnippets
+    ])
+    func reductionsWhileOver(change: PackCommitGate.Change) {
+        let current = input(user: stats(chars: 61_000), builtIn: stats(needles: 317, chars: 1_724))
+        let proposed = input(user: stats(chars: 60_500))
+        guard case .accept = PackCommitGate.judge(change, current: current, proposed: proposed) else {
+            Issue.record("받아야 한다: \(change)"); return
+        }
+    }
+}
+
+/// v3.6 ⑭ — 팩 수 상한(후보 16, P-2에서 확정)은 **꺼진 팩도 센다**. 「꺼 둔 채로 가져오기」(U2)는 예산 게이트 밖이지만 이 상한은 받는다
+@Suite("커밋 게이트 — 팩 수 상한 (⑭)")
+struct PackCountGateTests {
+
+    private func packs(_ count: Int, enabled: Bool = false) -> [ActivePackBudget.Candidate] {
+        (0..<count).map { ActivePackBudget.Candidate(id: "p\($0)", isEnabled: enabled, stats: PackStats(needleCount: 1, needleChars: 10, bytes: 10, items: 1)) }
+    }
+
+    private func input(_ packs: [ActivePackBudget.Candidate]) -> PackBudgetInput {
+        PackBudgetInput(userSnippets: .zero, builtIn: .zero, packs: packs)
+    }
+
+    private func newPack(enabled: Bool, chars: Int = 10) -> ActivePackBudget.Candidate {
+        ActivePackBudget.Candidate(id: "new", isEnabled: enabled, stats: PackStats(needleCount: 1, needleChars: chars, bytes: 10, items: 1))
+    }
+
+    @Test("후보값은 한 곳 — 16")
+    func candidateValue() {
+        #expect(PackLimits.externalPacks == 16)
+    }
+
+    @Test("켠 채 가져오기 — 꺼진 팩까지 세어 16개까지 받고 17번째는 거부")
+    func importEnabled() {
+        let atLimit = input(packs(15) + [newPack(enabled: true)])
+        guard case .accept = PackCommitGate.judge(.importPack(id: "new"), current: input(packs(15)), proposed: atLimit) else {
+            Issue.record("16번째는 받아야 한다"); return
+        }
+        let overLimit = input(packs(16) + [newPack(enabled: true)])
+        #expect(PackCommitGate.judge(.importPack(id: "new"), current: input(packs(16)), proposed: overLimit) == .reject(.tooManyPacks))
+    }
+
+    @Test("꺼 둔 채로 가져오기 — 예산은 보지 않고(예산 밖 크기도 받는다) 팩 수 상한만 본다")
+    func importDisabled() {
+        let atLimit = input(packs(15) + [newPack(enabled: false, chars: 70_000)])
+        guard case .accept(let evaluation, let newlyExcluded) = PackCommitGate.judge(
+            .importDisabledPack(id: "new"), current: input(packs(15)), proposed: atLimit) else {
+            Issue.record("받아야 한다"); return
+        }
+        #expect(!evaluation.isIncluded("new") && newlyExcluded.isEmpty)
+        let overLimit = input(packs(16) + [newPack(enabled: false)])
+        #expect(PackCommitGate.judge(.importDisabledPack(id: "new"), current: input(packs(16)), proposed: overLimit) == .reject(.tooManyPacks))
+    }
+}
+
 extension JSONEncoder {
     static var sorted: JSONEncoder {
         let encoder = JSONEncoder()

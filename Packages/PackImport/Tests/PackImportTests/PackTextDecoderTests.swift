@@ -115,6 +115,33 @@ struct PackTextDecoderTests {
         #expect(throws: PackImportFailure.unsupportedEncoding) { try PackTextDecoder.decode(bytes(data)) }
     }
 
+    /// 검증 T1 — `FE A1`은 KS X 1001 사용자 정의 영역이라 Foundation이 **디코드는 해 준다**(사용자 영역 문자로).
+    /// 다시 인코딩하면 원본과 달라지므로 엄격 CP949는 거부해야 한다. 왕복 비교를 지우면 이 테스트가 깨진다
+    @Test("CP949 사용자 정의 영역(`FE A1`)은 Foundation이 풀어도 왕복이 어긋나 거부한다 (R4 · T1)")
+    func cp949UserDefinedAreaRejected() throws {
+        let data = bytes([0x41, 0x2C, 0xFE, 0xA1])
+        let loose = try #require(String(data: data, encoding: Self.cp949), "전제: Foundation 단독 디코드는 성공한다")
+        #expect(loose.data(using: Self.cp949) != data)
+        #expect(throws: PackImportFailure.undecodable(.cp949)) { try PackTextDecoder.decode(data, choice: .cp949) }
+        #expect(throws: PackImportFailure.unsupportedEncoding) { try PackTextDecoder.decode(data) }
+    }
+
+    /// 검증 F8 — BOM이 두 번 붙은 파일. 남은 첫 `U+FEFF` **하나만** 더 뗀다(본문 가운데의 `U+FEFF`는 문자 정리 몫)
+    @Test("BOM이 두 번 붙어도 받는다 — UTF-8·UTF-16 모두 남은 첫 BOM 하나를 더 뗀다 (F8)", arguments: [
+        [UInt8]([0xEF, 0xBB, 0xBF, 0xEF, 0xBB, 0xBF, 0x41]),
+        [0xFF, 0xFE, 0xFF, 0xFE, 0x41, 0x00],
+        [0xFE, 0xFF, 0xFE, 0xFF, 0x00, 0x41]
+    ])
+    func doubleBOM(data: [UInt8]) throws {
+        let decoded = try PackTextDecoder.decode(bytes(data))
+        #expect(decoded.text == "A" && decoded.hadBOM)
+    }
+
+    @Test("본문 가운데의 `U+FEFF`는 디코더가 건드리지 않는다 — 엄격 UTF-8 왕복이 맞는다")
+    func innerZeroWidthNoBreakSpaceKept() throws {
+        #expect(try PackTextDecoder.decode(Data("A\u{FEFF}B".utf8)).text == "A\u{FEFF}B")
+    }
+
     @Test("파일 바이트 상한을 넘으면 디코드 전에 거부한다(cap+1)")
     func fileTooLarge() {
         #expect(throws: PackImportFailure.fileTooLarge) {

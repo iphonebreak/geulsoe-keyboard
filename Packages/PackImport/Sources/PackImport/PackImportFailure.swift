@@ -5,9 +5,9 @@ import Foundation
 /// ★ **내용 없는 열거형이다**(11절 누출 경로 — 디코딩 오류 객체). 파일 글자·셀 값·파일 이름을 담지 않고
 /// 위치는 레코드·줄 번호(정수)로만 말한다. 사용자에게 보이는 문구는 UI(1-c)가 이 코드에서 만든다.
 public enum PackImportFailure: Error, Equatable, Sendable {
-    /// 파일이 `PackLimits.fileBytes`보다 크다
+    /// 파일이 `PackLimits.fileBytes`보다 크다 — 붙여넣기도 UTF-8 바이트로 같은 상한(파싱 전, 검증 F5)
     case fileTooLarge
-    /// 비어 있다(레코드 0)
+    /// 내용이 없다 — 빈 파일·BOM만·빈 줄만·구분자만(비지 않은 레코드 0). 구분자 판정 **앞에서** 본다(검증 F4)
     case emptyFile
     /// UTF-32 BOM, 또는 BOM 없이 엄격 UTF-8·엄격 CP949 둘 다 실패(BOM 없는 UTF-16·다른 ANSI 포함, 5-3b #1·#4)
     case unsupportedEncoding
@@ -21,12 +21,15 @@ public enum PackImportFailure: Error, Equatable, Sendable {
     case undecodable(PackEncodingChoice)
     /// 채택한 구분자로 본 파싱에서 난 quote 오류, 또는 **모든 후보가 quote 오류로 탈락**(5-2 #3·5-4)
     case quote(CSVQuoteError)
-    /// 물리 줄이 `PackLimits.physicalLines`를 넘는다
+    /// 물리 줄이 `PackLimits.physicalLines`를 넘는다 — 4-G 사유는 `tooManyRecords`와 같은 「항목이 너무 많아요」(⑪, 문구는 1-c)
     case tooManyLines
-    /// 데이터 논리 레코드가 `PackLimits.dataRecords`를 넘는다
+    /// 데이터 논리 레코드가 `PackLimits.dataRecords`를 넘는다 — 4-G 「항목이 너무 많아요」(⑪, 문구는 1-c)
     case tooManyRecords
     /// 어떤 구분자 후보로도 머리글을 인정할 수 없다(「머리글을 확인하세요」 + 예시)
     case headerNotRecognized
+    /// 머리글은 인정됐는데 시험 창의 앞 데이터 레코드 과반이 머리글과 열 수가 다르다(5-2 #2) — 위치는 그 안의 첫 불일치 레코드.
+    /// 예전에는 `headerNotRecognized`로 보고해 머리글을 고쳐도 풀리지 않았다(검증 F2). 4-G 사유 문구는 1-c
+    case columnCountMismatch(record: Int, line: Int)
     /// 같은 열 이름 두 번(`본문`,`본문`)
     case duplicateHeader
     /// 같은 뜻의 별칭 두 개(`본문`+`body`)
@@ -35,7 +38,7 @@ public enum PackImportFailure: Error, Equatable, Sendable {
     case mixedModeHeader
     /// 필수 열이 없다 — 본문, 그리고 번호·단축어 중 하나
     case missingRequiredColumn
-    /// 머리글 실효 폭이 `PackLimits.dataColumns`를 넘는다
+    /// 머리글 실효 폭이 `PackLimits.dataColumns`를 넘는다 — 4-G 「칸이 너무 많아요」(⑪, 문구는 1-c)
     case tooManyColumns
     /// 예약 메타 키(`#이름`·`#틀`·`#권리`·`#escape`)가 머리글 **뒤**에 있다 — 엑셀 정렬 사고(5-3)
     case metaAfterHeader(record: Int, line: Int)

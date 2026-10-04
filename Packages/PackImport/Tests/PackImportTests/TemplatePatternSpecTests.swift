@@ -75,6 +75,19 @@ struct TemplateBibleCollisionTests {
         }
     }
 
+    /// 검증 F1·T2 — 공백 제거형만 성경으로 읽히는 표본. 원문형·번호 앞뒤 한 칸형은 둘 다 안 맞으므로
+    /// 공백 제거형 변형을 빼면 1~9,999 어디서도 충돌을 못 잡는다(PDR 11-b ⑩ 「공백 제거형 추가」는 이미 들어 있다)
+    @Test("`창 세 기 {n}장 1절` — 공백 제거형으로만 n=1에서 충돌, 컴파일도 거부 (AC-22 · T2)")
+    func strippedVariantOnly() throws {
+        let raw = "창 세 기 {n}장 1절"
+        let pattern = try TemplatePatternSpec.parse(raw).get()
+        #expect(pattern == TemplatePattern(prefix: "창세기", suffix: "장1절"))
+        #expect(BibleReferenceParser.matchSuffix(of: "창세기1장1절") != nil)
+        #expect(BibleReferenceParser.matchSuffix(of: "창 세 기 1장 1절") == nil)
+        #expect(BibleReferenceParser.matchSuffix(of: "창세기 1 장1절") == nil)
+        #expect(TemplatePatternSpec.firstBibleCollision(pattern, raw: raw) == 1)
+    }
+
     @Test("성경과 무관한 틀은 1~9,999 어디서도 충돌하지 않는다")
     func noCollision() throws {
         for raw in ["사자성어 {n}번", "상용 영어 {n}번", "회차{n}장"] {

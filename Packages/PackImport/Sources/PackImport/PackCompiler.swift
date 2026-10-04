@@ -29,7 +29,7 @@ public enum PackCompileFailure: Error, Equatable, Sendable {
     case templateNotAllowed
     /// 틀 별칭이 8개를 넘는다(같은 쌍으로 합친 뒤)
     case tooManyPatterns
-    /// `index`번째 틀(0부터)이 스키마·성경 충돌 검사를 통과하지 못했다
+    /// 폼의 `index`번째 틀 칸(0부터, **빈 칸도 센다** — 검증 F7)이 스키마·성경 충돌 검사를 통과하지 못했다
     case pattern(index: Int, TemplatePatternSpec.Failure)
     /// 유효 레코드 0
     case noValidRecords
@@ -48,9 +48,10 @@ public enum PackCompiler {
         guard !license.allSatisfy(\.isWhitespace) else { throw .licenseMissing }
         guard PackLimits.license.admits(license) else { throw .licenseTooLong }
 
-        let specs = form.templateSpecs
-            .map { PackTextSanitizer.sanitize($0).text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        // 빈 칸은 건너뛰되 순번은 폼 칸 그대로 둔다 — 오류가 가리키는 칸이 화면 칸과 같아야 한다(F7)
+        let specs = form.templateSpecs.enumerated()
+            .map { (index: $0.offset, raw: PackTextSanitizer.sanitize($0.element).text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .filter { !$0.raw.isEmpty }
         switch draft.mode {
         case .phrases:
             guard specs.isEmpty else { throw .templateNotAllowed }
@@ -59,7 +60,7 @@ public enum PackCompiler {
             guard !specs.isEmpty else { throw .templateRequired }
             // 스키마 먼저(싸다) → 같은 쌍 합치기 → 개수 → 성경 전체 n 검사(9,999 × 별칭 — 가져오기 시점에만)
             var parsed: [(index: Int, raw: String, pattern: TemplatePattern)] = []
-            for (index, raw) in specs.enumerated() {
+            for (index, raw) in specs {
                 switch TemplatePatternSpec.parse(raw) {
                 case .success(let pattern):
                     // 띄어쓰기만 다른 별칭은 같은 쌍(10-4 2번) — 하나로
@@ -75,7 +76,7 @@ public enum PackCompiler {
                 }
             }
             let patterns = parsed.map(\.pattern)
-            let template = PackTemplate(patterns: patterns, titleFormat: specs[0], items: draft.items)
+            let template = PackTemplate(patterns: patterns, titleFormat: specs[0].raw, items: draft.items)
             return ExternalPack(name: name, license: license, mode: .numbered, template: template)
         }
     }

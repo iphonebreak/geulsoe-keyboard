@@ -44,11 +44,13 @@ public enum CSVParseError: Error, Equatable, Sendable {
 /// - 셀 안 줄바꿈은 원문 그대로 둔다 — LF 통일은 문자 정리(11절)가 한다.
 public enum CSVRecordParser {
 
-    /// - Parameter maxRecords: 이만큼 모이면 멈춘다(구분자 후보 시험용 — 「첫 논리 레코드들」만 본다). nil이면 끝까지
+    /// - Parameter maxNonBlankRecords: **비지 않은** 레코드가 이만큼 모이면 멈춘다(구분자 후보 시험용 — 「첫 논리 레코드들」만 본다).
+    ///   빈 레코드는 결과에 남기지만(번호를 본 파싱과 맞춘다) 세지 않는다 — 머리글 앞 빈 줄이 시험 창을 다 쓰지 않게(검증 F3). nil이면 끝까지
     public static func parse(
-        _ text: String, delimiter: CSVDelimiter, maxRecords: Int? = nil
+        _ text: String, delimiter: CSVDelimiter, maxNonBlankRecords: Int? = nil
     ) throws(CSVParseError) -> CSVParseResult {
         var records: [CSVRecord] = []
+        var nonBlankCount = 0
         var cells: [String] = []
         var cell = ""
         var line = 1
@@ -62,7 +64,9 @@ public enum CSVRecordParser {
 
         func endRecord() {
             cells.append(cell)
-            records.append(CSVRecord(cells: cells, line: recordLine))
+            let record = CSVRecord(cells: cells, line: recordLine)
+            if !record.isBlank { nonBlankCount += 1 }
+            records.append(record)
             cells = []
             cell = ""
             hasContent = false
@@ -70,7 +74,7 @@ public enum CSVRecordParser {
         }
 
         for character in text {
-            if let maxRecords, records.count >= maxRecords { break }
+            if let maxNonBlankRecords, nonBlankCount >= maxNonBlankRecords { break }
             // 글자가 있는 줄만 센다 — 마지막 줄바꿈 뒤의 빈 자리는 줄이 아니다
             if line > PackLimits.physicalLines { throw .tooManyLines }
             let isNewline = character == "\n" || character == "\r" || character == "\r\n"
@@ -124,7 +128,7 @@ public enum CSVRecordParser {
             }
         }
 
-        let stopped = maxRecords.map { records.count >= $0 } ?? false
+        let stopped = maxNonBlankRecords.map { nonBlankCount >= $0 } ?? false
         if !stopped {
             switch state {
             case .quoted:

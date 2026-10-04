@@ -102,6 +102,62 @@ struct PackTemplateMatcherTests {
         #expect(controller.insertSnippet(match.suggestion))
         #expect(output.text == "본문 12")
     }
+
+    /// 검증 T4 — AC-25 「숫자열 전체·후퇴 없음·선행 0·44자」를 꼬리 주입이 아니라 3종 자판으로 실제로 쳐서
+    private static let syllableKeys: [String: [String: [String]]] = [
+        "dubeolsik": ["가": ["r", "k"], "나": ["s", "k"], "장": ["w", "k", "d"]],
+        "cheonjiin": ["가": ["ㄱ", "ㅣ", "ㆍ"], "나": ["ㄴ", "ㅣ", "ㆍ"], "장": ["ㅈ", "ㅣ", "ㆍ", "ㅇ"]],
+        "danmoeum": ["가": ["ㄱ", "ㅏ"], "나": ["ㄴ", "ㅏ"], "장": ["ㅈ", "ㅏ", "ㅇ"]]
+    ]
+
+    /// `prefix`(한글) → 기호 자판에서 `digits` → `suffix`(한글)를 그 자판으로 친다
+    @MainActor
+    private static func typed(_ layout: String, prefix: [String], digits: String, suffix: [String]) -> (InputController, RecordingOutput) {
+        let source: JamoSource = switch layout {
+        case "cheonjiin": CheonjiinSource(timeout: 10)
+        case "danmoeum": DanmoeumSource()
+        default: DubeolsikSource()
+        }
+        let keys = syllableKeys[layout] ?? [:]
+        let output = RecordingOutput()
+        let controller = InputController(output: output, hangulSource: source)
+        for syllable in prefix { for key in keys[syllable] ?? [] { controller.handle(.character(key)) } }
+        controller.handle(.symbols)
+        for digit in digits { controller.handle(.character(String(digit))) }
+        controller.handle(.symbols)
+        for syllable in suffix { for key in keys[syllable] ?? [] { controller.handle(.character(key)) } }
+        return (controller, output)
+    }
+
+    @Test("3종 자판 — 숫자열 전체 소비(3232는 32로 후퇴하지 않는다)·선행 0 거부 (AC-25 · T4)", arguments: ["dubeolsik", "cheonjiin", "danmoeum"])
+    @MainActor
+    func threeLayoutsDigitRules(layout: String) throws {
+        let (whole, _) = Self.typed(layout, prefix: ["가", "나"], digits: "3232", suffix: ["장"])
+        #expect(whole.textTail == "가나3232장")
+        let only32 = PackTemplateMatcher(sources: [.init(id: "K", template: Self.template([("가나", "장")], items: [32]))])
+        #expect(only32.match(tail: whole.textTail) == nil)
+        let has3232 = PackTemplateMatcher(sources: [.init(id: "K", template: Self.template([("가나", "장")], items: [32, 3_232]))])
+        #expect(has3232.match(tail: whole.textTail)?.n == 3_232)
+
+        let (leadingZero, _) = Self.typed(layout, prefix: ["가", "나"], digits: "012", suffix: ["장"])
+        #expect(leadingZero.textTail == "가나012장")
+        let has12 = PackTemplateMatcher(sources: [.init(id: "K", template: Self.template([("가나", "장")], items: [12]))])
+        #expect(has12.match(tail: leadingZero.textTail) == nil)
+    }
+
+    @Test("3종 자판 — 최대 확장 44자(접두 39 + 4자리 + 접미 1)를 쳐서 틀 원문 44자를 지우고 본문을 넣는다 (AC-25 · T4)",
+          arguments: ["dubeolsik", "cheonjiin", "danmoeum"])
+    @MainActor
+    func threeLayoutsLongestExpansion(layout: String) throws {
+        let prefix = Array(repeating: "가", count: 39)
+        let (controller, output) = Self.typed(layout, prefix: prefix, digits: "9999", suffix: ["장"])
+        #expect(controller.textTail == prefix.joined() + "9999장")
+        let matcher = PackTemplateMatcher(sources: [.init(id: "W", template: Self.template([(prefix.joined(), "장")], items: [9_999]))])
+        let match = try #require(matcher.match(tail: controller.textTail))
+        #expect(match.n == 9_999 && match.trigger.count == 44)
+        #expect(controller.insertSnippet(match.suggestion))
+        #expect(output.text == "본문 9999")
+    }
 }
 
 @Suite("소유권·동점·순서 (10-4, AC-24)")

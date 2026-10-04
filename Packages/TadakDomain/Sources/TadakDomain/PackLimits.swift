@@ -56,6 +56,8 @@ public enum PackLimits {
     public static let triggersPerEntry = 10
     /// 번호 1~9,999
     public static let numberRange = 1...9_999
+    /// 외부 팩 수 — **꺼진 팩도 센다**(9-4 ② 팩 수 cap). 후보값 — P-2 「비활성 16팩」 시험값, P-2에서 확정(v3.6 ⑭)
+    public static let externalPacks = 16
     /// 건너뜀 비율이 이 값 이상이면 자동 진행 금지 — 경험적 초안(R10, 5-5)
     public static let skipRatioRequiringConfirmation = 0.5
 }
