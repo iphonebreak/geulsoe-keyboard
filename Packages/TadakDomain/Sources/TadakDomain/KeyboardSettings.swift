@@ -63,12 +63,6 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 클립보드 기록(툴바 클립보드 도구). 끄면 저장분을 즉시 삭제한다 — 보안 규칙 조항.
     /// 전체 접근 필요 (PDR clipboard-history).
     public var clipboardHistoryEnabled: Bool
-    /// 복사한 사진 도우미(v1.3.0 ④ B) — 클립보드의 사진을 툴바 칩으로 보여 주고, 탭하면 그 사진을 클립보드에
-    /// 다시 담는다(`localOnly`·만료 120초). **기본 꺼짐** — `clipboardHistoryEnabled`와 **따로 둔다**: 사진은 문자열보다
-    /// 민감할 수 있어 문자열 기록에 대한 동의를 사진까지 넓히지 않는다. 전체 접근 필요.
-    /// 키보드는 사진 바이트를 들고 있지 않다(B6) — 끄면 다음 설정 재로드(닫혀 있으면 다음 등장)에서 미리보기를 비운다
-    /// (PDR `clipboard-image-history.md` 6-1·B6).
-    public var copiedPhotoHelperEnabled: Bool
     /// 추천단어 학습 초기화 신호. 앱이 저장소를 비우며 +1 하면, 키보드가 설정 재로드에서
     /// 변화를 보고 엔진을 재생성한다(세션 메모리 폐기). 저장소만 비우면 살아 있는
     /// 프로세스가 다음 학습 때 옛 단어를 되살린다 — PDR settings-app 결정 4.
@@ -240,8 +234,6 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         // 즉 **이미 켜 둔 사용자는 꺼지지 않는다.** 이 기본값은 키가 없는 경우에만 적용된다 —
         // 새 설치, 그리고 이 필드가 생기기 전(Phase 6 이전)의 저장분이다.
         clipboardHistoryEnabled: Bool = false,
-        // 기본 꺼짐(사장님 결정 4) — 키가 없는 저장분(이 필드 이전)도 꺼짐으로 읽는다
-        copiedPhotoHelperEnabled: Bool = false,
         learningResetToken: Int = 0,
         emojiHistoryEnabled: Bool = true,
         emojiHistoryResetToken: Int = 0,
@@ -282,7 +274,6 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.verificationCodeSuggestionsEnabled = verificationCodeSuggestionsEnabled
         self.pasteSuggestionEnabled = pasteSuggestionEnabled
         self.clipboardHistoryEnabled = clipboardHistoryEnabled
-        self.copiedPhotoHelperEnabled = copiedPhotoHelperEnabled
         self.learningResetToken = learningResetToken
         self.emojiHistoryEnabled = emojiHistoryEnabled
         self.emojiHistoryResetToken = emojiHistoryResetToken
@@ -351,8 +342,6 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         verificationCodeSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .verificationCodeSuggestionsEnabled) ?? base.verificationCodeSuggestionsEnabled
         pasteSuggestionEnabled = try container.decodeIfPresent(Bool.self, forKey: .pasteSuggestionEnabled) ?? base.pasteSuggestionEnabled
         clipboardHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .clipboardHistoryEnabled) ?? base.clipboardHistoryEnabled
-        copiedPhotoHelperEnabled = try container.decodeIfPresent(Bool.self, forKey: .copiedPhotoHelperEnabled)
-            ?? base.copiedPhotoHelperEnabled
         learningResetToken = try container.decodeIfPresent(Int.self, forKey: .learningResetToken) ?? base.learningResetToken
         emojiHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .emojiHistoryEnabled) ?? base.emojiHistoryEnabled
         emojiHistoryResetToken = try container.decodeIfPresent(Int.self, forKey: .emojiHistoryResetToken) ?? base.emojiHistoryResetToken

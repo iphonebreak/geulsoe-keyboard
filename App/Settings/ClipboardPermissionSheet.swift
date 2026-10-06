@@ -56,7 +56,7 @@ struct ClipboardPermissionSheet: View {
                     header
                     step(number: 1,
                          title: "전체 접근을 켜세요",
-                         body: "클립보드 기록·복사한 인증번호 제안·복사한 텍스트 제안·복사한 사진 도우미에 필요해요.\n"
+                         body: "클립보드 기록·복사한 인증번호 제안·복사한 텍스트 제안에 필요해요.\n"
                              + "「글쇠」를 켜면 바로 아래 「전체 접근 허용」이 나타나요.",
                          paths: [
                             (version: "iOS 18 이상", value: "설정 > 앱 > 글쇠 > 키보드"),

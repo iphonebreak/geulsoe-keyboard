@@ -1,4 +1,3 @@
-import CoreGraphics
 import Foundation
 import Testing
 import KeyboardCore
@@ -160,33 +159,6 @@ struct ToolbarCandidateRuleTests {
         #expect(KeyboardMetrics.candidateRowSnippet(snippet, hasPaste: false) == snippet)
         #expect(KeyboardMetrics.candidateRowSnippet(nil, hasPaste: false) == nil)
         #expect(KeyboardMetrics.showsDismissButton(hasSnippet: true, hasWords: false, hasPaste: false))
-    }
-
-    // MARK: - 사진 칩도 붙여넣기 칩이다 (v1.3.0 ④ B, PDR `clipboard-image-history.md` 1-2 · D18·D19)
-
-    private static var photoChip: CopiedPhotoChip {
-        let context = CGContext(
-            data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
-        return CopiedPhotoChip(stage: .copyable, thumbnail: CopiedPhotoThumbnail(image: context.makeImage()!))
-    }
-
-    @Test("★ 사진 칩이 있으면 [사진][✕]만 — 채움글 칩·추천단어·배지를 그리지 않는다")
-    func photoChipStandsAlone() {
-        let hasPaste = PasteChipGate.hasPasteChip(text: nil, photo: Self.photoChip)
-        #expect(hasPaste)
-        #expect(KeyboardMetrics.candidateRowWords(Self.carRow, hasPaste: hasPaste).isEmpty)
-        #expect(KeyboardMetrics.candidateRowSnippet(Self.greeting, hasPaste: hasPaste) == nil)
-        #expect(!KeyboardMetrics.candidateRowShowsBadge(hasPaste: hasPaste))
-        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: false, hasWords: false, hasPaste: hasPaste))
-    }
-
-    @Test("사진 칩이 물러나면(✕·만료) 후보 줄은 지금과 같다")
-    func noPhotoChipUnchanged() {
-        let hasPaste = PasteChipGate.hasPasteChip(text: nil, photo: nil)
-        #expect(!hasPaste)
-        #expect(KeyboardMetrics.candidateRowWords(Self.carRow, hasPaste: hasPaste) == Self.carRow)
-        #expect(KeyboardMetrics.candidateRowSnippet(Self.greeting, hasPaste: hasPaste) == Self.greeting)
     }
 
     @Test("D6 여백C — 이모지 칩이 뜬 줄은 칩 안쪽 좌우 여백 0, 아니면 지금 그대로 6")

@@ -104,28 +104,6 @@ struct KeyboardSettingsTests {
     // 아래 넷이 그 경계를 고정한다. 인라인 휴리스틱으로 값을 되돌리지 않는다 —
     // 툴바 순서에서 겪은 "영구 고착" 계열의 함정을 여기서 반복하지 않기 위해서다.
 
-    // MARK: - 복사한 사진 도우미 (v1.3.0 ④ B, PDR `clipboard-image-history.md` 6-1 — 기본 꺼짐)
-
-    @Test("사진 도우미 — 새 설치·구 저장분(키 없음)은 꺼져 있고, 문자열 기록을 켠 사용자도 자동으로 켜지지 않는다")
-    func copiedPhotoHelperDefaultsOff() throws {
-        #expect(KeyboardSettings().copiedPhotoHelperEnabled == false)
-        #expect(KeyboardSettings.default.copiedPhotoHelperEnabled == false)
-        let legacy = #"{"clipboardHistoryEnabled":true,"pasteSuggestionEnabled":true}"#.data(using: .utf8)!
-        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
-        #expect(decoded.clipboardHistoryEnabled == true)
-        #expect(decoded.copiedPhotoHelperEnabled == false, "문자열 기록에 대한 동의를 사진까지 넓히지 않는다(6-1)")
-    }
-
-    @Test("사진 도우미 — 저장한 값은 그대로 읽고, 왕복해도 같다")
-    func copiedPhotoHelperRoundTrip() throws {
-        let stored = #"{"copiedPhotoHelperEnabled":true}"#.data(using: .utf8)!
-        #expect(try JSONDecoder().decode(KeyboardSettings.self, from: stored).copiedPhotoHelperEnabled == true)
-        var settings = KeyboardSettings()
-        settings.copiedPhotoHelperEnabled = true
-        let data = try JSONEncoder().encode(settings)
-        #expect(try JSONDecoder().decode(KeyboardSettings.self, from: data).copiedPhotoHelperEnabled == true)
-    }
-
     @Test("마이그레이션 1 — 새 설치는 클립보드 기록이 꺼져 있다")
     func clipboardDefaultsOffOnFreshInstall() {
         #expect(KeyboardSettings().clipboardHistoryEnabled == false)

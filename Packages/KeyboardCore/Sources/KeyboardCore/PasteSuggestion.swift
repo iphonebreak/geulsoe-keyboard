@@ -108,21 +108,6 @@ public enum PasteChipGate {
         guard hasFullAccess, !isSecureTextEntry, !isSuppressedByTyping else { return nil }
         return suggestion
     }
-
-    /// 사진 칩(v1.3.0 ④ B) — **같은 칩 자리**를 쓴다(PDR `clipboard-image-history.md` 1-2). 텍스트·인증번호 칩이 보이면
-    /// 그쪽이 이긴다(드물게 리치 콘텐츠가 둘 다 가진 경우). 나머지 조건은 텍스트 칩과 같다 — 키를 누르면 그 등장 동안 내려간다.
-    public static func visiblePhotoChip(
-        _ chip: CopiedPhotoChip?, hasFullAccess: Bool, isSecureTextEntry: Bool,
-        isSuppressedByTyping: Bool, hasTextChip: Bool
-    ) -> CopiedPhotoChip? {
-        guard hasFullAccess, !isSecureTextEntry, !isSuppressedByTyping, !hasTextChip else { return nil }
-        return chip
-    }
-
-    /// 붙여넣기 칩(텍스트·인증번호·사진 중 하나)이 보이는가 — D18·D19의 `hasPasteChip`은 **이 값**이다.
-    public static func hasPasteChip(text: PasteSuggestion?, photo: CopiedPhotoChip?) -> Bool {
-        text != nil || photo != nil
-    }
 }
 
 /// 툴바에 채움글 칩(날짜·시간 칩 포함)을 **지금** 띄울까 — 조립 지점의 조건식을 옮겼다.

@@ -152,13 +152,6 @@ final class KeyboardViewController: UIInputViewController {
     /// ✕로 지운 항목이 **키보드를 다시 열 때마다 되살아났다** — PDR clipboard-history가
     /// "✕로 지운 현재 클립보드가 재오픈마다 되살아나지 않게"라고 못박은 가드가 사실상 죽어 있었다.
     private static var recordedPasteboardChangeCount: Int?
-    /// 복사한 사진 도우미(v1.3.0 ④ B) — 미리보기(썸네일)·「복사됨」 표식(우리가 쓴 changeCount·만료 시각)·거절한 클립보드.
-    /// **사진 바이트는 들고 있지 않다**(B6 — 원본 사본 없음, 재탭은 클립보드의 우리가 쓴 항목을 다시 읽는다).
-    /// **프로세스 수명**이다(VC는 등장마다 새로 만들어진다). 메모리에만 있다 — 파일·로그 0.
-    /// 만료(120초)·새 복사·끄기(설정 재로드·등장)에서 비우는 규칙은 `CopiedPhotoHelper`가 쥔다.
-    private static var copiedPhoto = CopiedPhotoHelper()
-    /// 사진 도우미의 클립보드 경계 — 이 키보드의 **유일한 클립보드 쓰기 지점**(`setItems` + `localOnly` + 만료).
-    private let copiedPhotoPasteboard = SystemCopiedPhotoPasteboard()
     /// 이번 등장에서 사용자가 키를 눌렀나 — **일반 붙여넣기 칩만** 이걸 보고 내려간다.
     ///
     /// 인증번호 칩은 예전부터 `textTail.isEmpty` 게이트(입력란이 비어 있을 때만)를 쓴다.
@@ -543,8 +536,7 @@ final class KeyboardViewController: UIInputViewController {
         guard hasFullAccess, textDocumentProxy.isSecureTextEntry != true else { return }
         guard settings.verificationCodeSuggestionsEnabled
                 || settings.pasteSuggestionEnabled
-                || settings.clipboardHistoryEnabled
-                || settings.copiedPhotoHelperEnabled else { return }
+                || settings.clipboardHistoryEnabled else { return }
         let now = UIPasteboard.general.changeCount
         guard now != seenPasteboardChangeCount else { return }
         probePasteboard()
@@ -558,7 +550,6 @@ final class KeyboardViewController: UIInputViewController {
         probedPasteboardChangeCount = nil   // 칩과 수명을 같이한다 (위 불변식) — 늦게 온 탭이
                                             // 사라진 칩의 클립보드를 소비하지 못하게 한다
         viewState?.pasteSuggestion = nil
-        viewState?.copiedPhoto = nil        // 칩만 내린다 — 사진 도우미 상태는 프로세스 수명(`Self.copiedPhoto`, 5-2)
         if viewState?.clipboardEntries.isEmpty == false { viewState?.clipboardEntries = [] }
         // 예약된 성경 검색은 버린다 — 내려간 키보드를 위해 본문을 훑을 이유가 없고,
         // 다음 등장에서 꼬리가 다시 서면 그때 새로 예약된다.
@@ -724,14 +715,8 @@ final class KeyboardViewController: UIInputViewController {
         // ★ D19(2026-10-06): **붙여넣기 칩이 채움글 칩(날짜 칩 포함)보다 먼저다** — 붙여넣기 칩이 있으면 그 줄은
         //   `[붙여넣기 칩][✕]`만이고, ✕로 칩을 물리면(클립보드 소비) 채움글 칩(+✕)이 나온다. 그 ✕는 기존 채움글 ✕
         //   그대로(`dismissedSnippetTail`). 예전 주석은 「채움글 > 붙여넣기」라 적었지만 실제로는 둘이 한 줄에 함께 떴다.
-        // 사진 칩(v1.3.0 ④ B)도 **같은 붙여넣기 칩 자리**다 — 텍스트·인증번호 칩이 이기고, 나머지 조건(키를 누르면 그 등장
-        // 동안 내려감·secure·전체 접근)은 같다. 「복사됨」이 만료(120초)됐으면 칩이 없다.
-        let photoChip = PasteChipGate.visiblePhotoChip(
-            Self.copiedPhoto.visibleChip(now: Date()), hasFullAccess: hasFullAccess, isSecureTextEntry: secure,
-            isSuppressedByTyping: pasteChipSuppressedByTyping, hasTextChip: chip != nil)
-        let hasPasteChip = PasteChipGate.hasPasteChip(text: chip, photo: photoChip)
         let snippet = SnippetChipGate.visibleSnippet(
-            matched, isDismissed: Self.dismissedSnippetTail != nil, hasPasteChip: hasPasteChip)
+            matched, isDismissed: Self.dismissedSnippetTail != nil, hasPasteChip: chip != nil)
 
         // MARK: 성경 검색 배지 (계획서 2-1·2-6)
         //
@@ -786,7 +771,7 @@ final class KeyboardViewController: UIInputViewController {
                !inputController.textTail.hasSuffix(result.typedText) {
                 closeBibleSearchPanel()
             }
-        } else if canSearchBibleNow(tail: inputController.textTail), snippet == nil, !hasPasteChip {
+        } else if canSearchBibleNow(tail: inputController.textTail), snippet == nil, chip == nil {
             bibleSearchSchedulerMakingIfNeeded().schedule(tail: inputController.textTail)
         } else {
             bibleSearchScheduler?.cancel()
@@ -812,7 +797,7 @@ final class KeyboardViewController: UIInputViewController {
         //   (`textDidChange`는 sync 뒤), sync(userEdited == false)에서는 뽑은 값을 버리지도 새로 뽑지도 않는다 —
         //   호스트가 꼬리를 잠깐 비웠다 다시 세워도 같은 값이다(검증 ⑤-2a 참고 2, `EmojiChipState`).
         let wordsAllowed = WordSuggestionGate.allowsWords(
-            isSecureTextEntry: secure, hasSnippet: snippet != nil, hasPasteChip: hasPasteChip,
+            isSecureTextEntry: secure, hasSnippet: snippet != nil, hasPasteChip: chip != nil,
             isDismissed: dismissedSuggestionWord != nil,
             isSuppressedAfterCursorMove: suppressesWordSuggestionsAfterCursorMove
         ) && suggestionEngine != nil
@@ -843,7 +828,6 @@ final class KeyboardViewController: UIInputViewController {
         if viewState.pasteSuggestion != chip {
             viewState.pasteSuggestion = chip
         }
-        if viewState.copiedPhoto != photoChip { viewState.copiedPhoto = photoChip }
         // ★ 배지 유무가 **도구 칸 하나를 여닫으므로** 여기서도 도구 목록을 다시 낸다 (v1.1.0).
         //   예전에는 등장(`viewWillAppear`)과 설정 재로드 두 곳에서만 불렀다 —
         //   그대로 두면 0건 → 1건이 돼도 📖 칸이 안 생긴다.
@@ -983,14 +967,13 @@ final class KeyboardViewController: UIInputViewController {
     private func handleDismissSuggestions() {
         playToolbarHaptic()
         guard let inputController, let viewState else { return }
-        let hadPasteChip = PasteChipGate.hasPasteChip(text: viewState.pasteSuggestion, photo: viewState.copiedPhoto)
         // D18·D19 — 붙여넣기 칩이 있으면 채움글 칩·추천단어는 그려지지 않았다(`KeyboardMetrics.candidateRowSnippet`·
         // `candidateRowWords`) — 이 ✕는 붙여넣기 칩만 물리고, 다시 계산하면 채움글 칩 또는 지금 단어의 후보가 나온다.
         // 안 보인 후보를 숨김 처리하지 않는다.
-        if !hadPasteChip, viewState.snippetSuggestion != nil {
+        if viewState.pasteSuggestion == nil, viewState.snippetSuggestion != nil {
             Self.dismissedSnippetTail = inputController.textTail
         }
-        if !hadPasteChip, !viewState.wordSuggestions.isEmpty, !inputController.currentWord.isEmpty {
+        if viewState.pasteSuggestion == nil, !viewState.wordSuggestions.isEmpty, !inputController.currentWord.isEmpty {
             dismissedSuggestionWord = inputController.currentWord
         }
         if viewState.pasteSuggestion != nil {
@@ -998,10 +981,6 @@ final class KeyboardViewController: UIInputViewController {
             // 새로 복사하면 changeCount가 달라져 다시 뜬다 (사용자 요구 2026-09-15).
             Self.consumedPasteboardChangeCount = probedPasteboardChangeCount
             pasteSuggestion = nil
-        }
-        // 사진 칩 — 그 클립보드를 소비하고 칩을 물린다(텍스트 칩과 같은 소비 장치, D18·D19)
-        if viewState.copiedPhoto != nil, let consumed = Self.copiedPhoto.dismiss() {
-            Self.consumedPasteboardChangeCount = consumed
         }
         // 배지도 함께 내린다 — 후보 행을 통째로 내리는 버튼인데 배지만 남으면
         // 도구 행으로 영영 못 돌아간다(배지가 있으면 후보 행이 유지된다).
@@ -1055,11 +1034,7 @@ final class KeyboardViewController: UIInputViewController {
         probedPasteboardChangeCount = nil     // 칩과 함께 지운다 (위 불변식)
         // 재시도는 **등장이 아니다** — 그 사이 사용자가 키를 눌렀으면 억제를 유지한다
         if !isRetry { pasteChipSuppressedByTyping = false }   // 등장마다 다시 띄운다
-        guard hasFullAccess, textDocumentProxy.isSecureTextEntry != true else {
-            // 사진 도우미도 클립보드를 건드리지 않는다 — 전체 접근이 없으면 미리보기·표식까지 비운다(같은 커밋의 권한 없는 경로)
-            probeCopiedPhoto(yieldsToText: false)
-            return
-        }
+        guard hasFullAccess, textDocumentProxy.isSecureTextEntry != true else { return }
         let pasteboard = UIPasteboard.general
         let changeCount = pasteboard.changeCount   // 정수 — 내용을 가져오지 않는다
         seenPasteboardChangeCount = changeCount
@@ -1090,64 +1065,19 @@ final class KeyboardViewController: UIInputViewController {
         // `hasStrings`는 **확인 창을 띄우지 않는다** — 내용이 올 때까지의 재시도는 조용하고,
         // `string`은 실제로 내용이 생긴 그 한 번에만 불린다.
         // 재시도도 같은 게이트를 지난다 — 원하는 게 없으면 재시도하지 않는다.
-        if let text = probed {
-            if plan.needsSuggestion {
-                pasteSuggestion = PasteSuggestion.make(
-                    from: text,
-                    allowsCode: settings.verificationCodeSuggestionsEnabled,
-                    allowsText: settings.pasteSuggestionEnabled)
-                probedPasteboardChangeCount = changeCount
-            }
-            if plan.needsHistory {
-                recordClipboardHistory(text)
-                Self.recordedPasteboardChangeCount = changeCount
-            }
+        if plan.retries(afterReading: probed) { scheduleProbeRetry() }
+        guard let text = probed else { return }
+        if plan.needsSuggestion {
+            pasteSuggestion = PasteSuggestion.make(
+                from: text,
+                allowsCode: settings.verificationCodeSuggestionsEnabled,
+                allowsText: settings.pasteSuggestionEnabled)
+            probedPasteboardChangeCount = changeCount
         }
-        // 사진 도우미(v1.3.0 ④ B) — **같은 1회 읽기(+ 아래 재시도) 안**이다. 새 폴링이 아니다.
-        // 텍스트·인증번호 칩이 생겼으면 그쪽이 이기고 사진은 읽지 않는다(PDR 1-2).
-        let photo = probeCopiedPhoto(yieldsToText: pasteSuggestion != nil)
-        if plan.retries(afterReading: probed) || photo == .retry { scheduleProbeRetry() }
-    }
-
-    /// 사진 도우미 프로브 — 스위치·전체 접근이 켜져 있고 secure가 아니며 이 클립보드를 아직 처리하지 않았을 때만
-    /// `hasImages` → 첫 이미지 UTI → 바이트(≤ 8MB) → **디코드 전** 화소 수(≤ 64MP) → 썸네일. 원본 바이트는 버리고
-    /// 썸네일만 든다(B5). 넘으면 칩 없음(B3). 판단은 전부 `CopiedPhotoHelper`(KeyboardCore, `swift test`).
-    /// `autoreleasepool` — 클립보드가 돌려준 바이트가 이 호출이 끝나면 바로 풀리게 한다(실기 세션 2의 경로 A 그대로).
-    @discardableResult
-    private func probeCopiedPhoto(yieldsToText: Bool) -> CopiedPhotoHelper.ProbeResult {
-        let enabled = settings.copiedPhotoHelperEnabled
-        let fullAccess = hasFullAccess
-        let secure = textDocumentProxy.isSecureTextEntry == true
-        let consumed = Self.consumedPasteboardChangeCount
-        return autoreleasepool {
-            Self.copiedPhoto.probe(
-                enabled: enabled, hasFullAccess: fullAccess, isSecureTextEntry: secure, yieldsToText: yieldsToText,
-                consumedChangeCount: consumed, pasteboard: copiedPhotoPasteboard,
-                decoder: ImageIOCopiedPhotoDecoder(), now: Date())
+        if plan.needsHistory {
+            recordClipboardHistory(text)
+            Self.recordedPasteboardChangeCount = changeCount
         }
-    }
-
-    /// 사진 칩 탭 — **이 키보드의 유일한 클립보드 쓰기 경로**다(보안 규칙 클립보드 절 예외 조건 3: 사용자 탭의 직접 결과).
-    ///
-    /// 클립보드가 그 칩이 가리키는 항목 그대로일 때만(「복사한 사진」 = 프로브가 본 changeCount, 「길게 눌러 붙여넣기」 = 우리가 쓴
-    /// changeCount) 바이트를 읽어 상한을 다시 보고 `setItems`(`localOnly`·만료 120초)로 되쓴다 — 「복사됨」 재탭은 만료 갱신.
-    /// 바이트는 쓰고 나면 버린다(B6). 그 사이 바뀌었거나 만료됐으면 쓰지 않는다.
-    /// **지금 떠 있는 칩만 받는다** — 탭 콜백은 한 박자 늦게 오므로 빠른 두 번째 탭은 이미 바뀐 칩과 달라 버려진다.
-    private func handleCopiedPhotoTap(_ tapped: CopiedPhotoChip) {
-        // 빠른 두 번째 탭 — 첫 탭이 이미 칩을 바꿨고 화면도 갱신됐다. 그냥 버린다
-        guard let viewState, viewState.copiedPhoto == tapped else { return }
-        // F3 — 만료(120초)·설정 변화 등으로 더는 유효하지 않은 칩이면 **쓰지 않고 칩을 거둔다**
-        //      (가드에서 그냥 끝내면 반응 없는 칩이 다음 갱신까지 남았다 — 검증 F3)
-        guard Self.copiedPhoto.visibleChip(now: Date()) == tapped, hasFullAccess, settings.copiedPhotoHelperEnabled,
-              textDocumentProxy.isSecureTextEntry != true else {
-            updateSuggestionBar()
-            return
-        }
-        playToolbarHaptic()
-        autoreleasepool {
-            _ = Self.copiedPhoto.tap(pasteboard: copiedPhotoPasteboard, decoder: ImageIOCopiedPhotoDecoder(), now: Date())
-        }
-        updateSuggestionBar()
     }
 
     /// 빈손으로 끝난 읽기를 **정해진 횟수만** 다시 시도한다 (위 `pasteboardRetryDelays` 주석 참조).
@@ -1629,9 +1559,6 @@ final class KeyboardViewController: UIInputViewController {
             onPasteboardCodeTap: { [weak self] in
                 DispatchQueue.main.async { self?.handlePasteboardCodeTap() }
             },
-            onCopiedPhotoTap: { [weak self] chip in
-                DispatchQueue.main.async { self?.handleCopiedPhotoTap(chip) }
-            },
             onToolTap: { [weak self] tool in
                 DispatchQueue.main.async { self?.handleToolTap(tool) }
             },
@@ -1813,9 +1740,6 @@ final class KeyboardViewController: UIInputViewController {
 
     private func reloadSettingsIfChanged() {
         let latest = settingsRepository.load()
-        // 사진 도우미를 끄면(또는 전체 접근이 없으면) 미리보기·「복사됨」 표식을 **이 재로드에서** 비운다 — 사진 바이트는
-        // 원래 들고 있지 않다(B6). 키보드가 닫혀 있어 이 알림을 못 받았으면 다음 등장의 프로브가 비운다
-        Self.copiedPhoto.apply(enabled: latest.copiedPhotoHelperEnabled, hasFullAccess: hasFullAccess)
         guard latest != settings, let viewState else {
             settings = latest
             return
@@ -1827,7 +1751,6 @@ final class KeyboardViewController: UIInputViewController {
         viewState.keyboardHeight = keyboardAreaHeight
         viewState.showsKeyPreview = showsKeyPreview
         viewState.clipboardHistoryEnabled = latest.clipboardHistoryEnabled
-        if !latest.copiedPhotoHelperEnabled, viewState.copiedPhoto != nil { updateSuggestionBar() }
         if let inputController {
             // 자판 또는 타임아웃이 바뀌면 소스를 새로 만든다 (조합은 확정된다)
             if latest.activeHangulLayout != previous.activeHangulLayout
