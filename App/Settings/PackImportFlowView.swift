@@ -521,13 +521,20 @@ private struct PackImportPreviewSections: View {
             } header: {
                 Text(PackImportCopy.skipReasonsHeader)
             }
+            // 큰 글자에서 잘리지 않게 줄을 바꾼다(화면 확인 N-6)
             Section {
                 Button(action: onHowToFix) {
-                    Text(PackImportCopy.howToFix).frame(maxWidth: .infinity)
+                    Text(PackImportCopy.howToFix)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 Button(action: onPartial) {
-                    Text(PackImportCopy.importOnly(preview.importCount)).frame(maxWidth: .infinity)
+                    Text(PackImportCopy.importOnly(preview.importCount))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
             }

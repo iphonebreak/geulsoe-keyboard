@@ -115,6 +115,28 @@ struct UsageExampleTests {
         #expect(PackDetail.examples(of: pack, hidden: all).map(\.trigger) == ["회사주소", "새해인사", "회의실"])
     }
 
+    @Test("★ 화면 확인 N-2 — 번호형 예시는 이 팩이 쓰는 틀부터: 위 팩·단축어에 밀린 틀은 건너뛰고, 다 밀렸으면 대표 틀")
+    func numberedPrefersOwnedPattern() throws {
+        let first = try TemplatePatternSpec.parse("사자성어 {n}번").get()
+        let alias = try TemplatePatternSpec.parse("성어 {n}번").get()
+        let pack = ExternalPack(name: "예시", license: "자체", mode: .numbered, template: PackTemplate(
+            patterns: [first, alias], titleFormat: "사자성어 {n}번", items: [PackTemplateItem(n: 3, title: "제목", body: "본문")]))
+        func pattern(_ value: TemplatePattern, _ display: String, _ status: PackStanding.PatternStatus) -> PackStanding.Pattern {
+            PackStanding.Pattern(pattern: value, display: display, status: status)
+        }
+        let triggers = { (patterns: [PackStanding.Pattern]) in PackDetail.examples(of: pack, patterns: patterns).map(\.trigger) }
+        #expect(PackDetail.examples(of: pack) == [PackDetail.Example(trigger: "사자성어 3번", title: "제목")], "자리를 모르면 대표 틀")
+        #expect(triggers([pattern(first, "사자성어 {n}번", .owned(sharedWith: [])), pattern(alias, "성어{n}번", .owned(sharedWith: []))])
+                    == ["사자성어 3번"])
+        #expect(triggers([pattern(first, "사자성어 {n}번", .outranked(by: "a")), pattern(alias, "성어{n}번", .owned(sharedWith: []))])
+                    == ["성어3번"])
+        #expect(triggers([pattern(first, "사자성어 {n}번", .owned(sharedWith: [])), pattern(alias, "성어{n}번", .outranked(by: "a"))])
+                    == ["사자성어 3번"])
+        // 다 밀렸으면 그래도 보인다(문구형 O-1과 같다 — 사용법 절이 사라지지 않게, 상세의 틀 절이 이유를 말한다)
+        #expect(triggers([pattern(first, "사자성어 {n}번", .shadowed(by: ["번"])), pattern(alias, "성어{n}번", .outranked(by: "a"))])
+                    == ["사자성어 3번"])
+    }
+
     @Test("★ 저장소의 팩 상세 — 내 채움글이 먼저 뜨는 단축어는 예시 앞에 오지 않는다(U1 계산과 같은 입력)")
     func packDetailUsesStanding() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("o1-\(UUID().uuidString)", isDirectory: true)

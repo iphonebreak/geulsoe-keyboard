@@ -27,6 +27,9 @@ struct ExternalSnippetSection: View {
     /// 팩 상세에서 켬/끔·삭제를 했다 — 채움글 화면이 저장본을 다시 읽는다
     let onChange: @MainActor () -> Void
 
+    /// 「채움글 사용」을 끄면 채움글 화면이 이 절에 `.disabled`를 건다
+    @Environment(\.isEnabled) private var isEnabled
+
     var body: some View {
         Section {
             if !summaries.isEmpty {
@@ -47,9 +50,12 @@ struct ExternalSnippetSection: View {
                 }
                 Button(PackChangeNotice.Action.reorderPacks.label, action: onReorder)
             }
-            // 가져오기(4·5단계) — 3-A 첫 화면. 끝나면 새 팩이 목록 맨 아래에 강조된다
+            // 가져오기(4·5단계) — 3-A 첫 화면. 끝나면 새 팩이 목록 맨 아래에 강조된다.
+            // 색을 직접 준다 — `Label` 버튼은 꺼져도 글자가 검정·아이콘이 파랑으로 남아 켜진 줄처럼 보였다(화면 확인 N-4, S-2 잔여).
+            // 「채움글 추가」 등 옆 줄처럼 꺼지면 흐리게
             Button(action: onAdd) {
                 Label(PackNoticeCopy.addPack, systemImage: "plus")
+                    .foregroundStyle(isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
         } header: {
             Text(PackNoticeCopy.externalSectionTitle)

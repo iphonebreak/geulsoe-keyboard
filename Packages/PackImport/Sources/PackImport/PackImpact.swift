@@ -424,12 +424,19 @@ public struct PackDetail: Equatable, Sendable {
 
     public func name(of id: String) -> String { names[id] ?? PackNoticeCopy.unnamedPack }
 
-    /// - Parameter hidden: 위 줄에 밀려 지금 안 뜨는 단축어(정규화) — 문구형은 **지금 뜨는 단축어부터** 고른다(화면 확인 O-1: 안 뜨는 단축어를
-    ///   사용법으로 보이면 그대로 쳐도 이 팩 문구가 안 나온다). 항목 안에서도 안 밀린 단축어를 보이고, 다 밀린 항목은 뒤로 보낸다
-    static func examples(of pack: ExternalPack, hidden: Set<String> = []) -> [Example] {
+    /// 팩 상세·완료 화면(4-M)이 함께 쓴다 — 둘 다 `PackStore.packDetail`이 `PackStanding`으로 부른다(화면 확인 N-2).
+    /// - Parameters:
+    ///   - hidden: 위 줄에 밀려 지금 안 뜨는 단축어(정규화) — 문구형은 **지금 뜨는 단축어부터** 고른다(화면 확인 O-1: 안 뜨는 단축어를
+    ///     사용법으로 보이면 그대로 쳐도 이 팩 문구가 안 나온다). 항목 안에서도 안 밀린 단축어를 보이고, 다 밀린 항목은 뒤로 보낸다
+    ///   - patterns: 번호형 틀의 자리(`PackStanding.patterns`) — **이 팩이 쓰는(`owned`) 틀부터** 고른다(N-2 — 위 팩이 같은 틀을 가졌거나
+    ///     단축어가 가린 틀로 쳐도 이 팩 칩이 안 뜬다). 다 밀렸거나 자리를 모르면 대표 틀(첫 `#틀` 원문)
+    static func examples(of pack: ExternalPack, hidden: Set<String> = [], patterns: [PackStanding.Pattern] = []) -> [Example] {
         if let template = pack.template {
             guard let first = template.items.first else { return [] }
-            return [Example(trigger: template.titleFormat.replacingOccurrences(of: TemplatePatternSpec.placeholder, with: String(first.n)),
+            let owned = template.patterns.lazy.compactMap { pattern in patterns.first { $0.pattern == pattern } }
+                .first { if case .owned = $0.status { true } else { false } }
+            let format = owned?.display ?? template.titleFormat
+            return [Example(trigger: format.replacingOccurrences(of: TemplatePatternSpec.placeholder, with: String(first.n)),
                             title: template.title(for: first))]
         }
         let ranked = pack.entries.map { entry -> (example: Example, isShown: Bool) in

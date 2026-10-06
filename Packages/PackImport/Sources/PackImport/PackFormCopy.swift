@@ -82,12 +82,24 @@ public enum PackFormCopy {
         }
     }
 
-    /// 빨강 둘째 줄(예) — 시안이 예를 단 사유만
+    /// 빨강 둘째 줄(예) — 시안이 예를 단 사유만. **통과하는 입력(고친 예)**이다 — 날짜 끝말 예는 거부되는 「회차{n}시간」이었다가
+    /// 「회차{n}번」으로 고쳤다(화면 확인 N-3, 사장님 대리 결정 2026-10-06). 시험이 예마다 틀 검사를 통과하는지 본다
     public static func templateFailureExample(_ failure: TemplatePatternSpec.Failure) -> String? {
         switch failure {
         case .prefixTooShort: "예: 사자성어 {n}번"
-        case .reservedDateSuffix: "예: 회차{n}시간"
+        case .reservedDateSuffix: "예: 회차{n}번"
         default: nil
+        }
+    }
+
+    /// 틀 칸 상태 아이콘(✓·✕·⚠)의 VoiceOver 이름 — 기호 기본 이름(「선택됨」)으로 읽히지 않게(화면 확인 N-7). 풋터 「빨간 표시가 있으면
+    /// 가져올 수 없어요. 주황 표시는 알림이에요.」와 같은 말. 빈 칸·검사 전은 아이콘이 없다(nil)
+    public static func templateStatusLabel(_ status: PackTemplateReview.Status) -> String? {
+        switch status {
+        case .ok: "통과"
+        case .invalid: "가져올 수 없음"
+        case .outranked, .shadowed: "알림"
+        case .empty: nil
         }
     }
 

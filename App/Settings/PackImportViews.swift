@@ -46,11 +46,19 @@ struct PackImportStartView: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+                    // 아이콘·글자를 직접 놓는다 — `Label`은 목록 행에서 아이콘이 강조색(버튼 바탕과 같은 색)으로 칠해져 평소엔 안 보이면서
+                    // 자리만 차지했고, 큰 글자에서 글자가 「CSV 파」에서 잘렸다(화면 확인 N-6). 글자는 줄을 바꿔 다 보인다
                     Button {
                         showsImporter = true
                     } label: {
-                        Label(PackImportCopy.pickFile, systemImage: "folder")
-                            .frame(maxWidth: .infinity)
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder")
+                                .accessibilityHidden(true)
+                            Text(PackImportCopy.pickFile)
+                                .multilineTextAlignment(.center)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -275,9 +283,11 @@ struct PackPasteView: View {
     var body: some View {
         Form {
             Section {
+                // 높이 상한 — 넘는 글은 칸 안에서 스크롤한다. 상한이 없으면 칸이 글 길이만큼 늘어 3MB 글이면 화면이 516쪽이 되고
+                // 아래 개요 줄·「모두 지우기」·「붙여넣기」·「읽기」에 닿으려면 끝까지 내려야 했다(화면 확인 N-5)
                 TextEditor(text: $text)
                     .font(.callout.monospaced())
-                    .frame(minHeight: 250)
+                    .frame(minHeight: 250, maxHeight: 360)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                 if !text.isEmpty {

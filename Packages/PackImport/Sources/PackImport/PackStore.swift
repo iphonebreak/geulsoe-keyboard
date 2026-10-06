@@ -204,10 +204,11 @@ public final class PackStore: @unchecked Sendable {
         queue.sync {
             guard let made = makeImpactLibrary(keeping: id), let pack = made.library.pack(id) else { return nil }
             let standing = PackImpact.standing(of: id, in: made.library)
-            // 사용법 예시는 지금 뜨는 단축어부터(O-1) — 「지금 안 뜨는 단축어」 절과 같은 계산
+            // 사용법 예시는 지금 뜨는 단축어·이 팩이 쓰는 틀부터(O-1·N-2) — 「지금 안 뜨는 단축어」·「단축어 틀」 절과 같은 계산.
+            // 가져오기 완료 화면(4-M)도 저장 뒤 이 값을 그대로 쓴다(`PackImportConfirmation.perform`)
             let hidden = Set(standing?.hiddenTriggers.map { SnippetEntry.normalizedTrigger($0.trigger) } ?? [])
             return PackDetail(summary: pack.summary, license: made.kept?.license,
-                              examples: made.kept.map { PackDetail.examples(of: $0, hidden: hidden) } ?? [],
+                              examples: made.kept.map { PackDetail.examples(of: $0, hidden: hidden, patterns: standing?.patterns ?? []) } ?? [],
                               standing: standing,
                               names: Dictionary(made.library.packs.map { ($0.id, made.library.name(of: $0.id)) },
                                                 uniquingKeysWith: { first, _ in first }))

@@ -83,12 +83,12 @@ private func filledForm(_ draft: PackDraft, name: String? = nil) -> PackImportFo
     return form
 }
 
-/// 메인 밖 확정을 끝까지 — `perform` 결과를 상태기계에 돌려준다
+/// 메인 밖 확정을 끝까지 — `perform` 결과를 그 일과 함께 상태기계에 돌려준다(화면 `PackImportFormView.run`과 같은 길)
 private func run(_ confirmation: inout PackImportConfirmation, _ work: PackImportConfirmation.Work?,
                  client: PackStoreClient) async throws {
     let work = try #require(work)
     let result = await PackImportConfirmation.perform(work, client: client)
-    let received = confirmation.receive(result)
+    let received = confirmation.receive(result, for: work)
     #expect(received)
 }
 
@@ -479,6 +479,97 @@ struct PackImportConfirmationTransitionTests {
         #expect(closed == nil)
     }
 
+    /// 저장소 없이 만든 「받음」 결과
+    private func accepted(packID: String = "new") -> PackImportConfirmation.Result {
+        let evaluation = ActivePackBudget.evaluate(baseline: .zero, packs: [], limits: .candidate)
+        let result = PackStore.CommitResult.accepted(PackStore.Accepted(revision: 8, packID: packID, newlyExcluded: [],
+                                                                        evaluation: evaluation, rechecked: false))
+        return .committed(PackChangeOutcome(result: result, notice: nil), compiled: nil)
+    }
+
+    /// D1 거부 알림이 떠 있는 확정 흐름 — 「꺼 둔 채로 가져오기」가 열려 있다
+    private func rejectedD1(_ draft: PackDraft) throws -> PackImportConfirmation {
+        var confirmation = PackImportConfirmation(draft: draft, library: nil)
+        _ = try required(confirmation.confirm(filledForm(draft, name: "새 팩")))
+        let result = PackStore.CommitResult.rejected(.gate(.packExcluded(id: "x", dimensions: [.needleChars])), rechecked: false)
+        let notice = PackChangeNotice(.importPack, result: result, userSnippetsOverLimit: { false }, packName: { _ in nil })
+        confirmation.receive(.committed(PackChangeOutcome(result: result, notice: notice), compiled: nil))
+        return confirmation
+    }
+
+    @Test("★ 화면 확인 N-1 — 「꺼 둔 채로」 저장이 받아지면 완료(4-M) — 알림 닫힘·버튼 동작이 어떤 순서로 와도, 닫힘이 옛 값으로 되써도")
+    func importDisabledCompletesInAnyOrder() throws {
+        let draft = try phrasesDraft()
+        // ① 동작 → 닫힘
+        var actionFirst = try rejectedD1(draft)
+        let work1 = try required(actionFirst.importDisabled())
+        actionFirst.dismissNotice()
+        #expect(actionFirst.phase == .working, "일하는 중에는 닫힘이 폼으로 되돌리지 않는다")
+        let received1 = actionFirst.receive(accepted(), for: work1)
+        #expect(received1)
+        // ② 닫힘 → 동작(SwiftUI 알림은 순서를 보장하지 않는다 — 5단계 보고)
+        var dismissFirst = try rejectedD1(draft)
+        dismissFirst.dismissNotice()
+        let work2 = try required(dismissFirst.importDisabled())
+        let received2 = dismissFirst.receive(accepted(), for: work2)
+        #expect(received2)
+        // ③ 닫힘이 **동작 전에 읽은 값**에 `dismissNotice`를 해서 통째로 되쓴다(바인딩의 읽고-고쳐-쓰기) — 화면 확인 N-1의 증상:
+        //    저장은 됐는데 단계가 폼(editing)으로 돌아가 결과를 버렸다
+        var overwritten = try rejectedD1(draft)
+        let stale = overwritten
+        let work3 = try required(overwritten.importDisabled())
+        overwritten = stale
+        overwritten.dismissNotice()
+        #expect(overwritten.phase == .editing, "되써진 값은 일을 시작한 적이 없는 폼이다")
+        let received3 = overwritten.receive(accepted(), for: work3)
+        #expect(received3, "그래도 저장소가 받았다 — 완료로 간다")
+
+        for confirmation in [actionFirst, dismissFirst, overwritten] {
+            let completion = try #require(confirmation.completion)
+            #expect(completion.kind == .importedDisabled && !completion.isEnabled && completion.packID == "new")
+            #expect(PackFormCopy.doneTitle(completion.kind) == "꺼 둔 채로 가져왔어요")
+            #expect(!confirmation.hasDraft, "원본(초안)을 비운다 — 일반 가져오기와 같은 완료")
+        }
+    }
+
+    @Test("★ 화면 확인 N-1 ② — 완료한 흐름은 다시 저장하지 않는다(가져오기·꺼 둔 채로·바꾸기·늦게 온 두 번째 결과 모두 무시)")
+    func completedFlowStartsNoWork() throws {
+        let draft = try phrasesDraft()
+        var confirmation = try rejectedD1(draft)
+        let work = try required(confirmation.importDisabled())
+        confirmation.receive(accepted(), for: work)
+        let done = try #require(confirmation.completion)
+
+        let reconfirmed = confirmation.confirm(filledForm(draft, name: "새 팩"))
+        let disabledAgain = confirmation.importDisabled()
+        let replaced = confirmation.chooseReplace()
+        #expect(reconfirmed == nil && disabledAgain == nil && replaced == nil)
+        confirmation.dismissNotice()
+        confirmation.cancelSameName()
+        confirmation.chooseSeparate()
+        let secondAccepted = confirmation.receive(accepted(packID: "again"), for: work)
+        let lateFailure = confirmation.receive(.compileFailed(.nameMissing), for: work)
+        let currentAccepted = confirmation.receive(accepted(packID: "again"))
+        #expect(!secondAccepted && !lateFailure && !currentAccepted)
+        #expect(confirmation.completion == done && !confirmation.focusesName)
+    }
+
+    @Test("거부·최종 검사 실패는 지금 하는 일의 결과만 받는다 — 되써진 폼에 늦은 거부가 알림을 띄우지 않는다")
+    func rejectionOfAnotherWorkIsDropped() throws {
+        let draft = try phrasesDraft()
+        var confirmation = try rejectedD1(draft)
+        let stale = confirmation
+        let work = try required(confirmation.importDisabled())
+        confirmation = stale
+        confirmation.dismissNotice()
+        let tooMany = PackStore.CommitResult.rejected(.gate(.tooManyPacks), rechecked: false)
+        let notice = PackChangeNotice(.importDisabledPack, result: tooMany, userSnippetsOverLimit: { false }, packName: { _ in nil })
+        let rejected = confirmation.receive(.committed(PackChangeOutcome(result: tooMany, notice: notice), compiled: nil), for: work)
+        let failed = confirmation.receive(.compileFailed(.nameMissing), for: work)
+        #expect(!rejected && !failed)
+        #expect(confirmation.phase == .editing && confirmation.formFailure == nil)
+    }
+
     @Test("거부 알림을 닫으면 폼으로 — 같은 폼을 다시 확정할 수 있다")
     func dismissNotice() throws {
         let draft = try phrasesDraft()
@@ -591,6 +682,62 @@ struct PackImportCommitStoreTests {
         try await run(&confirmation, confirmation.importDisabled(), client: store.client)
         #expect(confirmation.completion?.kind == .importedDisabled)
         #expect(store.store.summaries().map(\.isEnabled) == [false])
+    }
+
+    @Test("★ 화면 확인 N-1 — D1 「꺼 둔 채로」: 알림 닫힘이 옛 값으로 되써도 완료(꺼짐·맨 아래), 완료 뒤 다시 눌러도 같은 팩이 또 생기지 않는다")
+    func d1ImportDisabledSurvivesStaleDismiss() async throws {
+        let store = Store(limits: tight)
+        defer { store.cleanup() }
+        _ = await store.client.importPack(phrasesPack("큰 팩", prefix: string(18, "큰"), count: 10), source: .csv)
+        let draft = try phrasesDraft()
+        let form = filledForm(draft, name: "새 팩")
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)
+        try await run(&confirmation, confirmation.confirm(form), client: store.client)
+        #expect(confirmation.notice?.actions == [.importDisabled])
+
+        let stale = confirmation
+        let work = try required(confirmation.importDisabled())
+        confirmation = stale
+        confirmation.dismissNotice()
+        let result = await PackImportConfirmation.perform(work, client: store.client)
+        let received = confirmation.receive(result, for: work)
+        #expect(received)
+        let completion = try #require(confirmation.completion)
+        #expect(completion.kind == .importedDisabled && !completion.isEnabled)
+
+        // 화면 확인 재현 — 예전에는 폼이 남아 「가져오기」 → D1 → 「꺼 둔 채로」가 같은 이름 팩을 하나 더 만들었다
+        let reconfirmed = confirmation.confirm(form)
+        let disabledAgain = confirmation.importDisabled()
+        #expect(reconfirmed == nil && disabledAgain == nil)
+        let summaries = store.store.summaries()
+        #expect(summaries.map(\.name) == ["큰 팩", "새 팩"])
+        #expect(summaries.last?.id == completion.packID && summaries.last?.isEnabled == false)
+    }
+
+    @Test("★ 화면 확인 N-2 — 완료 화면 「이렇게 써 보세요」는 팩 상세와 같은 계산 — 문구형은 지금 뜨는 단축어부터(O-1)")
+    func completionExamplesFollowDetailPhrases() async throws {
+        let store = Store(user: [SnippetEntry(trigger: "회사주소", title: "내 주소", body: "내 본문")])
+        defer { store.cleanup() }
+        let draft = try phrasesDraft()
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)
+        try await run(&confirmation, confirmation.confirm(filledForm(draft, name: "새 팩")), client: store.client)
+        let completion = try #require(confirmation.completion)
+        #expect(completion.examples.map(\.trigger) == ["새해인사", "회사주소"], "내 채움글이 먼저 뜨는 「회사주소」는 뒤로")
+        #expect(completion.examples == store.store.packDetail(completion.packID)?.examples)
+    }
+
+    @Test("★ 화면 확인 N-2 — 번호형은 이 팩이 쓰는 틀부터 — 위 팩이 대표 틀을 가지면 별칭으로(팩 상세와 같다)")
+    func completionExamplesFollowDetailNumbered() async throws {
+        let store = Store()
+        defer { store.cleanup() }
+        _ = await store.client.importPack(numberedPack("앞 팩", template: "사자성어 {n}번"), source: .csv)
+        let draft = try numberedDraft()
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)
+        try await run(&confirmation, confirmation.confirm(filledForm(draft, name: "뒤 팩")), client: store.client)
+        let completion = try #require(confirmation.completion)
+        // 별칭 「성어 {n}번」은 정규화 모양으로 저장돼 있다(화면 확인 O-5 — 상세의 틀 절과 같은 모양). 띄어쓰기는 매칭이 보지 않는다
+        #expect(completion.examples == [PackDetail.Example(trigger: "성어1번", title: "예시 제목 하나")])
+        #expect(completion.examples == store.store.packDetail(completion.packID)?.examples)
     }
 
     @Test("★ D3 — 팩이 너무 많다(꺼 둔 팩도 센다): 「꺼 둔 채로」 없음 · 확인")
@@ -775,6 +922,7 @@ var stage5Copy: [String] {
     texts += PackImportForm.LicenseChoice.allCases.map(PackFormCopy.licenseLabel)
     texts += [PackImportCompletion.Kind.imported, .importedDisabled, .replaced].map(PackFormCopy.doneTitle)
     texts += allPatternFailures.flatMap { [PackFormCopy.templateFailure($0), PackFormCopy.templateFailureExample($0)].compactMap { $0 } }
+    texts += allReviewStatuses.compactMap(PackFormCopy.templateStatusLabel)
     texts += allCompileFailures.map(PackFormCopy.compileFailure)
     let names = ["예시 번호 팩 2": "예시 번호 팩 2"]
     texts += [PackTemplateReview.Status.outranked(by: "예시 번호 팩 2"),
@@ -793,12 +941,17 @@ private let allPatternFailures: [TemplatePatternSpec.Failure] = [
     .reservedDateSuffix, .literalTooLong, .collidesWithBible(n: 51)
 ]
 
+/// 틀 칸 상태 전부(빈 칸·빨강·통과·주황 둘)
+private let allReviewStatuses: [PackTemplateReview.Status] = [
+    .empty, .invalid(.prefixTooShort), .ok, .outranked(by: "a"), .shadowed(triggers: ["장"], owner: .userSnippets)
+]
+
 private let allCompileFailures: [PackCompileFailure] = [
     .nameMissing, .nameTooLong, .licenseMissing, .licenseTooLong, .templateRequired, .templateNotAllowed, .tooManyPatterns,
     .pattern(index: 0, .prefixTooShort), .noValidRecords
 ]
 
-/// 숫자 허용 — 시안 예시(사자성어 {n}번 · 회차{n}시간)와 **필드 상한**(이름 40자 · 권리 120자 · 틀 literal 40자 · 틀+번호 48자 ·
+/// 숫자 허용 — 시안 예시(사자성어 {n}번 · 회차{n}번)와 **필드 상한**(이름 40자 · 권리 120자 · 틀 literal 40자 · 틀+번호 48자 ·
 /// 틀 8개 · 앞 글자 2자)뿐. 개수 표시(37개)는 시험 값. 예산 한도(R2) 숫자는 여기에 없다
 private let stage5AllowedNumbers = ["40자까지", "120자까지", "48자 이내", "8개까지", "2자 이상", "37개", "예시 번호 팩 2", "업무 상용구 A"]
 
@@ -820,6 +973,7 @@ struct PackFormCopyTests {
         #expect(PackFormCopy.templateFailure(.prefixTooShort) == "앞 글자가 2자 이상이어야 해요")
         #expect(PackFormCopy.templateFailureExample(.prefixTooShort) == "예: 사자성어 {n}번")
         #expect(PackFormCopy.templateFailure(.reservedDateSuffix) == "「날짜」「시간」「시각」으로 끝나면 날짜 채움글과 겹쳐요")
+        #expect(PackFormCopy.templateFailureExample(.reservedDateSuffix) == "예: 회차{n}번", "화면 확인 N-3 — 거부되는 「회차{n}시간」이 아니라 통과하는 예")
         #expect(PackFormCopy.reviewTitle(.outranked(by: "a"), name: { _ in "예시 번호 팩 2" }) == "「예시 번호 팩 2」도 이 틀을 써요")
         #expect(PackFormCopy.reviewDetail(.outranked(by: "a"), replacing: false, name: { _ in "예시 번호 팩 2" })
                     == "새 팩은 목록 맨 아래에 붙어서 위에 있는 「예시 번호 팩 2」가 이 틀을 가져요.")
@@ -830,6 +984,29 @@ struct PackFormCopyTests {
                     == "「사자성어 예시 팩」이 이미 있어요. 바꾸면 목록 자리와 켬/끔은 그대로고 내용만 새 파일로 바뀌어요.")
         #expect(PackFormCopy.doneSummary(name: "사자성어 예시 팩", count: 641) == "「사자성어 예시 팩」 · 641개")
         #expect(PackFormCopy.skippedLine(4) == "건너뛴 4개는 가져오지 않았어요.")
+    }
+
+    @Test("★ 화면 확인 N-3 — 빨강 아래 「예:」 줄은 **통과하는 입력**이다(고친 예) — 그 사유로 다시 거부되면 실패")
+    func failureExamplesPass() throws {
+        var checked = 0
+        for failure in allPatternFailures {
+            guard let example = PackFormCopy.templateFailureExample(failure) else { continue }
+            let spec = try #require(example.hasPrefix("예: ") ? String(example.dropFirst(3)) : nil, "\(example)")
+            #expect((try? TemplatePatternSpec.parse(spec).get()) != nil, "\(failure) — \(example)")
+            checked += 1
+        }
+        #expect(checked == 2, "예를 단 사유는 앞 글자 짧음·날짜 끝말 둘")
+        #expect(TemplatePatternSpec.parse("회차{n}시간") == .failure(.reservedDateSuffix), "옛 예는 바로 그 사유로 거부되는 입력이었다")
+    }
+
+    @Test("★ 화면 확인 N-7 — 틀 칸 상태 아이콘의 VoiceOver 이름(기호 기본 이름 「선택됨」 대신) — 빨강·통과·주황이 서로 다르다")
+    func templateStatusLabels() {
+        #expect(PackFormCopy.templateStatusLabel(.ok) == "통과")
+        #expect(PackFormCopy.templateStatusLabel(.invalid(.prefixTooShort)) == "가져올 수 없음")
+        #expect(PackFormCopy.templateStatusLabel(.outranked(by: "a")) == "알림")
+        #expect(PackFormCopy.templateStatusLabel(.shadowed(triggers: ["장"], owner: nil)) == "알림")
+        #expect(PackFormCopy.templateStatusLabel(.empty) == nil, "빈 칸은 아이콘이 없다")
+        #expect(!allReviewStatuses.compactMap(PackFormCopy.templateStatusLabel).contains("선택됨"))
     }
 
     @Test("★ 숫자는 필드 상한·시안 예시뿐 — 예산 한도 숫자 0")

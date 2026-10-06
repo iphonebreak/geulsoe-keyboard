@@ -87,17 +87,20 @@ struct PackImportFormView: View {
         } message: { existing in
             Text(PackFormCopy.sameNameMessage(existing.name ?? PackNoticeCopy.unnamedPack))
         }
-        // 4-J 등 거부 — D1 「꺼 둔 채로 가져오기」·닫기, D2 정리하기·꺼 둔 채로·닫기, D3 확인
-        .packChangeNoticeAlert(noticeBinding, in: .importFlow) { action in
+        // 4-J 등 거부 — D1 「꺼 둔 채로 가져오기」·닫기, D2 정리하기·꺼 둔 채로·닫기, D3 확인.
+        // U3처럼 **버튼마다 상태를 한 번 옮기고 닫힘 바인딩은 아무것도 하지 않는다**(화면 확인 N-1 — 아래 `noticeBinding`)
+        .packChangeNoticeAlert(noticeBinding, in: .importFlow, onDismiss: { confirmation.dismissNotice() }) { action in
             switch action {
-            case .importDisabled: run(confirmation.importDisabled())
+            case .importDisabled:
+                if let work = confirmation.importDisabled() { run(work) } else { confirmation.dismissNotice() }
             case .organize:
                 confirmation.dismissNotice()
                 onOrganize()
             case .recoverLibrary:
                 confirmation.dismissNotice()
                 showsRecovery = true
-            default: break
+            default:
+                confirmation.dismissNotice()
             }
         }
         .packLibraryRecovery(isPresented: $showsRecovery, onFinish: onLibraryChanged)
@@ -210,17 +213,20 @@ struct PackImportFormView: View {
         return nil
     }
 
+    /// 칸 상태 아이콘 — VoiceOver 이름은 문구 표(`PackFormCopy.templateStatusLabel` 「통과」·「가져올 수 없음」·「알림」). 숨겨 두면 칸 행이
+    /// 하나로 합쳐지지 않을 때(입력칸이 든 행) 기호 기본 이름 「선택됨」으로 읽혔다(화면 확인 N-7)
     @ViewBuilder
     private func statusIcon(_ status: PackTemplateReview.Status?) -> some View {
-        switch status {
-        case .ok?:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityHidden(true)
-        case .invalid?:
-            Image(systemName: "xmark.circle.fill").foregroundStyle(.red).accessibilityHidden(true)
-        case .outranked?, .shadowed?:
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).accessibilityHidden(true)
-        case .empty?, nil:
-            EmptyView()
+        if let status, let label = PackFormCopy.templateStatusLabel(status) {
+            Group {
+                switch status {
+                case .ok: Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                case .invalid: Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
+                case .outranked, .shadowed: Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                case .empty: EmptyView()
+                }
+            }
+            .accessibilityLabel(label)
         }
     }
 
@@ -310,21 +316,22 @@ struct PackImportFormView: View {
         }
     }
 
-    /// 거부 알림 — 닫히면 폼으로. 버튼 동작이 이미 상태를 옮겼으면(꺼 둔 채로 가져오는 중) 아무것도 하지 않는다
+    /// 거부 알림 — 보이는지는 단계가 정하고, **닫힘(set)은 아무것도 하지 않는다**(U3 알림과 같다). 닫기·동작 버튼이 각자 상태를 옮긴다.
+    /// ★ 화면 확인 N-1 — 예전에는 여기서 `dismissNotice()`를 불렀는데, 이 바인딩은 확정 흐름 값을 통째로 읽고-고쳐-쓴다. 알림 버튼 동작
+    /// (「꺼 둔 채로」 → `working`) 뒤에 닫힘이 **동작 전에 읽은 값**으로 되쓰면 단계가 폼으로 돌아가 저장 결과를 버렸고, 폼에 남은 채
+    /// 다시 누르면 같은 이름 팩이 하나 더 생겼다(재현 3회). 결과는 이제 그 일과 함께 받아(`receive(_:for:)`) 순서와 상관없이 완료로 간다
     private var noticeBinding: Binding<PackChangeNotice?> {
         Binding(get: {
             if case .rejected(let notice) = confirmation.phase { return notice }
             return nil
-        }, set: { value in
-            if value == nil { confirmation.dismissNotice() }
-        })
+        }, set: { _ in })
     }
 
     private func run(_ work: PackImportConfirmation.Work?) {
         guard let work else { return }
         Task {
             let result = await PackImportConfirmation.perform(work, client: .live)
-            confirmation.receive(result)
+            confirmation.receive(result, for: work)
         }
     }
 
@@ -404,7 +411,10 @@ struct PackImportCompletionSections: View {
 
         Section {
             Button(action: onBack) {
+                // 큰 글자에서 잘리지 않게 줄을 바꾼다(화면 확인 N-6)
                 Text(PackFormCopy.backToSnippets)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
