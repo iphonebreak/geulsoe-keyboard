@@ -192,6 +192,13 @@ public enum PackImporter {
         throw .headerNotRecognized
     }
 
+    /// 붙여넣기 화면의 「칸 나누기: 탭」(시안 3-E) — 같은 후보 시험(5-2)으로 **하나로 정해질 때만** 그 구분자. 앞 레코드(시험 창)만 본다.
+    /// 보여 주기용이다 — 실제 읽기는 「읽기」를 누른 뒤 `read(text:)`가 처음부터 다시 판정한다
+    public static func likelyDelimiter(_ text: String) -> CSVDelimiter? {
+        guard !containsOnlySeparators(text), let adopted = try? adoptDelimiters(text), adopted.count == 1 else { return nil }
+        return adopted.first
+    }
+
     /// 빈 텍스트이거나 구분자 후보(`,`·`;`·탭)와 줄바꿈만 있다 — 공백 글자는 내용이다(빈 셀이 아니다, 5-4 명확화 ②)
     private static func containsOnlySeparators(_ text: String) -> Bool {
         text.utf8.allSatisfy { byte in

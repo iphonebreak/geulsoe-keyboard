@@ -158,7 +158,7 @@ public enum PackNoticeCopy {
     // MARK: - 외부 채움글 절 (2-B·2-C) — 3단계. 글자는 시안 `docs/design/external-snippet-packs/index.html` 2절 그대로
 
     public static let externalSectionTitle = "외부 채움글"
-    /// 가져오기 입구 — 3단계는 자리만(눌리지 않는다, 코디네이터 결정 ⓐ). 4단계가 연결한다
+    /// 가져오기 입구 — 4단계가 3-A 첫 화면(`PackImportStartView`)으로 연결했다. 그 화면의 제목이기도 하다
     public static let addPack = "외부 채움글 추가"
     /// 2-B 빈 상태 — **CSV 전용판**(AC-35, R12: 1.3.0은 CSV만)
     public static let emptyListFooter = "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요."

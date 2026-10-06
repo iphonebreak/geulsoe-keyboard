@@ -8,7 +8,7 @@ import TadakDomain
 //
 // 쓰기·판정은 전부 `PackStoreClient`(메인 밖, 1-c G8) → `PackStore` 한 길이다 — 켬/끔 스위치도 내장 팩 스위치와 같은 커밋 게이트를 탄다(AC-6).
 // 문구는 전부 `PackNoticeCopy`(U6·금칙어·한도 숫자 검사가 `swift test`로 돈다). 팩 이름·단축어·권리 표기는 사용자 입력이다 —
-// **화면에 표시만** 하고 로그·분석 이벤트로 내보내지 않는다(보안 규칙). 가져오기는 4단계다 — 이 단계는 「외부 채움글 추가」 줄의 자리만 둔다.
+// **화면에 표시만** 하고 로그·분석 이벤트로 내보내지 않는다(보안 규칙). 「외부 채움글 추가」 줄은 가져오기 입구(4단계, `PackImportViews.swift`)로 간다.
 
 // MARK: - 채움글 화면의 절 (2-B · 2-C)
 
@@ -40,11 +40,12 @@ struct ExternalSnippetSection: View {
                 }
                 Button(PackChangeNotice.Action.reorderPacks.label, action: onReorder)
             }
-            // 가져오기는 4단계가 연결한다 — 지금은 자리만(눌리지 않는 줄, 코디네이터 결정 ⓐ)
-            Button {} label: {
+            // 가져오기(4단계) — 3-A 첫 화면. 확정(저장)은 5단계라 아직 목록이 바뀌지 않는다
+            NavigationLink {
+                PackImportStartView()
+            } label: {
                 Label(PackNoticeCopy.addPack, systemImage: "plus")
             }
-            .disabled(true)
         } header: {
             Text(PackNoticeCopy.externalSectionTitle)
         } footer: {
