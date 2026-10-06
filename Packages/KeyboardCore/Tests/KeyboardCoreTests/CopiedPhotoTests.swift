@@ -133,14 +133,14 @@ private final class PhotoHarness {
 @Suite("사진 도우미 — 등장 프로브 (수용 기준 1·B2~B5)")
 struct CopiedPhotoProbeTests {
 
-    @Test("★ 사진을 복사하고 키보드가 뜨면 썸네일 「사진 복사」 칩 — 바이트는 한 번 읽고 원본은 들고 있지 않는다")
+    @Test("★ 사진을 복사하고 키보드가 뜨면 썸네일 「복사한 사진」 칩 — 바이트는 한 번 읽고 원본은 들고 있지 않는다")
     func probeShowsCopyableChip() throws {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
         #expect(harness.appear() == .chip)
         let chip = try #require(harness.chip())
         #expect(chip.stage == .copyable)
-        #expect(chip.title == "사진 복사")
+        #expect(chip.title == "복사한 사진", "B7 — 탭 전은 무엇인지만(눌러도 바로 붙지 않는다)")
         #expect(harness.pasteboard.dataReads == 1)
         #expect(harness.decoder.calls == ["size", "thumbnail"], "★ 화소 수를 본 뒤에만 디코드한다(B2)")
         #expect(!containsBytes(harness.helper), "프로브는 원본 바이트를 버리고 썸네일만 든다(B5·B6)")
@@ -339,7 +339,7 @@ struct CopiedPhotoGateTests {
 @Suite("사진 도우미 — 탭 → 되쓰기 (수용 기준 3·4·7·8, 보안 규칙 예외 1~3)")
 struct CopiedPhotoWriteTests {
 
-    @Test("★ 탭 → setItems 한 번, localOnly 참·만료 120초가 항상 붙는다 → 칩이 「복사됨 · …」")
+    @Test("★ 탭 → setItems 한 번, localOnly 참·만료 120초가 항상 붙는다 → 칩이 「길게 눌러 붙여넣기」")
     func tapWritesLocalOnlyWithExpiration() throws {
         let harness = PhotoHarness()
         harness.pasteboard.copy(image: "public.png", bytes: 2_000)
@@ -354,7 +354,7 @@ struct CopiedPhotoWriteTests {
         #expect(write.data.count == 2_000, "같은 압축 바이트를 그대로 되쓴다")
         let chip = try #require(harness.chip())
         #expect(chip.stage == .copied)
-        #expect(chip.title == "복사됨 · 사진 붙여넣기를 지원하는 입력란에서 길게 눌러 붙여넣기")
+        #expect(chip.title == "길게 눌러 붙여넣기", "B7 — 탭 뒤는 할 일 하나(잘리지 않는 길이)")
         #expect(harness.pasteboard.dataReads == 2, "탭에서 다시 읽는다(프로브는 원본을 버렸다)")
     }
 
@@ -403,7 +403,7 @@ struct CopiedPhotoWriteTests {
         #expect(harness.pasteboard.writes.count == 1)
     }
 
-    @Test("★ 다른 것을 복사하면 「복사됨」을 버리고 새 사진은 「사진 복사」부터 (수용 기준 4)")
+    @Test("★ 다른 것을 복사하면 「복사됨」을 버리고 새 사진은 「복사한 사진」부터 (수용 기준 4)")
     func newCopyReplaces() throws {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
@@ -460,7 +460,7 @@ struct CopiedPhotoWriteTests {
         #expect(harness.chip() == nil)
     }
 
-    @Test("★ 같은 형식의 **다른 사진**으로 바뀐 뒤 「사진 복사」 탭 — 쓰지 않는다(새 사진에 120초 만료를 붙이지 않는다, M18)")
+    @Test("★ 같은 형식의 **다른 사진**으로 바뀐 뒤 「복사한 사진」 탭 — 쓰지 않는다(새 사진에 120초 만료를 붙이지 않는다, M18)")
     func sameTypeDifferentPhotoTapDoesNotWrite() {
         let harness = PhotoHarness()
         harness.pasteboard.copy(image: "public.jpeg", fill: 1)
@@ -569,10 +569,10 @@ struct CopiedPhotoToolbarTests {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
         harness.appear()
-        #expect(try #require(harness.chip()).accessibilityLabel == "복사한 사진, 탭하면 붙여넣을 수 있게 클립보드에 다시 담아요")
+        #expect(try #require(harness.chip()).accessibilityLabel == "복사한 사진. 탭하면 붙여넣을 수 있게 준비해요")
         harness.tap()
         #expect(try #require(harness.chip()).accessibilityLabel
-                == "사진을 클립보드에 담았어요. 사진 붙여넣기를 지원하는 입력란에서 길게 눌러 붙여넣으세요")
+                == "사진 붙여넣기 준비 완료. 입력란을 길게 눌러 붙여넣기를 고르세요")
     }
 }
 

@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 // 복사한 사진 도우미 (v1.3.0 ④ B) — PDR `docs/design-reviews/clipboard-image-history.md`(확정 결정 B1~B5).
 //
-// 클립보드에 사진이 있으면 툴바 붙여넣기 칩 자리에 썸네일 「사진 복사」 칩을 띄우고, 탭하면 그 사진을 클립보드에
+// 클립보드에 사진이 있으면 툴바 붙여넣기 칩 자리에 썸네일 「복사한 사진」 칩을 띄우고, 탭하면 그 사진을 클립보드에
 // **다시 쓴다**(`localOnly`·만료 120초) — 사용자가 입력란을 길게 눌러 iOS 기본 붙여넣기로 넣게 한다.
 //
 // 판단은 전부 여기 있다(익스텐션 타깃은 `swift test`가 닿지 않는다). 조립 지점은 `UIPasteboard.general`을
@@ -114,9 +114,9 @@ public struct CopiedPhotoThumbnail: Equatable {
 /// 툴바 사진 칩 — 붙여넣기 칩 자리를 텍스트·인증번호 칩과 나눠 쓴다(PDR 1-2).
 public struct CopiedPhotoChip: Equatable {
     public enum Stage: Equatable, Sendable {
-        /// 「사진 복사」 — 클립보드에 사진이 있다. 탭하면 되쓴다
+        /// 「복사한 사진」 — 클립보드에 사진이 있다. 탭하면 되쓴다
         case copyable
-        /// 「복사됨 · …」 — 되썼다. 만료(120초)까지 보인다
+        /// 「길게 눌러 붙여넣기」 — 되썼다. 만료(120초)까지 보인다
         case copied
     }
 
@@ -128,19 +128,21 @@ public struct CopiedPhotoChip: Equatable {
         self.thumbnail = thumbnail
     }
 
-    /// 칩 글자 — 문구는 PDR 1-2 흐름 3·4번(반론자2 문구)
+    /// 칩 글자 — **안내형, 짧게**(B7, 2026-10-06 실기 확인). 옛 「사진 복사」는 누르면 붙여넣어지는 줄 알게 했고,
+    /// 옛 「복사됨 · 사진 붙여넣기를 지원하는 입력란에서 길게 눌러 붙여넣기」는 칩에서 잘려 앞부분만 보였다(F6).
+    /// 탭 전은 **무엇인지**, 탭 뒤는 **할 일 하나**만 말한다 — 키보드가 사진을 직접 넣는 API는 없어 붙여넣기는 사용자 몫이다.
     public var title: String {
         switch stage {
-        case .copyable: "사진 복사"
-        case .copied: "복사됨 · 사진 붙여넣기를 지원하는 입력란에서 길게 눌러 붙여넣기"
+        case .copyable: "복사한 사진"
+        case .copied: "길게 눌러 붙여넣기"
         }
     }
 
-    /// VoiceOver — 화면에서 잘려도 무엇을 하는지 끝까지 읽는다
+    /// VoiceOver — 화면 글자가 짧은 대신 **뜻을 풀어** 읽는다(탭하면 무엇이 되는지, 그다음 무엇을 하는지)
     public var accessibilityLabel: String {
         switch stage {
-        case .copyable: "복사한 사진, 탭하면 붙여넣을 수 있게 클립보드에 다시 담아요"
-        case .copied: "사진을 클립보드에 담았어요. 사진 붙여넣기를 지원하는 입력란에서 길게 눌러 붙여넣으세요"
+        case .copyable: "복사한 사진. 탭하면 붙여넣을 수 있게 준비해요"
+        case .copied: "사진 붙여넣기 준비 완료. 입력란을 길게 눌러 붙여넣기를 고르세요"
         }
     }
 }
@@ -161,8 +163,8 @@ public enum CopiedPhotoGate {
 ///
 /// | 단계 | 든 것(메모리) | 칩 |
 /// |---|---|---|
-/// | 미리보기 | changeCount·UTI·썸네일(긴 변 96px) — 원본 바이트 없음(B5) | 「사진 복사」 |
-/// | 되씀 | UTI·썸네일·만료 시각·우리가 쓴 changeCount — 원본 바이트 없음(B6) | 「복사됨 · …」 |
+/// | 미리보기 | changeCount·UTI·썸네일(긴 변 96px) — 원본 바이트 없음(B5) | 「복사한 사진」 |
+/// | 되씀 | UTI·썸네일·만료 시각·우리가 쓴 changeCount — 원본 바이트 없음(B6) | 「길게 눌러 붙여넣기」 |
 ///
 /// 비우기: 다른 changeCount(진짜 새 복사)를 보면 「되씀」을 버린다 · 만료가 지나면 칩이 없다 ·
 /// 스위치나 전체 접근이 꺼진 것을 본 그 재로드·등장에서 전부 비운다.
@@ -275,7 +277,7 @@ public struct CopiedPhotoHelper {
     /// 칩 탭 — **유일한 쓰기 지점**(보안 규칙 예외 조건 3). 썼으면 참.
     ///
     /// 클립보드가 **그 칩이 가리키는 항목 그대로**일 때만 바이트를 읽고 상한을 다시 본 뒤 되쓴다 —
-    /// 「사진 복사」는 프로브가 본 changeCount, 「복사됨」은 우리가 쓴 changeCount(B6 — 들고 있는 사본이 없다).
+    /// 「복사한 사진」은 프로브가 본 changeCount, 「길게 눌러 붙여넣기」는 우리가 쓴 changeCount(B6 — 들고 있는 사본이 없다).
     /// 그 사이 다른 것(같은 형식의 다른 사진 포함)을 복사했으면 **읽지도 쓰지도 않고** 칩을 거둔다 —
     /// 사용자가 방금 복사한 것에 120초 만료를 붙이지 않는다.
     @MainActor

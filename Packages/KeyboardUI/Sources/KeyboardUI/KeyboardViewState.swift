@@ -33,7 +33,7 @@ public final class KeyboardViewState {
     /// 표현할 수 없어 값 타입으로 올렸다 (`KeyboardCore.PasteSuggestion`).
     public var pasteSuggestion: PasteSuggestion?
     /// 툴바 사진 칩(v1.3.0 ④ B) — 붙여넣기 칩 자리를 나눠 쓴다. 텍스트·인증번호 칩이 있으면 조립 지점이 nil로 둔다.
-    /// 썸네일(메모리의 축소 그림)과 단계(「사진 복사」/「복사됨」)뿐이다 — 원본 바이트는 여기 없다.
+    /// 썸네일(메모리의 축소 그림)과 단계(「복사한 사진」/「길게 눌러 붙여넣기」)뿐이다 — 원본 바이트는 여기 없다.
     public var copiedPhoto: CopiedPhotoChip?
     /// 툴바 도구 행에 보일 도구들 — 조립 지점이 설정(disabledTools)·권한(FA) 필터 후 넣는다.
     /// 후보(칩·추천단어)가 하나라도 있으면 후보가 우선한다 (PDR toolbar-tools).

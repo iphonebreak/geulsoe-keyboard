@@ -69,7 +69,7 @@ public struct KeyboardRootView: View {
     ///   - onSnippetTap: 툴바 채움글 칩을 탭했을 때. nil이면 칩을 그리지 않는다.
     ///   - onWordTap: 추천단어 후보(단어 칩·이모지 칩)를 탭했을 때. nil이면 후보를 그리지 않는다.
     ///   - onPasteboardCodeTap: 인증번호 붙여넣기 칩을 탭했을 때. nil이면 칩을 그리지 않는다.
-    ///   - onCopiedPhotoTap: 사진 칩(「사진 복사」·「복사됨」)을 탭했을 때(v1.3.0 ④ B). nil이면 칩을 그리지 않는다.
+    ///   - onCopiedPhotoTap: 사진 칩(「복사한 사진」·「길게 눌러 붙여넣기」)을 탭했을 때(v1.3.0 ④ B). nil이면 칩을 그리지 않는다.
     ///   - onToolTap: 툴바 도구(내리기·클립보드·이모지)를 탭했을 때. nil이면 도구 행을 그리지 않는다.
     ///   - onClipboardEntryTap/Delete/Clear: 클립보드 기록 패널 항목 삽입·삭제·모두 지우기.
     ///   - onCursorDrag: 스페이스 트랙패드 모드의 문자 단위 커서 이동 (진동 없이 연속 호출된다).
@@ -681,7 +681,7 @@ private struct PasteChip: View {
     }
 }
 
-/// 사진 칩(v1.3.0 ④ B, PDR `clipboard-image-history.md` 1-2) — 붙여넣기 칩 자리에 썸네일 + 「사진 복사」/「복사됨 · …」.
+/// 사진 칩(v1.3.0 ④ B, PDR `clipboard-image-history.md` 1-2) — 붙여넣기 칩 자리에 썸네일 + 「복사한 사진」/「길게 눌러 붙여넣기」(B7 — 짧게, VoiceOver는 풀어서).
 ///
 /// **서브트리 구조는 단계와 무관하게 같다** — 썸네일 `Image` 하나 + 글자 `Text` 하나. 단계(탭 전·뒤)는 글자 내용만
 /// 바꾼다(키캡·칩은 누르는 도중 구조를 바꾸지 않는다 — CLAUDE.md). 색은 `PasteChip`과 같은 이유로 `keyText`.
