@@ -494,8 +494,10 @@ public final class PackStore: @unchecked Sendable {
         let packs = library.order.compactMap(\.packID).filter { !unavailable.contains($0) }.compactMap { id in
             library.packs[id].map { ActivePackBudget.Candidate(id: id, isEnabled: $0.isEnabled, stats: $0.stats) }
         }
-        return PackBudgetInput(userSnippets: PackStats.of(entries: user),
-                               builtIn: PackStats.of(entries: builtInEntries(Set(disabled))), packs: packs)
+        // 내 채움글 stats는 키보드 로더와 **같은 함수**로 센다(AC-8) — 항목마다 한 번 인코드, 배열 재인코드 없음(R23)
+        let builtIn = PackStats.of(entries: builtInEntries(Set(disabled)))
+        return PackBudgetInput(userSnippets: ActivePackBudget.userSnippetUsage(user, builtIn: builtIn, limits: limits).stats,
+                               builtIn: builtIn, packs: packs)
     }
 
     /// 판정 결과에 **켜진** 못 읽는 팩을 `.unavailable` 제외로 싣는다(목록 순서) — 1-c가 이유를 보일 수 있게(C5)

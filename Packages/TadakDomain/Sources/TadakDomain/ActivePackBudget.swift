@@ -25,11 +25,21 @@ public struct PackStats: Codable, Equatable, Sendable {
                   bytes: lhs.bytes + rhs.bytes, items: lhs.items + rhs.items)
     }
 
-    /// 문구 목록(내 채움글·켜진 내장·문구형 팩) — needle은 `SnippetMatcher`와 같은 규칙(정규화 뒤 빈 단축어 제외)
+    /// 문구 목록(내 채움글·켜진 내장·문구형 팩) — needle은 `SnippetMatcher`와 같은 규칙(정규화 뒤 빈 단축어 제외).
+    /// 바이트는 배열을 통째로 인코드하지 않고 **항목마다 한 번** 인코드해 더한다(9-3 항등식 — 값은 같다, R23)
     public static func of(entries: [SnippetEntry]) -> PackStats {
-        let needles = needleCharacters(of: entries)
+        entries.indices.reduce(emptyArray) { $0 + of(entry: entries[$1], at: $1) }
+    }
+
+    /// 빈 배열 `[]` — 항목별 누적의 시작값
+    static let emptyArray = PackStats(needleCount: 0, needleChars: 0, bytes: 2, items: 0)
+
+    /// 배열의 `index`번째 항목 하나의 몫 — 직렬화는 **이 한 번뿐**이고, 둘째부터는 앞 쉼표 1바이트를 함께 센다.
+    /// 배열 길이 = `2 + Σ항목 + (n−1)`(9-3)이라 `emptyArray`에서 앞부터 더하면 통째로 인코드한 길이와 같다(`UserSnippetUsageTests`가 고정)
+    static func of(entry: SnippetEntry, at index: Int) -> PackStats {
+        let needles = needleCharacters(of: [entry])
         return PackStats(needleCount: needles.count, needleChars: needles.reduce(0, +),
-                         bytes: Self.serializedBytes(of: entries), items: entries.count)
+                         bytes: serializedBytes(of: entry) + (index > 0 ? 1 : 0), items: 1)
     }
 
     /// 외부 팩 하나 — 문구형은 항목의 단축어, 번호형은 패턴(접두+접미 정규화 길이)
@@ -51,11 +61,6 @@ public struct PackStats: Codable, Equatable, Sendable {
     /// 결정적 직렬화 — 키 정렬, 공백 없음. 인코딩 실패(이 타입들에서는 일어나지 않는다)는 0으로 둔다
     static func serializedBytes<Value: Encodable>(of value: Value) -> Int {
         (try? encoder.encode(value).count) ?? 0
-    }
-
-    /// 항목 하나의 직렬화 길이 — 배열 길이 = `2 + Σ항목 + (n−1)`(쉼표)라 앞에서부터 더할 수 있다(9-3)
-    static func serializedBytes(ofEntry entry: SnippetEntry) -> Int {
-        serializedBytes(of: entry)
     }
 
     private static var encoder: JSONEncoder {
@@ -165,20 +170,40 @@ public enum ActivePackBudget {
                           peakEstimateBytes: peakEstimateBytes(needleChars: usage.needleChars, largestPackBytes: largest))
     }
 
-    /// 9-3 — baseline이 넘을 때 키보드가 싣는 내 채움글 개수: **저장 순서대로 한도까지만**(나머지는 지우지 않고 안 싣는다).
-    /// 내장은 번들 고정량이라 먼저 차감하고 항상 싣는다. 앱의 「일부만 사용 중」 안내도 이 함수로 센다.
-    public static func loadableUserEntryCount(
-        _ entries: [SnippetEntry], builtIn: PackStats, limits: PackBudgetLimits = .candidate
-    ) -> Int {
-        var usage = builtIn + PackStats(needleCount: 0, needleChars: 0, bytes: 2, items: 0)   // 빈 배열 "[]"
-        for (index, entry) in entries.enumerated() {
-            var single = PackStats.of(entries: [entry])
-            single.bytes = PackStats.serializedBytes(ofEntry: entry) + (index > 0 ? 1 : 0)      // 쉼표
-            let next = usage + single
-            guard overflowing(next, largestPackBytes: 0, limits: limits).isEmpty else { return index }
-            usage = next
+    /// 내 채움글의 예산 몫 — `userSnippetUsage`의 결과
+    public struct UserSnippetUsage: Equatable, Sendable {
+        /// 내 채움글 **전체**의 stats — `PackStats.of(entries:)`와 같다
+        public var stats: PackStats
+        /// 키보드가 싣는 개수(9-3) — `내장 + 앞 k개`가 넘지 않는 가장 큰 k. 넘지 않으면 전부
+        public var loadableCount: Int
+
+        public init(stats: PackStats, loadableCount: Int) {
+            self.stats = stats
+            self.loadableCount = loadableCount
         }
-        return entries.count
+    }
+
+    /// 9-3 — 내 채움글을 **한 번 훑어** 전체 stats와 싣는 개수를 함께 낸다. 키보드(`PackSnapshotLoader`)와 앱(`PackStore` 판정 입력·
+    /// 「일부만 사용 중」 안내)이 이 함수 하나를 쓴다(AC-8). 저장 순서대로 한도까지만 싣고 나머지는 지우지 않는다. 내장은 번들 고정량이라
+    /// 먼저 차감하고 항상 싣는다.
+    ///
+    /// R23(P-2 6-4) — 예전에는 기준 바이트를 내려고 배열 전체를 다시 인코드했고(넘으면 항목마다 두 번 더), 재구성 피크가 내 채움글
+    /// 크기의 약 2배만큼 늘었다. 이제 항목마다 **한 번만** 인코드해 앞에서부터 더한다(항등식 `2 + Σ항목 + (n−1)`). 처음 넘는 자리가
+    /// 싣는 개수이고, 넘은 뒤에도 끝까지 더한다 — 넘은 항목(`baselineOverflow`)과 R21 비용 비교가 **전체** 값을 보기 때문이다.
+    /// 남은 항목도 하나씩 인코드하고 바로 놓으므로 한꺼번에 잡히는 직렬화 버퍼는 가장 큰 항목 하나다.
+    public static func userSnippetUsage(
+        _ entries: [SnippetEntry], builtIn: PackStats, limits: PackBudgetLimits = .candidate
+    ) -> UserSnippetUsage {
+        var stats = PackStats.emptyArray
+        var loadable: Int?
+        for (index, entry) in entries.enumerated() {
+            stats = stats + PackStats.of(entry: entry, at: index)
+            // 네 값과 피크 모두 항목이 늘면 줄지 않으므로 처음 넘은 자리 뒤는 전부 넘는다 — 첫 자리만 기록한다
+            if loadable == nil, !overflowing(builtIn + stats, largestPackBytes: 0, limits: limits).isEmpty {
+                loadable = index
+            }
+        }
+        return UserSnippetUsage(stats: stats, loadableCount: loadable ?? entries.count)
     }
 
     static func overflowing(_ usage: PackStats, largestPackBytes: Int, limits: PackBudgetLimits) -> [PackBudgetDimension] {

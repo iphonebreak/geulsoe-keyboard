@@ -611,14 +611,16 @@ final class KeyboardViewController: UIInputViewController {
     /// ★ **재구성 키가 같으면 아무것도 하지 않는다**(외부 채움글 9-5·AC-9) — 키 = 사용자 문구·팩 세대 + 채움글 관계 설정.
     /// 테마·진동·슬라이더 알림에서는 다시 만들지 않는다. 내 채움글 저장은 `PackStore`가 세대를 올리므로 키가 바뀐다.
     ///
-    /// ★ P-2 피크 측정 자리 — 이 함수의 `loadSnippetSources` + `SnippetMatcher(...)` 앞뒤(옛 매처는 새 매처를 만든 **뒤** 놓는다, R17 기본).
+    /// ★ R17 채택(P-2 6-3b) — 다시 만들 때는 새로 읽기 **전에** 옛 매처와 옛 읽기 결과(정적 캐시)를 놓는다. 옛·새가 함께 사는
+    /// 피크(9-5 「옛 + 새 + 디코드」)가 실측 1.81MB 줄었다. 재구성은 메인 스레드 동기라 그사이 칩 공백이 화면에 나오지 않는다
+    /// (P-2 6-6 ③ — PDR 9-5의 「수 ms 동안 칩 없음」은 비동기를 가정한 문장이다).
     private func rebuildSnippetMatcher() {
         let key = SnippetRebuildKey(settings: settings, userSnippetsGeneration: packGenerations.userSnippetsGeneration,
                                     packsGeneration: packGenerations.packsGeneration)
-        guard key != snippetMatcherKey else { return }
+        guard key != snippetMatcherKey else { return }   // 같은 키 — 아무것도 놓지도 만들지도 않는다(AC-9)
+        snippetMatcher = nil   // R17 — 키가 바뀌어 실제로 다시 만들 때만 여기 온다. 옛 매처부터 놓는다
         guard settings.snippetsEnabled else {
             snippetMatcherKey = key
-            snippetMatcher = nil
             Self.snippetSourcesCache = nil   // 채움글을 끄면 읽어 둔 외부 팩(최대 약 3.5MB)도 놓는다(검증 F6)
             return
         }
@@ -650,7 +652,12 @@ final class KeyboardViewController: UIInputViewController {
         let builtInDisabled = disabled.intersection([SnippetPack.anthem, SnippetPack.greetings])
         let wanted = SnippetSourcesKey(userSnippetsGeneration: packGenerations.userSnippetsGeneration,
                                        packsGeneration: packGenerations.packsGeneration, builtInDisabled: builtInDisabled)
-        if let cached = Self.snippetSourcesCache, cached.key == wanted { return cached.result }
+        if let cached = Self.snippetSourcesCache {
+            if cached.key == wanted { return cached.result }   // 새 VC(키 nil)·채움글 무관 설정 변경은 다시 읽지 않는다
+            // R17 — 옛 읽기 결과는 새로 읽기 **전에** 놓는다. 이 뒤 읽기가 일시 실패하면(F1) 캐시는 빈 채로 남고 매처 키도 비어(C4)
+            // 다음 알림·등장이 다시 읽는다 — 놓은 옛 결과로 되돌아가지 않는다
+            Self.snippetSourcesCache = nil
+        }
         guard let loader = PackSnapshotLoader.live() else { return .userOnly(userSnippetRepository.entries()) }
         let result = loader.load(builtIn: builtIn)
         // ★ 일시적 실패(세대 불일치·소실)로 외부 팩을 뺀 결과는 캐시하지 않는다 — 판정은 `Result.isCacheable`(테스트됨, 검증 F1).

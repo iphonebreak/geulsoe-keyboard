@@ -106,9 +106,9 @@ struct ActivePackBudgetTests {
         limits.needleChars = 100
         let entries = (0..<10).map { index in SnippetEntry(triggers: [String(repeating: "가", count: 19) + "\(index)"], title: "t", body: "b") }
         let builtIn = PackStats(needleCount: 1, needleChars: 30, bytes: 0, items: 0)
-        #expect(ActivePackBudget.loadableUserEntryCount(entries, builtIn: builtIn, limits: limits) == 3)
-        #expect(ActivePackBudget.loadableUserEntryCount(entries, builtIn: .zero, limits: limits) == 5)
-        #expect(ActivePackBudget.loadableUserEntryCount(Array(entries.prefix(2)), builtIn: .zero, limits: limits) == 2)
+        #expect(ActivePackBudget.userSnippetUsage(entries, builtIn: builtIn, limits: limits).loadableCount == 3)
+        #expect(ActivePackBudget.userSnippetUsage(entries, builtIn: .zero, limits: limits).loadableCount == 5)
+        #expect(ActivePackBudget.userSnippetUsage(Array(entries.prefix(2)), builtIn: .zero, limits: limits).loadableCount == 2)
     }
 }
 

@@ -790,6 +790,22 @@ struct PackSnapshotLoaderTests {
         #expect(!loaded.isCacheable, "F1 — 일시적 실패는 캐시하지 않는다(다음 재구성이 다시 읽는다)")
     }
 
+    /// R23 — 내 채움글 몫은 두 경로(읽은 경로·3회 포기 경로) 모두 `ActivePackBudget.userSnippetUsage` 하나로 센다
+    @Test("★ R23 — 3회 포기 경로도 같은 함수: 옛 초과본은 앞 20개만, 넘은 항목은 읽은 경로와 같다")
+    func givesUpWithLegacyOverflow() throws {
+        let legacy = (0..<30).map { entry(String(repeating: "다", count: 9) + String(UnicodeScalar(0xAC00 + $0)!)) }  // 300 > 200자
+        let h = Harness(user: legacy)
+        defer { h.sandbox.cleanup() }
+        let normal = h.load()
+        let generations = h.generations
+        let flips = Counter()
+        h.generations.onRead = { generations.setUserSnippetsGeneration(flips.next()) }
+        let gaveUp = h.load()
+        #expect(gaveUp.dropped == .inconsistentGenerations && gaveUp.attempts == 3)
+        #expect(gaveUp.userEntries == Array(legacy.prefix(20)) && normal.userEntries == gaveUp.userEntries)
+        #expect(!normal.baselineOverflow.isEmpty && gaveUp.baselineOverflow == normal.baselineOverflow)
+    }
+
     /// 범위: 읽는 사이 앱이 **새 세대를 만들고 옛 세대를 지운** 경우 — 세대 불일치·소실이 함께 일어난다(실제 GC 경로)
     @Test("★ AC-26 — 읽는 중 앱이 새 세대를 만들고 옛 세대를 지우면 새 세대로 다시")
     func retriesWhenGenerationReplacedDuringRead() throws {

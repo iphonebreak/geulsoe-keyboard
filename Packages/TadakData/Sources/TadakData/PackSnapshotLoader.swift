@@ -129,12 +129,13 @@ public struct PackSnapshotLoader: Sendable {
 
     private func readSnapshot(generation: Int, user: [SnippetEntry], builtIn: [SnippetEntry]) -> Outcome {
         let builtInStats = PackStats.of(entries: builtIn)
-        let baseline = PackStats.of(entries: user) + builtInStats
+        // 내 채움글은 항목마다 한 번만 인코드해 센다 — 배열 전체를 다시 인코드하지 않는다(R23, 앱 `PackStore`와 같은 함수 — AC-8)
+        let usage = ActivePackBudget.userSnippetUsage(user, builtIn: builtInStats, limits: limits)
+        let baseline = usage.stats + builtInStats
         let baselineCheck = ActivePackBudget.evaluate(baseline: baseline, packs: [], limits: limits)
         // 9-3 — baseline이 넘으면 외부 팩은 읽지도 않는다. 사용자 문구는 저장 순서대로 한도까지
         guard baselineCheck.baselineOverflow.isEmpty else {
-            let count = ActivePackBudget.loadableUserEntryCount(user, builtIn: builtInStats, limits: limits)
-            return .loaded(makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(count)), packs: [:],
+            return .loaded(makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(usage.loadableCount)), packs: [:],
                                       included: [], excluded: [], baselineOverflow: baselineCheck.baselineOverflow))
         }
         guard generation > 0 else {   // 아직 snapshot이 없다 — 내 채움글·내장만(지금과 같다)
@@ -223,10 +224,9 @@ public struct PackSnapshotLoader: Sendable {
 
     private func baselineOnly(user: [SnippetEntry], builtIn: [SnippetEntry], dropped: DropReason) -> Result {
         let builtInStats = PackStats.of(entries: builtIn)
-        let check = ActivePackBudget.evaluate(baseline: PackStats.of(entries: user) + builtInStats, packs: [], limits: limits)
-        let count = check.baselineOverflow.isEmpty
-            ? user.count : ActivePackBudget.loadableUserEntryCount(user, builtIn: builtInStats, limits: limits)
-        var result = makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(count)), packs: [:],
+        let usage = ActivePackBudget.userSnippetUsage(user, builtIn: builtInStats, limits: limits)
+        let check = ActivePackBudget.evaluate(baseline: usage.stats + builtInStats, packs: [], limits: limits)
+        var result = makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(usage.loadableCount)), packs: [:],
                                 included: [], excluded: [], baselineOverflow: check.baselineOverflow)
         result.dropped = dropped
         return result
