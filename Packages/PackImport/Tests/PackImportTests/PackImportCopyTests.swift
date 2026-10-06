@@ -113,7 +113,7 @@ struct PackImportCopyMappingTests {
         #expect(PackImportCopy.failureMessage(.fileUnreadable, source: .file)
                 == "파일을 열 수 없어요. 파일 앱에서 이 기기에 내려받은 뒤 다시 골라 주세요.")
         let draft = try ImportHelper.draft("번호,제목,본문\n0,a,b")
-        #expect(PackImportCopy.failureMessage(.noValidRecords(PackImportPreview(draft: draft, overlap: nil)), source: .file)
+        #expect(PackImportCopy.failureMessage(.noValidRecords(draft.skipped), source: .file)
                 == "가져올 수 있는 행이 없어요. 건너뛴 이유를 확인해 주세요.")
     }
 
@@ -131,7 +131,7 @@ struct PackImportCopyMappingTests {
                 == "붙여 넣은 내용은 보여 주지 않아요. 한 행이라도 구조가 틀리면 다른 행도 믿을 수 없어 통째로 받지 않아요.")
         #expect(PackImportCopy.failureFooter(.structural(.fileTooLarge), source: .file) == "파일 내용은 보여 주지 않아요.")
         let draft = try ImportHelper.draft("번호,제목,본문\n0,a,b")
-        #expect(PackImportCopy.failureFooter(.noValidRecords(PackImportPreview(draft: draft, overlap: nil)), source: .file)
+        #expect(PackImportCopy.failureFooter(.noValidRecords(draft.skipped), source: .file)
                 == "건너뛴 행은 내용 없이 위치와 이유만 보여요.")
     }
 
@@ -172,6 +172,12 @@ struct PackImportCopyMappingTests {
         let cp949 = review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)
         #expect(PackImportCopy.encodingStatus(cp949) == "UTF-8로는 읽을 수 없어요(깨진 글자 37행).")
         #expect(PackImportCopy.samplesHeader(cp949) == "파일에서 찾은 표본")
+
+        // 검증 F-6 ② — 다른 쪽 깨진 글자 수도 숫자 함수를 거친다(S-4 — 천 단위 쉼표)
+        #expect(PackImportCopy.encodingStatus(review(selected: .cp949, utf8Failed: 1_234, cp949Failed: 0))
+                == "UTF-8로는 읽을 수 없어요(깨진 글자 1,234행).")
+        #expect(PackImportCopy.encodingStatus(review(selected: .utf8, utf8Failed: 1_234, cp949Failed: 0))
+                == "UTF-8로는 읽을 수 없어요(깨진 글자 1,234행). 다른 쪽을 골라 주세요.")
 
         let broken = review(selected: .utf8, utf8Failed: 37, cp949Failed: 0)
         #expect(PackImportCopy.encodingStatus(broken) == "UTF-8로는 읽을 수 없어요(깨진 글자 37행). 다른 쪽을 골라 주세요.")
@@ -268,9 +274,9 @@ struct PackImportCopyContentLeakTests {
             }
             var shown = [PackImportCopy.failureTitle(source.kind), PackImportCopy.failureMessage(problem, source: source.kind),
                          PackImportCopy.failureFooter(problem, source: source.kind)]
-            if case .noValidRecords(let preview) = problem {
-                shown += preview.draft.skipped.flatMap { [PackImportCopy.skipTitle($0), PackImportCopy.skipFix($0.reason)] }
-                shown += PackImportCopy.skipGroups(preview.draft.skipped).map(\.label)
+            if case .noValidRecords(let skipped) = problem {
+                shown += skipped.flatMap { [PackImportCopy.skipTitle($0), PackImportCopy.skipFix($0.reason)] }
+                shown += PackImportCopy.skipGroups(skipped).map(\.label)
             }
             for text in shown { #expect(!text.contains(marker), "\(text)") }
         }

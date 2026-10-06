@@ -268,7 +268,7 @@ struct PackPasteView: View {
     let onFinished: @MainActor (_ packID: String) -> Void
 
     @State private var text = ""
-    @State private var overview: PasteOverview?
+    @State private var overview: PackPasteOverview?
     @State private var request: PackImportRequest?
     @State private var completedPackID: String?
 
@@ -322,9 +322,14 @@ struct PackPasteView: View {
                     .disabled(text.isEmpty)
             }
         }
-        // 줄 수·칸 나누기 — 앞부분만 보는 후보 시험이라 가볍지만 큰 글은 메인 밖에서
+        // 줄 수·칸 나누기 — 앞부분만 보는 후보 시험이라 가볍지만 큰 글은 메인 밖에서. 그 사이 글이 또 바뀌면 이 작업은 취소되고
+        // 늦은 결과는 버린다(nil — 검증 F-8 ③)
         .task(id: text) {
-            overview = text.isEmpty ? nil : await PasteOverview.of(text)
+            guard !text.isEmpty else {
+                overview = nil
+                return
+            }
+            if let measured = await PackPasteOverview.perform(text) { overview = measured }
         }
         .sheet(item: $request, onDismiss: {
             guard let packID = completedPackID else { return }
@@ -352,18 +357,3 @@ struct PackPasteView: View {
     }
 }
 
-/// 붙인 글의 줄 수와, 하나로 정해지면 칸 나누기(시안 3-E 「42줄 · 칸 나누기: 탭」)
-private struct PasteOverview: Equatable, Sendable {
-    let lines: Int
-    let delimiter: CSVDelimiter?
-
-    static func of(_ text: String) async -> PasteOverview {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let breaks = text.utf8.reduce(0) { $0 + ($1 == UInt8(ascii: "\n") ? 1 : 0) }
-                let lines = breaks + (text.hasSuffix("\n") ? 0 : 1)
-                continuation.resume(returning: PasteOverview(lines: lines, delimiter: PackImporter.likelyDelimiter(text)))
-            }
-        }
-    }
-}

@@ -227,7 +227,8 @@ public final class PackStore: @unchecked Sendable {
     ///
     /// 변환본을 읽어 키보드가 받는 내용이면 표시 칸(이름·종류·틀)과 stats(다시 센 값)를 채우고, 아니면 그 팩은 「읽을 수 없는 팩」(`.unavailable`)으로
     /// 목록에 남긴다(지우지 않는다 — 다시 가져오기·지우기는 사용자가 한다). 같은 팩의 변환본이 여럿이면(정리 전에 앱이 죽은 경우) revision이
-    /// 가장 큰 것을 쓰고 나머지는 평소처럼 정리된다. 순서는 파일을 쓴 시각(가져온 순서에 가깝다), 「내 채움글」은 맨 위(U1 기본).
+    /// 가장 큰 것을 쓰고 나머지는 평소처럼 정리된다. 순서는 변환본 이름의 r 번호(쓴 차례 — 가져온 순서에 가깝다, 수정 시각은 읽지 않는다),
+    /// 「내 채움글」은 맨 위(U1 기본).
     public func recoverLibrary(now: Date = Date()) -> PackLibraryRecovery {
         queue.sync {
             guard loadLibrary().status != .readable else { return .notNeeded }
@@ -535,11 +536,23 @@ public final class PackStore: @unchecked Sendable {
         if proposal.userChanged { generations.setUserSnippetsGeneration(newUserGeneration) }
         generations.setPacksGeneration(newPacksGeneration)
 
-        // ⑥ 정리 — 앱의 변경 때만(키보드는 지우지 않는다) ⑦ 알림
+        // ⑥ 정리 — 앱의 변경 때만(키보드는 지우지 않는다) ⑦ 알림.
+        // ★ 팩을 **지우거나 바꾸면** 옛 snapshot 세대를 모두 지운다(평소 커밋은 현재 − 2 이하만) — 지운 팩·바꾸기 전 내용이 키보드가 읽는
+        //   App Group 공유 사본에 채움글을 두 번 더 바꿀 때까지 남지 않게(기획 1-d 「지우면 기기에서 지워져요」). 그 세대를 읽던 키보드는
+        //   소실을 보고 현재 세대로 다시 읽는다(AC-26). 지운 파일의 검사 기록(pack-checks)도 함께 뺀다
         removeUnreferencedPackFiles(library: library)
-        collectSnapshotGarbage(current: newPacksGeneration)
+        pruneChecks(keeping: library)
+        collectSnapshotGarbage(current: newPacksGeneration, keepingPrevious: !Self.purgesOldSnapshots(proposal.change))
         notify()
         return true
+    }
+
+    /// 팩 내용이 기기에서 바로 사라져야 하는 커밋 — 지우기·바꾸기(켜진 팩·꺼진 팩 모두 — 꺼진 팩도 옛 세대에는 켜진 채 있을 수 있다)
+    private static func purgesOldSnapshots(_ change: PackCommitGate.Change) -> Bool {
+        switch change {
+        case .deletePack, .replaceActivePack, .replaceInactivePack: true
+        default: false
+        }
     }
 
     /// snapshot 폴더 하나를 처음부터 쓴다 — 팩 파일을 다 쓴 **뒤** 마지막에 manifest(8절). `included`는 판정이 이미 못 읽는 팩을 뺀
@@ -590,12 +603,14 @@ public final class PackStore: @unchecked Sendable {
         return manifest.order
     }
 
-    /// 현재 − 2 세대 이하만 지운다(8-2) — 읽고 있던 키보드는 현재 세대로 재시도한다
-    private func collectSnapshotGarbage(current: Int) {
+    /// 현재 − 2 세대 이하만 지운다(8-2) — 읽고 있던 키보드는 현재 세대로 재시도한다. `keepingPrevious == false`면(팩 지우기·바꾸기)
+    /// 현재 세대 하나만 남긴다
+    private func collectSnapshotGarbage(current: Int, keepingPrevious: Bool = true) {
         let fileManager = FileManager.default
         guard let names = try? fileManager.contentsOfDirectory(atPath: snapshotRoot.path) else { return }
+        let newestRemoved = current - (keepingPrevious ? 2 : 1)
         for name in names where name.hasPrefix("g") {
-            guard let generation = Int(name.dropFirst()), generation <= current - 2 else { continue }
+            guard let generation = Int(name.dropFirst()), generation <= newestRemoved else { continue }
             try? fileManager.removeItem(at: snapshotRoot.appendingPathComponent(name, isDirectory: true))
         }
     }
@@ -657,10 +672,12 @@ public final class PackStore: @unchecked Sendable {
                       parts.hour ?? 0, parts.minute ?? 0, parts.second ?? 0)
     }
 
-    /// 복구가 불러올 변환본 — 팩 id마다 하나(revision이 가장 큰 것), 파일을 쓴 시각 순(가져온 순서에 가깝다). 내용은 읽지 않는다
+    /// 복구가 불러올 변환본 — 팩 id마다 하나(revision이 가장 큰 것), **이름의 r 번호 순**(그 팩을 마지막으로 쓴 커밋 차례 — 가져온 순서에
+    /// 가깝다), 같으면 파일 이름 순. 내용은 읽지 않는다.
+    /// ★ 파일 수정 시각을 읽지 않는다(검증 F-1) — 수정 시각은 애플 필수 사유 API(File timestamp)이고 PDR 1-d가 「파일 타임스탬프 미접근」을
+    ///   심사 정합 조건으로 적었다. r 번호는 커밋마다 하나씩 오르므로 쓴 차례를 시각 없이 그대로 준다
     private func recoveryFiles() -> [(id: String, file: String)] {
-        let fileManager = FileManager.default
-        guard let names = try? fileManager.contentsOfDirectory(atPath: packsDirectory.path) else { return [] }
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: packsDirectory.path) else { return [] }
         var newest: [String: (revision: Int, file: String)] = [:]
         for name in names where name.hasSuffix(".json") {
             let identity = Self.packFileIdentity(name)
@@ -668,12 +685,8 @@ public final class PackStore: @unchecked Sendable {
             if let current = newest[identity.id], current.revision >= identity.revision { continue }
             newest[identity.id] = (identity.revision, name)
         }
-        func written(_ file: String) -> Date {
-            (try? fileManager.attributesOfItem(atPath: packsDirectory.appendingPathComponent(file).path)[.modificationDate] as? Date)
-                ?? .distantPast
-        }
-        return newest.map { (id: $0.key, file: $0.value.file, date: written($0.value.file)) }
-            .sorted { ($0.date, $0.file) < ($1.date, $1.file) }
+        return newest.map { (id: $0.key, revision: $0.value.revision, file: $0.value.file) }
+            .sorted { ($0.revision, $0.file) < ($1.revision, $1.file) }
             .map { (id: $0.id, file: $0.file) }
     }
 
@@ -712,6 +725,15 @@ public final class PackStore: @unchecked Sendable {
                 atPath: packsDirectory.appendingPathComponent(file).path)[.size] as? NSNumber)?.intValue,
               size == check.bytes else { return nil }
         return check.isLoadable
+    }
+
+    /// 커밋 뒤 — 목록이 가리키지 않는 파일의 검사 결과가 있을 때만 다시 쓴다(지운 팩·바꾸기 전 변환본의 이름이 기록에 남지 않게, 1-d).
+    /// 평소 커밋은 남길 것이 없어 쓰지 않는다
+    private func pruneChecks(keeping library: PackLibrary) {
+        let checks = loadedChecks()
+        let referenced = Set(library.packs.values.map(\.file))
+        guard checks.keys.contains(where: { !referenced.contains($0) }) else { return }
+        saveChecks(checks, keeping: library)
     }
 
     /// 목록이 가리키는 파일 것만 남긴다(교체·삭제로 사라진 파일의 결과는 버린다). 쓰지 못하면 메모리에만 — 다음 실행이 다시 검사한다

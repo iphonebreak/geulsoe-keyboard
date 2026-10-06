@@ -195,15 +195,17 @@ struct ExternalPackDetailView: View {
         }
 
         if let standing = detail.standing {
+            // 꺼진·쉬는 팩은 「켜면(다시 뜨면)」으로 계산한 자리다 — 그 전제를 머리·배지에 보인다(검증 F-5)
+            let premise = PackNoticeCopy.standingPremise(detail.summary.status)
             if !standing.patterns.isEmpty {
                 Section {
                     ForEach(standing.patterns, id: \.pattern) { item in
                         standingRow(title: item.display, monospaced: true,
                                     line: PackNoticeCopy.patternLine(item.status, name: detail.name(of:)),
-                                    badge: PackNoticeCopy.patternBadge(item.status), tint: tint(item.status))
+                                    badge: PackNoticeCopy.patternBadge(item.status, premise: premise), tint: tint(item.status))
                     }
                 } header: {
-                    Text(PackNoticeCopy.templatesHeader)
+                    Text(PackNoticeCopy.templatesHeader(premise))
                 } footer: {
                     Text(PackNoticeCopy.templatesFooter)
                 }
@@ -217,7 +219,7 @@ struct ExternalPackDetailView: View {
                     }
                     Button(PackChangeNotice.Action.reorderPacks.label) { showsOrder = true }
                 } header: {
-                    Text(PackNoticeCopy.hiddenTriggersHeader(count: standing.hiddenTriggers.count))
+                    Text(PackNoticeCopy.hiddenTriggersHeader(count: standing.hiddenTriggers.count, premise: premise))
                 } footer: {
                     Text(PackNoticeCopy.hiddenTriggersFooter(owners: standing.hiddenTriggers.map(\.owner), name: detail.name(of:)))
                 }
@@ -369,8 +371,7 @@ struct PackOrderView: View {
                             row(slot, in: library)
                         }
                         .onMove { source, destination in
-                            slots.move(fromOffsets: source, toOffset: destination)
-                            recompute()
+                            slots.move(fromOffsets: source, toOffset: destination)   // 안내는 `.task(id: slots)`가 다시 계산한다
                         }
                     } footer: {
                         Text(PackNoticeCopy.orderFooter)
@@ -405,6 +406,7 @@ struct PackOrderView: View {
             }
             .interactiveDismissDisabled(isSaving)
             .task { await load() }
+            .task(id: slots) { await recompute() }
         }
     }
 
@@ -446,14 +448,16 @@ struct PackOrderView: View {
             return
         }
         library = loaded
-        slots = loaded.order
-        recompute()
+        slots = loaded.order   // 안내 계산은 `.task(id: slots)`
     }
 
-    /// 사전 영향(G3) — 순수 계산이라 끌 때마다 다시 한다(변환본은 열 때 한 번만 읽었다)
-    private func recompute() {
+    /// 사전 영향(G3) — 끌어 놓을 때마다 **메인 밖에서** 다시 한다(합성 2회·정규화 전부, 검증 F-8 ①. 변환본은 열 때 한 번만 읽었다).
+    /// 그 사이 또 옮기면 이 작업은 취소되고 늦은 결과는 버린다. 완료 때 견줄 「쉬게 될 팩」은 **화면에 보인 안내**의 것이다 —
+    /// 계산이 끝나기 전에 완료하면 보인 것과 결과가 달라 알림이 뜬다(결정 ⓑ)
+    private func recompute() async {
         guard let library else { return }
-        let impact = PackImpact.of(PackImpact.Proposal(order: slots), in: library)
+        let order = slots
+        guard let impact = await PackImpact.perform(PackImpact.Proposal(order: order), in: library), order == slots else { return }
         previewedResting = impact.restingPacks
         lines = PackNoticeCopy.impactLines(impact, in: library)
     }

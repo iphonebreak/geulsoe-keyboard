@@ -1,3 +1,4 @@
+import Foundation
 import KeyboardCore
 import TadakDomain
 
@@ -138,6 +139,17 @@ public struct PackImpact: Equatable, Sendable {
                 return TemplateOwnerChange(pattern: pattern, from: old, to: owner)
             }
         return PackImpact(restingPacks: newlyExcluded, templateOwnerChanges: templateChanges, triggerOwnerChanges: triggerChanges)
+    }
+
+    /// `of`를 전역 큐에서 — 순서 화면이 끌어 놓을 때마다 부른다(합성 2회·정규화 전부가 메인을 막지 않게, 검증 F-8 ①).
+    /// 기다리는 사이 부른 작업이 취소됐으면(그 사이 또 옮겼다) nil — 늦은 결과가 새 순서의 안내를 덮지 않게.
+    /// Swift 협력 스레드 풀이 아니라 GCD 큐로 넘긴다(`PackImportSession.perform`과 같은 이유)
+    public static func perform(_ proposal: Proposal, in library: Library,
+                               queue: DispatchQueue = .global(qos: .userInitiated)) async -> PackImpact? {
+        let impact = await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: of(proposal, in: library)) }
+        }
+        return Task.isCancelled ? nil : impact
     }
 
     /// 팩 상세(2-E·U1)의 자리 — 틀마다 사용 중·뒤 순서·가려짐(10-3·10-4 ③), 문구형은 「지금 안 뜨는 단축어」.

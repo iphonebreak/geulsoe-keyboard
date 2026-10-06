@@ -142,7 +142,7 @@ public enum PackImportCopy {
         guard selected.isReadable else {
             return "\(encodingName(review.selected))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(selected.failedLines))행). 다른 쪽을 골라 주세요."
         }
-        return "\(encodingName(review.other))로는 읽을 수 없어요(깨진 글자 \(review.reading(review.other).failedLines)행)."
+        return "\(encodingName(review.other))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(review.reading(review.other).failedLines))행)."
     }
 
     public static func samplesHeader(_ review: PackEncodingReview) -> String {

@@ -281,9 +281,9 @@ struct PackImportFlowView: View {
             } footer: {
                 Text(PackImportCopy.failureFooter(problem, source: request.kind))
             }
-        } else if case .noValidRecords(let preview) = problem {
+        } else if case .noValidRecords(let skipped) = problem {
             Section {
-                ForEach(PackImportCopy.skipGroups(preview.draft.skipped), id: \.label) { group in
+                ForEach(PackImportCopy.skipGroups(skipped), id: \.label) { group in
                     LabeledContent(group.label, value: PackImportCopy.skipReasonCount(group.count))
                 }
                 Button(PackImportCopy.showAllSkipped) { path.append(.allSkipped) }
@@ -312,9 +312,15 @@ struct PackImportFlowView: View {
     // MARK: - 전체 보기
 
     private var currentPreview: PackImportPreview? {
+        if case .preview(let preview) = session.phase { return preview }
+        return nil
+    }
+
+    /// 건너뛴 행 — 미리보기의 것, 또는 유효 0 거부(4-G)가 들고 온 위치·사유
+    private var currentSkipped: [SkippedRecord]? {
         switch session.phase {
-        case .preview(let preview): preview
-        case .failed(.noValidRecords(let preview)): preview
+        case .preview(let preview): preview.draft.skipped
+        case .failed(.noValidRecords(let skipped)): skipped
         default: nil
         }
     }
@@ -334,10 +340,10 @@ struct PackImportFlowView: View {
     /// 건너뛴 행 전부 — 위치와 이유만(5-5)
     @ViewBuilder
     private var allSkippedView: some View {
-        if let preview = currentPreview {
+        if let skippedRecords = currentSkipped {
             List {
                 Section {
-                    ForEach(Array(preview.draft.skipped.enumerated()), id: \.offset) { _, skipped in
+                    ForEach(Array(skippedRecords.enumerated()), id: \.offset) { _, skipped in
                         SkippedRow(skipped: skipped)
                     }
                 } footer: {

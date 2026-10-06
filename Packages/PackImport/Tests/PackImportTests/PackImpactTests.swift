@@ -274,6 +274,19 @@ struct PackImpactTests {
         #expect(standingB.hiddenTriggers.isEmpty)
     }
 
+    @Test("★ 검증 F-3 V14 — 「가려짐」(10-3)은 내 채움글만이 아니라 포함된 문구형 팩·내장 팩의 정적 단축어도 본다(순서와 무관), 꺼진 팩은 가리지 않는다")
+    func shadowedByPackAndBuiltIn() throws {
+        let b = numbered("예시 번호 팩", ["고사 {n}장"])
+        let byPack = Fixture(packs: [("b", b), ("c", phrases("상용 문구", ["장"]))])
+        #expect(try #require(PackImpact.standing(of: "b", in: byPack.library)).patterns.map(\.status) == [.shadowed(by: ["장"])],
+                "아래에 있는 문구형 팩의 단축어도 가린다 — 정적 단축어가 틀보다 먼저다")
+        let byBuiltIn = Fixture(packs: [("b", b)], builtIn: [SnippetEntry(trigger: "장", title: "내장", body: "내장 본문")])
+        #expect(try #require(PackImpact.standing(of: "b", in: byBuiltIn.library)).patterns.map(\.status) == [.shadowed(by: ["장"])])
+        let offPack = Fixture(packs: [("b", b), ("c", phrases("상용 문구", ["장"]))], off: ["c"])
+        #expect(try #require(PackImpact.standing(of: "b", in: offPack.library)).patterns.map(\.status) == [.owned(sharedWith: [])],
+                "꺼진 팩의 단축어는 키보드에 없다")
+    }
+
     @Test("★ U1 — 문구형 팩의 「지금 안 뜨는 단축어」: 위 줄이 같은 단축어를 가지면 뒤 순서. 팩을 올리면 사라진다")
     func hiddenTriggers() throws {
         let other = phrases("상용 영어", ["회의 실"])

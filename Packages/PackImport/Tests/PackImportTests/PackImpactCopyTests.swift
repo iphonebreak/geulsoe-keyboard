@@ -165,6 +165,31 @@ struct PackImpactCopyTests {
                 == "목록에서 위에 있는 쪽이 먼저 떠요. 이 팩 문구를 쓰려면 이 팩을 더 위로 올려 주세요.")
     }
 
+    @Test("★ 검증 F-5 — 꺼진·쉬는 팩 상세는 「켜면(다시 뜨면)」 전제를 머리·배지에 보인다 — 지금 뜨는 팩은 그대로")
+    func standingPremiseCopy() {
+        #expect(PackNoticeCopy.standingPremise(.on) == nil && PackNoticeCopy.standingPremise(.unavailable) == nil)
+        #expect(PackNoticeCopy.standingPremise(.off) == .ifEnabled)
+        #expect(PackNoticeCopy.standingPremise(.restingOverLimit) == .ifResumed && PackNoticeCopy.standingPremise(.restingForUserSnippets) == .ifResumed)
+
+        #expect(PackNoticeCopy.templatesHeader(nil) == "단축어 틀")
+        #expect(PackNoticeCopy.templatesHeader(.ifEnabled) == "단축어 틀 — 켜면 이렇게 떠요")
+        #expect(PackNoticeCopy.templatesHeader(.ifResumed) == "단축어 틀 — 다시 뜨면 이렇게 떠요")
+        #expect(PackNoticeCopy.hiddenTriggersHeader(count: 37, premise: nil) == "지금 안 뜨는 단축어 37개")
+        #expect(PackNoticeCopy.hiddenTriggersHeader(count: 37, premise: .ifEnabled) == "켜도 안 뜨는 단축어 37개")
+        #expect(PackNoticeCopy.hiddenTriggersHeader(count: 1_500, premise: .ifResumed) == "다시 떠도 안 뜨는 단축어 1,500개")
+        #expect(PackNoticeCopy.patternBadge(.owned(sharedWith: []), premise: nil) == "사용 중")
+        #expect(PackNoticeCopy.patternBadge(.owned(sharedWith: ["b"]), premise: .ifEnabled) == "켜면 사용")
+        #expect(PackNoticeCopy.patternBadge(.owned(sharedWith: []), premise: .ifResumed) == "뜨면 사용")
+        #expect(PackNoticeCopy.patternBadge(.outranked(by: "a"), premise: .ifEnabled) == "뒤 순서")
+        #expect(PackNoticeCopy.patternBadge(.shadowed(by: ["장"]), premise: .ifEnabled) == "가려짐")
+        // 가정 문구에는 「지금」·「사용 중」이 없다 — 꺼진 팩이 지금 쓰이는 것처럼 보이지 않게
+        let premised = [PackNoticeCopy.StandingPremise.ifEnabled, .ifResumed].flatMap {
+            [PackNoticeCopy.templatesHeader($0), PackNoticeCopy.hiddenTriggersHeader(count: 37, premise: $0),
+             PackNoticeCopy.patternBadge(.owned(sharedWith: []), premise: $0)]
+        }
+        for text in premised { #expect(!text.contains("지금") && !text.contains("사용 중"), "\(text)") }
+    }
+
     @Test("★ 2-F — 삭제 확인: 「이름」을/를 지울까요? · 항목 수 · 다시 가져와야 한다. 항목 수를 모르면 숫자 없이")
     func deleteCopy() {
         #expect(PackNoticeCopy.deleteTitle(name: "사자성어 예시 팩") == "「사자성어 예시 팩」을 지울까요?")
@@ -199,6 +224,12 @@ var stage3Copy: [String] {
     let statuses: [PackStanding.PatternStatus] = [.owned(sharedWith: []), .owned(sharedWith: ["b"]), .owned(sharedWith: ["b", "c"]),
                                                   .outranked(by: "a"), .shadowed(by: ["장"]), .shadowed(by: ["장", "번"])]
     texts += statuses.flatMap { [PackNoticeCopy.patternBadge($0), PackNoticeCopy.patternLine($0, name: name)] }
+    // 검증 F-5 — 꺼진·쉬는 팩의 가정 머리·배지
+    let premises: [PackNoticeCopy.StandingPremise] = [.ifEnabled, .ifResumed]
+    texts += premises.flatMap { premise in
+        [PackNoticeCopy.templatesHeader(premise), PackNoticeCopy.hiddenTriggersHeader(count: 37, premise: premise)]
+            + statuses.map { PackNoticeCopy.patternBadge($0, premise: premise) }
+    }
     texts += [PackImpact.Source.userSnippets, .pack("c")].map { PackNoticeCopy.hiddenTriggerLine(owner: $0, name: name) }
     texts += [[.userSnippets], [.userSnippets, .pack("c")]].map { PackNoticeCopy.hiddenTriggersFooter(owners: $0, name: name) }
     let impact = PackImpact(

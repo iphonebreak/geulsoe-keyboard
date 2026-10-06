@@ -629,6 +629,89 @@ struct PackStoreTests {
         _ = h.load()
         #expect(h.sandbox.generationNames() == ["g3", "g4"], "키보드는 지우지 않는다")
     }
+
+    // MARK: 1-d — 팩 지우기·바꾸기 뒤 옛 snapshot 즉시 정리
+
+    @Test("★ 1-d — 팩을 지우면 옛 snapshot 세대를 모두 지운다(현재만) — 지운 팩의 내용·변환본·검사 기록이 어느 파일에도 남지 않는다",
+          arguments: [true, false])
+    func deletePurgesOldSnapshots(enabled: Bool) throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let gone = try h.importedID(h.store.importPack(pack("DELMARK", chars: 10), source: .csv, enabled: enabled))   // g1
+        let kept = try h.importedID(h.store.importPack(pack("KEEPMARK", chars: 10), source: .csv))                    // g2
+        h.store.maintain()   // 검사 기록(pack-checks)에 두 변환본이 실린다 — 지운 뒤 빠지는지 본다
+        #expect(h.store.saveUserSnippet(entry("문구"), editing: nil).isAccepted)                                      // g3
+        #expect(h.sandbox.generationNames() == ["g2", "g3"], "평소 커밋은 현재 − 2 이하만")
+        #expect(try filesMentioning("DELMARK", in: h).count > 1, "지우기 전에는 변환본·snapshot에 있다")
+        #expect(try checkedFiles(h).contains { $0.hasPrefix("\(gone)-r") })
+
+        #expect(h.store.deletePack(gone).isAccepted)                                                                 // g4
+        #expect(h.sandbox.generationNames() == ["g4"], "지우기는 현재 세대만 남긴다")
+        #expect(try filesMentioning("DELMARK", in: h).isEmpty, "지운 팩의 내용이 남은 파일 0")
+        #expect(try filesMentioning("\(gone)-r", in: h).isEmpty, "지운 팩의 변환본 이름(목록·검사 기록)도 남지 않는다")
+        #expect(try filesMentioning("\(gone).json", in: h).isEmpty, "snapshot 사본 이름도")
+        #expect(!packFileNames(h).contains { $0.hasPrefix("\(gone)-r") })
+        #expect(try !checkedFiles(h).contains { $0.hasPrefix("\(gone)-r") }, "검사 기록에서도 빠진다")
+        #expect(try checkedFiles(h).contains { $0.hasPrefix("\(kept)-r") }, "남은 팩의 검사 기록은 그대로")
+        #expect(h.load().includedPackIDs == [kept])
+
+        // 그 뒤 평소 커밋은 지금 규칙 그대로(현재 − 2 이하만)
+        #expect(h.store.saveUserSnippet(entry("문구2"), editing: nil).isAccepted)                                     // g5
+        #expect(h.sandbox.generationNames() == ["g4", "g5"])
+    }
+
+    @Test("★ 1-d — 팩을 바꾸면(켜진·꺼진 팩 모두) 옛 snapshot 세대를 모두 지운다 — 바꾸기 전 내용이 남은 파일 0", arguments: [true, false])
+    func replacePurgesOldSnapshots(enabled: Bool) throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let id = try h.importedID(h.store.importPack(pack("OLDMARK", chars: 10), source: .csv))                      // g1(켜짐)
+        if !enabled { #expect(h.store.setPackEnabled(id, enabled: false).isAccepted) }                               // g2 — g1에는 켜진 채 남아 있다
+        let oldFile = try packFileName(h, of: id)
+        #expect(h.sandbox.generationNames().count == (enabled ? 1 : 2))
+        #expect(try filesMentioning("OLDMARK", in: h).count > 1)
+
+        #expect(h.store.replacePack(id, with: pack("NEWMARK", chars: 10), source: .csv).isAccepted)
+        #expect(h.sandbox.generationNames() == ["g\(h.generations.packsGeneration)"], "현재 세대만")
+        #expect(try filesMentioning("OLDMARK", in: h).isEmpty, "바꾸기 전 내용이 남은 파일 0")
+        #expect(try filesMentioning(oldFile, in: h).isEmpty, "옛 변환본 이름도(목록·검사 기록) 남지 않는다")
+        #expect(h.load().includedPackIDs == (enabled ? [id] : []))
+    }
+
+    @Test("1-d — 평소 커밋(가져오기·켬/끔·순서·내 채움글)은 지금 규칙 그대로: 바로 앞 세대를 남긴다")
+    func ordinaryCommitsKeepPreviousGeneration() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))
+        let b = try h.importedID(h.store.importPack(pack("나", chars: 10), source: .csv))
+        #expect(h.sandbox.generationNames() == ["g1", "g2"])
+        #expect(h.store.setPackEnabled(a, enabled: false).isAccepted)
+        #expect(h.sandbox.generationNames() == ["g2", "g3"])
+        #expect(h.store.reorder([.pack(b), .userSnippets, .pack(a)]).isAccepted)
+        #expect(h.sandbox.generationNames() == ["g3", "g4"])
+    }
+}
+
+/// 이 상자(목록·변환본·검사 기록·snapshot) 안에서 `marker`(UTF-8 바이트)를 품은 파일 — 이름에 들었거나 내용에 들었거나
+private func filesMentioning(_ marker: String, in h: Harness) throws -> [String] {
+    let needle = Data(marker.utf8)
+    guard let enumerator = FileManager.default.enumerator(at: h.sandbox.root, includingPropertiesForKeys: [.isRegularFileKey]) else { return [] }
+    var found: [String] = []
+    for case let url as URL in enumerator {
+        guard (try url.resourceValues(forKeys: [.isRegularFileKey])).isRegularFile == true else { continue }
+        let contents = try Data(contentsOf: url)
+        if url.lastPathComponent.contains(marker) || contents.range(of: needle) != nil {
+            found.append(url.path.replacingOccurrences(of: h.sandbox.root.path, with: ""))
+        }
+    }
+    return found
+}
+
+/// 검사 기록(`pack-checks.json`)이 든 변환본 이름 — 파일이 없으면 빈 목록
+private func checkedFiles(_ h: Harness) throws -> [String] {
+    let url = h.sandbox.library.appendingPathComponent("pack-checks.json")
+    guard FileManager.default.fileExists(atPath: url.path) else { return [] }
+    let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
+    return ((object as? [String: Any]) ?? [:]).keys.sorted()
 }
 
 // MARK: - 키보드 PackSnapshotLoader
@@ -845,6 +928,28 @@ struct PackSnapshotLoaderTests {
         #expect(loaded.attempts == 2)
         #expect(loaded.packsGeneration == 2)
         #expect(loaded.includedPackIDs == [first, "pack2"])
+    }
+
+    /// 1-d — 팩 지우기는 옛 세대를 **바로** 지운다(평소 GC는 현재 − 2 이하). 키보드가 그 세대를 읽던 중이면 소실 → 새 세대로 다시
+    @Test("★ AC-26·1-d — 읽는 중 앱이 팩을 지우면 그 커밋이 읽던 세대를 바로 지운다 — 키보드는 새 세대로 다시 읽어 지운 팩 없이 싣는다")
+    func retriesWhenDeleteRemovesReadingGeneration() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))                 // g1
+        let b = try h.importedID(h.store.importPack(pack("나", chars: 10), source: .csv))                 // g2
+        let reader = CountingReader()
+        let store = h.store
+        let once = Counter()
+        reader.beforeRead = { url in
+            guard url.lastPathComponent == "\(a).json", once.next() == 1 else { return }
+            _ = store.deletePack(b)                                                                       // g3 — g2(읽는 중)를 바로 지운다
+        }
+        let loaded = h.load(reader: reader)
+        #expect(h.sandbox.generationNames() == ["g3"], "테스트가 아니라 저장소가 지웠다")
+        #expect(loaded.attempts == 2)
+        #expect(loaded.dropped == nil)
+        #expect(loaded.packsGeneration == 3)
+        #expect(loaded.includedPackIDs == [a], "지운 팩은 싣지 않는다")
     }
 
     @Test("★ AC-26 — 세대는 그대로인데 파일이 한 번 안 보이면 같은 세대로 다시 읽는다 (L08 · 소실 재시도 단독)")
@@ -1275,7 +1380,7 @@ struct LibraryRecoveryTests {
             }
         }
         if files == .allGood {
-            #expect(summaries.map(\.id) == ids, "가져온 순서(파일 시각)대로")
+            #expect(summaries.map(\.id) == ids, "가져온 순서(r 번호)대로")
             #expect(summaries.map(\.name) == ["회사 상용구", "사자성어 예시 팩", "상용 영어"])
             #expect(summaries[1].titleFormat == "사자성어 {n}번" && summaries[1].mode == .numbered && summaries[1].itemCount == 3)
         }
@@ -1350,6 +1455,30 @@ struct LibraryRecoveryTests {
         }
         #expect(backupName == "library.damaged-20261006T074222Z-2.json")
         #expect(h.store.summaries().map(\.name) == ["새 이름"])
+    }
+
+    @Test("★ 검증 F-1 — 복구 순서는 변환본 이름의 r 번호(쓴 차례)다 — 파일 수정 시각·이름 순과 무관(수정 시각을 읽지 않는다, PDR 1-d)")
+    func recoveryOrderFollowsRevision() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가 팩", chars: 10), source: .csv))   // r1
+        let b = try h.importedID(h.store.importPack(pack("나 팩", chars: 10), source: .csv))   // r2
+        let c = try h.importedID(h.store.importPack(pack("다 팩", chars: 10), source: .csv))   // r3
+        #expect(h.store.replacePack(a, with: pack("가 새 팩", chars: 10), source: .csv).isAccepted)   // a → r4
+        let packs = h.sandbox.library.appendingPathComponent("packs")
+        let files = try [a, b, c].map { try packFileName(h, of: $0) }
+        #expect(files.sorted() == files, "이름 순은 a·b·c — r 번호 순(b·c·a)과 다르다")
+        // 수정 시각은 a·c·b 순으로 — 시각으로 정렬하면 이 순서가 나온다(시험만 시각을 만진다)
+        for (file, seconds) in zip(files, [1_000.0, 3_000, 2_000]) {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: seconds)],
+                                                  ofItemAtPath: packs.appendingPathComponent(file).path)
+        }
+        _ = try damage(h, .corrupt)
+        guard case .recovered(3, 0, _) = h.store.recoverLibrary(now: recoveryTime) else {
+            Issue.record("복구돼야 한다"); return
+        }
+        #expect(h.store.summaries().map(\.id) == [b, c, a], "r2 · r3 · r4")
+        #expect(h.store.summaries().map(\.name) == ["나 팩", "다 팩", "가 새 팩"])
     }
 
     @Test("★ F-2 — 복구는 변환본 파일의 stats를 믿지 않고 다시 센다 — 앱 판정 == 키보드(AC-8, 검증 탐침 P2)")

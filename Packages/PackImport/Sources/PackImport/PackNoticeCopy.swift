@@ -286,6 +286,42 @@ public enum PackNoticeCopy {
         }
     }
 
+    /// 팩 상세의 틀·단축어 자리가 **가정**인 까닭 — 지금 키보드에 뜨지 않는 팩은 「켜면(다시 뜨면) 어떻게 되나」로 계산한다
+    /// (`PackImpact.standing` — 그 팩만 포함된 것으로 놓는다). 그 전제를 절 머리·배지에 드러낸다(검증 F-5)
+    public enum StandingPremise: Equatable, Sendable {
+        /// 꺼진 팩 — 켜면
+        case ifEnabled
+        /// 켜져 있지만 쉬는 팩 — 다시 뜨면
+        case ifResumed
+    }
+
+    /// 지금 뜨는 팩·읽을 수 없는 팩(자리를 계산하지 않는다)은 nil
+    public static func standingPremise(_ status: PackSummary.Status) -> StandingPremise? {
+        switch status {
+        case .on, .unavailable: nil
+        case .off: .ifEnabled
+        case .restingOverLimit, .restingForUserSnippets: .ifResumed
+        }
+    }
+
+    /// 「단축어 틀」 절 머리 — 가정이면 「— 켜면 이렇게 떠요」
+    public static func templatesHeader(_ premise: StandingPremise?) -> String {
+        switch premise {
+        case nil: templatesHeader
+        case .ifEnabled?: "\(templatesHeader) — 켜면 이렇게 떠요"
+        case .ifResumed?: "\(templatesHeader) — 다시 뜨면 이렇게 떠요"
+        }
+    }
+
+    /// 틀 배지 — 가정이면 「사용 중」이 아니라 「켜면 사용」·「뜨면 사용」(지금 쓰는 것처럼 보이지 않게). 뒤 순서·가려짐은 그대로
+    public static func patternBadge(_ status: PackStanding.PatternStatus, premise: StandingPremise?) -> String {
+        switch (status, premise) {
+        case (.owned, .ifEnabled?): "켜면 사용"
+        case (.owned, .ifResumed?): "뜨면 사용"
+        default: patternBadge(status)
+        }
+    }
+
     /// 틀 행 설명 줄 — 이름은 다른 팩 이름(`PackDetail.name(of:)`)
     public static func patternLine(_ status: PackStanding.PatternStatus, name: (String) -> String) -> String {
         switch status {
@@ -307,6 +343,15 @@ public enum PackNoticeCopy {
 
     /// U1 — 문구형 팩에서 위 줄에 밀린 단축어 절
     public static func hiddenTriggersHeader(count: Int) -> String { "지금 안 뜨는 단축어 \(number(count))개" }
+
+    /// U1 절 머리 — 가정이면 「지금」이 아니라 「켜도」·「다시 떠도」(검증 F-5)
+    public static func hiddenTriggersHeader(count: Int, premise: StandingPremise?) -> String {
+        switch premise {
+        case nil: hiddenTriggersHeader(count: count)
+        case .ifEnabled?: "켜도 안 뜨는 단축어 \(number(count))개"
+        case .ifResumed?: "다시 떠도 안 뜨는 단축어 \(number(count))개"
+        }
+    }
     public static let hiddenTriggerBadge = "뒤 순서"
 
     public static func hiddenTriggerLine(owner: PackImpact.Source, name: (String) -> String) -> String {

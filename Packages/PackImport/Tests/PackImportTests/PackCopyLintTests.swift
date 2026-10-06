@@ -32,12 +32,23 @@ enum PackCopyLint {
     /// 금칙어
     static let bannedWords = ["트리거", "잠시 뒤"]
 
-    /// AC-35 — xlsx **형식** 이름(확장자·「통합 문서」·Excel·workbook)과, 엑셀을 **가져오는 대상**으로 가리키는 말(「엑셀 파일」·「엑셀로」·알약 「엑셀」).
-    /// 엑셀 뒤가 「에서」·「·」·「이나」면 CSV를 만드는 **곳**이라 허용한다(「엑셀에서 「CSV UTF-8」로 저장」·「엑셀·Numbers·구글 시트에서는」)
-    static let xlsxPatterns = [#"(?i)xlsx"#, #"(?i)\.xls"#, #"(?i)excel"#, #"(?i)workbook"#, "통합 문서", "엑셀(?!에서|·|이나)"]
+    /// AC-35 — xlsx **형식** 이름(확장자 xls·xlsx·xlsm·xlsb — 점이 없어도·「통합 문서」·Excel·workbook·워크북)과, 엑셀을 **가져오는 대상**으로
+    /// 가리키는 말(「엑셀 파일」·「엑셀로」·알약 「엑셀」·「엑셀·CSV 파일」). 엑셀은 **CSV를 만드는 곳**으로만 허용한다 — 「엑셀」(또는
+    /// 「엑셀·Numbers·구글 시트」·「엑셀이나 구글 시트」처럼 엑셀로 시작하는 앱 목록) 바로 뒤가 「에서」여야 한다(마지막 패턴).
+    /// 그래도 「엑셀에서 만든 파일을 그대로 골라요」처럼 무엇을 하라는지 없는 문장이 남으므로, 엑셀을 말하는 문장은 「CSV」나 「복사」가
+    /// 함께 있어야 한다(`excelCompanions` — 검증 F-4 L1~L3)
+    static let xlsxPatterns = [
+        #"(?i)(?<![a-z])xls[xmb]?(?![a-z])"#, #"(?i)excel"#, #"(?i)workbook"#, "워크북", #"통합\s*문서"#,
+        #"엑셀(?!(?:(?:·|이나\s)[^·\s]+(?:\s[^·\s]+)?)*에서)"#
+    ]
+
+    /// 엑셀을 말하는 문장이 함께 가져야 하는 말 하나 — CSV로 저장하라는 안내이거나 칸을 복사해 붙이라는 안내다
+    static let excelCompanions = ["CSV", "복사"]
 
     static func xlsxMentions(in text: String) -> [String] {
-        xlsxPatterns.filter { text.range(of: $0, options: .regularExpression) != nil }
+        var found = xlsxPatterns.filter { text.range(of: $0, options: .regularExpression) != nil }
+        if text.contains("엑셀"), !excelCompanions.contains(where: text.contains) { found.append("엑셀(CSV·복사 없음)") }
+        return found
     }
 
     static func churchWords(in text: String) -> [String] {
@@ -47,6 +58,11 @@ enum PackCopyLint {
     }
 
     static func bannedWords(in text: String) -> [String] { bannedWords.filter(text.contains) }
+
+    /// U6를 앱 리터럴에 걸 파일 — 외부 채움글 화면(목록·상세·순서·가져오기·폼·안전망·정리). 앱 전체로 넓히면 기존 성경 기능 문구가 걸린다
+    static func isPackScreenFile(_ name: String) -> Bool {
+        name.hasPrefix("PackImport") || ["ExternalPackViews.swift", "PackSafetyNetViews.swift", "SnippetCleanupView.swift"].contains(name)
+    }
 }
 
 // MARK: - 검사 대상
@@ -181,9 +197,13 @@ struct PackCopyLintTests {
         ("엑셀 파일 그대로 가져오기", true), ("엑셀 파일 고르기", true), ("엑셀로 팩 만드는 법", true), ("엑셀", true),
         ("번호형 샘플.xlsx", true), ("XLSX", true), ("Excel 통합 문서(.xlsx)", true), ("옛 엑셀(.xls)", true), ("매크로가 든 파일(.xlsm·.xlsb)", true),
         ("엑셀 통합 문서로 저장", true), ("Workbook", true),
+        // 검증 F-4 L1~L3 — 엑셀을 가져오는 대상으로 · 할 일 없는 「엑셀에서」 · 점 없는 형식 이름
+        ("엑셀·CSV 파일을 그대로 가져와요", true), ("엑셀에서 만든 파일을 그대로 골라요", true), ("XLS 파일도 돼요", true),
+        ("XLS파일", true), ("xlsx로 저장", true), ("엑셀이나 CSV 파일 고르기", true), ("엑셀 워크북", true), ("통합문서", true),
+        ("엑셀이나 구글 시트에서 숫자·날짜처럼 보이는 글", true),   // CSV·복사가 없다 — 무엇을 하라는지 없어 걸린다(보수적)
         ("엑셀·Numbers·구글 시트에서는 「CSV UTF-8」로 저장한 뒤 가져와요.", false),
         ("다음부터는 엑셀에서 「CSV UTF-8」로 저장하면 이 화면이 안 나와요.", false),
-        ("엑셀이나 구글 시트에서 숫자·날짜처럼 보이는 글", false),
+        ("엑셀이나 구글 시트에서 칸을 골라 복사해요.", false),
         ("엑셀·구글 시트에서 칸을 골라 복사하면 그대로 붙어요.", false),
         ("CSV 파일 가져오기", false), ("번호형 샘플.csv", false)
     ])
@@ -244,6 +264,28 @@ struct PackCopyLintTests {
         #expect(literals.contains { $0.file == "SnippetCleanupView.swift" && $0.literal == "고치기" })
         #expect(literals.count > 100)
         for (file, literal) in literals { #expect(PackCopyLint.xlsxMentions(in: literal).isEmpty, "\(file): \(literal)") }
+    }
+
+    @Test("★ 검증 F-4 ② — 앱(`App/`) 소스에 직접 쓴 문자열도 금칙어 0(앱 전체), 외부 채움글 화면 파일은 U6도 0")
+    func appSourceHasNoBannedOrChurchWords() throws {
+        let literals = try appStringLiterals()
+        for (file, literal) in literals { #expect(PackCopyLint.bannedWords(in: literal).isEmpty, "\(file): \(literal)") }
+        // U6는 팩 화면 파일로 좁힌다 — 앱 전체면 기존 성경 기능(설정의 「성경 (개역한글)」 등) 문구가 걸린다
+        let packScreen = literals.filter { PackCopyLint.isPackScreenFile($0.file) }
+        #expect(Set(packScreen.map(\.file)).isSuperset(of: ["ExternalPackViews.swift", "PackImportFlowView.swift", "PackImportFormView.swift",
+                                                           "PackImportViews.swift", "PackSafetyNetViews.swift", "SnippetCleanupView.swift"]),
+                "검색 대상 파일이 실제로 문자열을 낸다 — 이름이 바뀌면 이 시험이 알린다")
+        for (file, literal) in packScreen { #expect(PackCopyLint.churchWords(in: literal).isEmpty, "\(file): \(literal)") }
+    }
+
+    @Test("검증 F-4 ② — 앱 문자열 검색이 금칙어·U6를 실제로 잡는다(규칙이 앱 리터럴에 걸려 있다)")
+    func appLiteralRulesCatch() {
+        let source = #"Text("잠시 뒤 다시 해 주세요"); Text("찬송가 팩"); Text("트리거 \(n)")"#
+        let literals = SwiftStringLiterals(source).literals
+        #expect(literals.contains { !PackCopyLint.bannedWords(in: $0).isEmpty })
+        #expect(literals.contains { !PackCopyLint.churchWords(in: $0).isEmpty })
+        #expect(PackCopyLint.isPackScreenFile("PackImportFormView.swift") && PackCopyLint.isPackScreenFile("ExternalPackViews.swift"))
+        #expect(!PackCopyLint.isPackScreenFile("SnippetSettingsView.swift"), "기존 채움글·성경 설정 화면은 U6 대상이 아니다")
     }
 
     @Test("앱 소스 검색 — 주석은 빼고, 보간 안의 문자열·여러 줄 문자열은 넣는다")

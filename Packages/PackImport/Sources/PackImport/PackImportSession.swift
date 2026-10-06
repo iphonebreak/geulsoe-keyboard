@@ -32,8 +32,9 @@ public enum PackImportProblem: Error, Equatable, Sendable {
     case structural(PackImportFailure)
     /// 고른 파일을 열지 못했다(권한·내려받기 실패) — 이유·경로를 담지 않는다
     case fileUnreadable
-    /// 받을 수 있는 행이 0 — 영구 비활성(5-5). 건너뛴 이유를 보이려고 미리보기를 들고 간다
-    case noValidRecords(PackImportPreview)
+    /// 받을 수 있는 행이 0 — 영구 비활성(5-5). 건너뛴 행의 **위치와 사유만** 들고 간다(검증 F-7 — 초안을 들면 `#이름`·`#권리`·`#틀`
+    /// 원문이 오류 값에 실린다. 4-G 화면이 보이는 것은 사유 묶음과 위치뿐이다)
+    case noValidRecords([SkippedRecord])
 }
 
 /// 미리보기 모델(시안 4-E·4-F·4-H·4-I) — 받을 항목 · 건너뛴 행과 사유 · 겹치는 단축어
@@ -310,7 +311,7 @@ public struct PackImportSession: Equatable, Sendable {
             case .draft(let draft):
                 let overlap = draft.mode == .phrases ? library.map { PackImpact.overlap(ofDraft: draft.entries, in: $0) } : nil
                 let preview = PackImportPreview(draft: draft, overlap: overlap)
-                outcome = draft.isImportable ? .preview(preview) : .failed(.noValidRecords(preview))
+                outcome = draft.isImportable ? .preview(preview) : .failed(.noValidRecords(draft.skipped))
                 review?.recordCount = draft.dataRecordCount
                 review?.multilineBodyCount = draft.mode == .numbered ? draft.items.filter { $0.body.contains("\n") }.count
                     : draft.entries.filter { $0.body.contains("\n") }.count

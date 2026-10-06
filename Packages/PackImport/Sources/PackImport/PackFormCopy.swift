@@ -35,9 +35,14 @@ public enum PackFormCopy {
     public static let addTemplate = "틀 추가"
     public static let removeTemplate = "틀 지우기"
     public static let chipPreviewHeader = "이렇게 칩이 떠요"
-    /// 10-1 — 「틀+번호는 공백 포함 48자 이내」(최대 확장 40 + 4자리 = 44 ≤ `committedTail` 48)
-    public static let templatesFooter = "앞 글자는 2자 이상, {n}은 한 번만 써요. 틀+번호는 띄어쓰기 포함 48자 이내로 써 주세요. "
-        + "틀은 \(PackNoticeCopy.number(PackLimits.templatePatterns))개까지예요."
+    /// 10-1 — 「틀+번호는 공백 포함 48자 이내」(최대 확장 40 + 4자리 = 44 ≤ `committedTail` 48). 숫자는 `TemplatePatternSpec`·`PackLimits`에서(검증 F-6)
+    public static let templatesFooter = "앞 글자는 \(PackNoticeCopy.number(TemplatePatternSpec.minimumPrefixCharacters))자 이상, {n}은 한 번만 써요. "
+        + "\(expandedTriggerRule) 틀은 \(PackNoticeCopy.number(PackLimits.templatePatterns))개까지예요."
+
+    /// 「틀+번호는 띄어쓰기 포함 48자 이내로 써 주세요.」 — 풋터와 `literalTooLong` 사유가 함께 쓴다
+    static var expandedTriggerRule: String {
+        "틀+번호는 띄어쓰기 포함 \(PackNoticeCopy.number(TemplatePatternSpec.expandedTriggerCharacters))자 이내로 써 주세요."
+    }
     public static let reviewFooter = "빨간 표시가 있으면 가져올 수 없어요. 주황 표시는 알림이에요."
 
     public static let licenseHeader = "권리 표기(꼭 필요해요)"
@@ -67,12 +72,12 @@ public enum PackFormCopy {
     public static func templateFailure(_ failure: TemplatePatternSpec.Failure) -> String {
         switch failure {
         case .placeholderCount: "{n}이 꼭 한 번 있어야 해요"
-        case .prefixTooShort: "앞 글자가 2자 이상이어야 해요"
+        case .prefixTooShort: "앞 글자가 \(PackNoticeCopy.number(TemplatePatternSpec.minimumPrefixCharacters))자 이상이어야 해요"
         case .prefixEndsWithDigit, .prefixAllDigits: "앞 글자가 숫자로 끝나면 번호와 붙어 읽혀요. 끝에 글자를 넣어 주세요"
         case .suffixEmpty: "{n} 뒤에 글자가 한 자 이상 있어야 해요"
         case .literalContainsNewline: "틀에는 줄바꿈을 쓸 수 없어요"
         case .reservedDateSuffix: "「날짜」「시간」「시각」으로 끝나면 날짜 채움글과 겹쳐요"
-        case .literalTooLong: "틀은 \(PackNoticeCopy.number(PackLimits.templateLiteral.characters))자까지예요. 틀+번호는 띄어쓰기 포함 48자 이내로 써 주세요"
+        case .literalTooLong: "틀은 \(PackNoticeCopy.number(PackLimits.templateLiteral.characters))자까지예요. \(String(expandedTriggerRule.dropLast()))"
         case .collidesWithBible: "내장 성경 채움글의 구절 단축어와 겹쳐요"
         }
     }
@@ -149,8 +154,8 @@ public enum PackFormCopy {
         case .templateRequired: "틀을 하나 이상 써 주세요."
         case .tooManyPatterns: "틀은 \(PackNoticeCopy.number(PackLimits.templatePatterns))개까지예요."
         case .pattern(_, let pattern): templateFailure(pattern)
-        // 폼으로는 생길 수 없는 사유(문구형에 틀 · 받을 항목 0) — 내용 없이 처음부터
-        case .templateNotAllowed, .noValidRecords: "문제가 생겨서 가져오지 못했어요. 처음부터 다시 해 주세요."
+        // 폼으로는 생길 수 없는 사유(문구형에 틀 · 받을 항목 0) — 버그라 다시 해도 같다. F3 꼴(계획서 4-2 — 내용 없이 「앱을 다시 열어」, 검증 F-6)
+        case .templateNotAllowed, .noValidRecords: "문제가 생겨서 가져오지 못했어요. 앱을 다시 열어 주세요."
         }
     }
 

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import KeyboardCore
 import TadakDomain
 @testable import PackImport
 
@@ -680,6 +681,43 @@ struct PackImportCommitStoreTests {
         #expect(store.store.summaries() == before)
     }
 
+    @Test("★ 검증 F-3 V05 (AC-3) — 바꾸기도 시트를 열 때 읽은 revision을 넘긴다: 그 사이 저장본이 바뀌어 거부되면 알림에 「다시 판정」 한 줄")
+    func replaceRechecked() async throws {
+        let store = Store(limits: tight)
+        defer { store.cleanup() }
+        _ = await store.client.importPack(phrasesPack("우리 회사 상용구", prefix: "옛", count: 1), source: .csv)        // 2자
+        let draft = try phrasesDraft()
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)   // 이 목록의 revision을 잡는다
+        // 그 사이 큰 팩이 아래에 들어온다 — 새 판(8자)으로 바꾸면 8 + 190 > 195라 큰 팩이 밀린다(R15 거부)
+        _ = await store.client.importPack(phrasesPack("큰 팩", prefix: string(18, "큰"), count: 10), source: .csv)
+        let before = store.store.summaries()
+        let asked = confirmation.confirm(filledForm(draft, name: "우리 회사 상용구"))
+        #expect(asked == nil)
+        let work = try required(confirmation.chooseReplace())
+        #expect(work.expectedRevision != nil && work.expectedRevision != store.store.revision)
+        let result = await PackImportConfirmation.perform(work, client: store.client)
+        let received = confirmation.receive(result)
+        #expect(received)
+        let notice = try #require(confirmation.notice)
+        #expect(notice.reason == .replaceExceedsLimit && notice.rechecked)
+        #expect(notice.message.hasPrefix(PackNoticeCopy.recheckedLine))
+        #expect(store.store.summaries() == before)
+    }
+
+    @Test("★ 검증 F-3 V26 (4-M) — 완료 개수는 같은 번호를 합친 **뒤** 팩에 실제로 든 수다(원본 데이터 행 수가 아니다), 건너뜀은 따로")
+    func completionCountsMergedItems() async throws {
+        let store = Store()
+        defer { store.cleanup() }
+        let csv = "#틀,사자성어 {n}번\n#권리,자체 작성\n번호,제목,본문\n1,첫 제목,첫 본문\n2,둘 제목,둘 본문\n1,고친 제목,고친 본문\n0,빈,빈\n"
+        let draft = try ImportHelper.draft(csv)
+        #expect(draft.dataRecordCount == 4 && draft.items.count == 2 && draft.duplicateCount == 1 && draft.skipped.count == 1)
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)
+        try await run(&confirmation, confirmation.confirm(filledForm(draft, name: "합친 팩")), client: store.client)
+        let completion = try #require(confirmation.completion)
+        #expect(completion.itemCount == 2 && completion.skippedCount == 1)
+        #expect(store.store.summaries().first?.itemCount == completion.itemCount, "완료 화면 수 == 목록 수")
+    }
+
     @Test("최종 검사에서 성경 겹침 — 저장하지 않고 폼으로(그 칸 번호)")
     func compileFailureStoresNothing() async throws {
         let store = Store()
@@ -811,5 +849,42 @@ struct PackFormCopyTests {
         #expect(PackFormCopy.compileFailure(.nameTooLong).contains("\(PackLimits.name.characters)자까지"))
         #expect(PackFormCopy.compileFailure(.licenseTooLong).contains("\(PackLimits.license.characters)자까지"))
         #expect(PackFormCopy.counter("가나다", limit: PackLimits.name) == "3/\(PackLimits.name.characters)")
+        // 검증 F-6 ③ — 「2자」「48자」도 상수에서(틀 검사와 같은 값)
+        let prefix = "\(TemplatePatternSpec.minimumPrefixCharacters)자 이상"
+        #expect(PackFormCopy.templatesFooter.hasPrefix("앞 글자는 \(prefix),"))
+        #expect(PackFormCopy.templateFailure(.prefixTooShort) == "앞 글자가 \(prefix)이어야 해요")
+        let expanded = "띄어쓰기 포함 \(TemplatePatternSpec.expandedTriggerCharacters)자 이내"
+        #expect(PackFormCopy.templatesFooter.contains(expanded) && PackFormCopy.templateFailure(.literalTooLong).contains(expanded))
+    }
+
+    @Test("★ 검증 F-6 ③ — 「앞 글자 2자」는 틀 검사가 실제로 막는 길이다 — 상수 하나가 문구와 검사를 함께 정한다")
+    func prefixMinimumIsTheRule() {
+        let short = String(repeating: "가", count: TemplatePatternSpec.minimumPrefixCharacters - 1)
+        let enough = String(repeating: "가", count: TemplatePatternSpec.minimumPrefixCharacters)
+        #expect(TemplatePatternSpec.parse("\(short){n}번") == .failure(.prefixTooShort))
+        #expect((try? TemplatePatternSpec.parse("\(enough){n}번").get()) != nil)
+        #expect(TemplatePatternSpec.minimumPrefixCharacters == 2, "시안 5-C 「앞 글자가 2자 이상」")
+    }
+
+    @Test("★ 검증 F-6 ③ — 「틀+번호 48자」는 키보드가 매칭에 보는 꼬리 길이다(거울 값 대조) — 최대 확장(틀 40 + 번호 4자리 + 띄어쓰기 2)이 그 안에 든다")
+    @MainActor
+    func expandedLimitMirrorsKeyboardTail() {
+        final class Sink: TextOutput {
+            func insertText(_ text: String) {}
+            func deleteBackward(_ count: Int) {}
+        }
+        let controller = InputController(output: Sink())
+        controller.syncWithDocument(documentTail: String(repeating: "가", count: TemplatePatternSpec.expandedTriggerCharacters + 20))
+        #expect(controller.textTail.count == TemplatePatternSpec.expandedTriggerCharacters)
+        let digits = String(PackLimits.numberRange.upperBound).count
+        #expect(PackLimits.templateLiteral.characters + digits + 2 <= TemplatePatternSpec.expandedTriggerCharacters)
+    }
+
+    @Test("★ 검증 F-6 ① — 폼으로 생길 수 없는 사유(버그)는 F3 꼴 — 「처음부터 다시」가 아니라 「앱을 다시 열어」, 내용 없음")
+    func impossibleFailuresUseInternalErrorCopy() {
+        for failure in [PackCompileFailure.templateNotAllowed, .noValidRecords] {
+            #expect(PackFormCopy.compileFailure(failure) == "문제가 생겨서 가져오지 못했어요. 앱을 다시 열어 주세요.")
+        }
+        #expect(PackNoticeCopy.message(.internalError, firstName: "", count: 0).hasSuffix("앱을 다시 열어 주세요."), "F3과 같은 끝말")
     }
 }

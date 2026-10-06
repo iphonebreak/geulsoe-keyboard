@@ -173,14 +173,32 @@ struct PackImportSessionTransitionTests {
     @Test("★ 유효 행 0 — 미리보기가 아니라 거부(영구 비활성), 건너뛴 이유는 들고 간다 (5-5·AC-19)")
     func noValidRecords() throws {
         var session = started(.paste("번호,제목,본문\n0,제목,본문\n,제목,본문\n"))
-        guard case .noValidRecords(let preview)? = session.problem else {
+        guard case .noValidRecords(let skipped)? = session.problem else {
             Issue.record("유효 0이어야 한다: \(session.phase)")
             return
         }
-        #expect(preview.draft.skipped.map(\.reason) == [.numberOutOfRange, .missingNumber])
+        #expect(skipped.map(\.reason) == [.numberOutOfRange, .missingNumber])
         #expect(!session.canProceed)
         session.confirmPartialImport()
         #expect(!session.canProceed)
+    }
+
+    @Test("★ 검증 F-7 — 유효 0 거부 값은 건너뛴 위치·사유만 든다: 파일의 `#이름`·`#권리`·`#틀`·본문이 오류 값 어디에도 없다(AC-34)")
+    func noValidRecordsCarriesNoContent() throws {
+        let marker = "표식글자"
+        let text = "#이름,\(marker)이름\n#권리,\(marker)권리\n#틀,\(marker){n}번\n번호,제목,본문\n0,\(marker)제목,\(marker)본문\n"
+        let session = started(.paste(text))
+        guard case .noValidRecords(let skipped)? = session.problem else {
+            Issue.record("유효 0이어야 한다: \(session.phase)")
+            return
+        }
+        #expect(skipped.map(\.reason) == [.numberOutOfRange])
+        let draft = try ImportHelper.draft(text)
+        #expect(draft.meta.name == "\(marker)이름", "초안에는 메타가 있다 — 오류 값이 그것을 옮기지 않는지 본다")
+        #expect(skipped == draft.skipped)
+        for dumped in [String(describing: session.phase), String(reflecting: session.phase)] {
+            #expect(!dumped.contains(marker), "\(dumped)")
+        }
     }
 
     @Test("★ R10 — 건너뜀 50% 이상은 자동 진행 금지, 명시 확인 뒤에만 진행 (AC-19)",
@@ -294,6 +312,50 @@ struct PackImportSessionRerunTests {
         let run = try required(session.chooseEncoding(.cp949))
         #expect(run.options == PackImportOptions(encoding: .cp949, delimiter: nil))
         #expect(run.source == .file(Data(ambiguousText.utf8)))
+    }
+
+    @Test("★ 검증 F-2 (AC-18) — 칸 나누기를 바꿔도 **고른 글자 방식은 그대로**: CP949로 확정한 é/챕 파일은 구분자를 바꿔 다시 읽어도 「챕」")
+    func delimiterChangeKeepsChosenEncoding() throws {
+        // 두 방식 모두 읽히고(C3 A9 — é/챕) 쉼표·세미콜론 둘 다 머리글을 인정하는 표 — UTF-8이 기본(자동)이라 CP949는 사용자가 고른 값이다
+        let bytes = Data("trigger,body,z;trigger;body\r\ncafe,Caf\u{E9},c;cafe;Caf\u{E9} meeting\r\n".utf8)
+        var session = started(.file(bytes))
+        #expect(session.review?.selected == .utf8 && session.review?.bothReadable == true)
+        drive(&session, session.chooseEncoding(.cp949))
+        session.confirmEncoding()
+        #expect(session.phase == .delimiter([.comma, .semicolon]))
+
+        let toSemicolon = try required(session.chooseDelimiter(.semicolon))
+        #expect(toSemicolon.options == PackImportOptions(encoding: .cp949, delimiter: .semicolon))
+        #expect(toSemicolon.source == .file(bytes), "원본 바이트에서 다시")
+        drive(&session, toSemicolon)
+        #expect(session.preview?.draft.entries.map(\.body) == ["Caf챕 meeting"])
+
+        let toComma = try required(session.chooseDelimiter(.comma))       // 미리보기에서 바꾸기(5-2 #4)
+        #expect(toComma.options == PackImportOptions(encoding: .cp949, delimiter: .comma))
+        drive(&session, toComma)
+        #expect(session.preview?.draft.entries.map(\.body) == ["Caf챕"], "UTF-8로 조용히 돌아가면 「Café」가 된다")
+        #expect(session.preview?.draft.encoding == .cp949)
+    }
+
+    @Test("★ 검증 F-3 V03 — 「글자 방식 다시 고르기」 뒤 다른 방식을 고르면 확인 화면을 **다시** 거친다 — 못 읽는 방식으로 바로 거부(원본 잃음)되지 않는다")
+    func reviewAgainRequiresConfirmationAgain() throws {
+        var session = started(.file(cp949(phrasesCSV)))
+        #expect(session.review?.selected == .cp949)
+        session.confirmEncoding()
+        #expect(session.preview != nil)
+
+        session.reviewEncodingAgain()
+        drive(&session, session.chooseEncoding(.utf8))                  // CP949 파일을 UTF-8로 — 못 읽는다
+        let review = try #require(session.review, "확인 화면으로 와야 한다: \(session.phase)")
+        #expect(review.selected == .utf8 && !review.utf8.isReadable)
+        #expect(session.hasSource, "거부로 끝나지 않았다 — 원본이 남아 다른 쪽을 다시 고를 수 있다")
+        session.confirmEncoding()                                        // 고른 쪽이 깨져 「다음」이 먹지 않는다
+        #expect(session.review != nil)
+
+        drive(&session, session.chooseEncoding(.cp949))
+        #expect(session.review?.selected == .cp949, "돌아와도 확인 화면에서 「다음」을 기다린다")
+        session.confirmEncoding()
+        #expect(session.preview?.draft.entries.map(\.triggers) == [["주소"], ["새해인사"]])
     }
 
     @Test("글자 확인으로 돌아갔다가 그대로 「다음」 — 같은 결과로 돌아온다(다시 읽지 않는다)")
