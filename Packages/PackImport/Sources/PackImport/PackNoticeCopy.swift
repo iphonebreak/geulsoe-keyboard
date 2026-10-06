@@ -12,7 +12,7 @@ public enum PackNoticeCopy {
     /// 이름을 모르는 팩(표시 칸도 변환본도 없는 옛 목록·그 사이 지워진 팩)
     public static let unnamedPack = "이름 없는 팩"
 
-    /// G3 — 순서 변경 화면 아래 줄(완료는 막지 않는다). 언제 띄우는지는 3단계(`PackImpact`)가 정한다
+    /// G3 — 순서 변경 화면 아래 줄(완료는 막지 않는다). `PackImpact.restingPacks`가 비지 않을 때(`impactLines`의 첫 줄)
     public static func reorderWarning(names: [String]) -> String {
         "이렇게 바꾸면 \(subject(names.first ?? unnamedPack, count: max(names.count, 1))) 한도 밖으로 밀려서 쉬어요."
     }
@@ -155,6 +155,187 @@ public enum PackNoticeCopy {
     public static let recoveryFailedTitle = "복구하지 못했어요"
     public static let recoveryFailedMessage = "기기에 쓰지 못했어요. 저장 공간을 확인한 뒤 다시 해 주세요. 원래 목록 파일은 그대로예요."
 
+    // MARK: - 외부 채움글 절 (2-B·2-C) — 3단계. 글자는 시안 `docs/design/external-snippet-packs/index.html` 2절 그대로
+
+    public static let externalSectionTitle = "외부 채움글"
+    /// 가져오기 입구 — 3단계는 자리만(눌리지 않는다, 코디네이터 결정 ⓐ). 4단계가 연결한다
+    public static let addPack = "외부 채움글 추가"
+    /// 2-B 빈 상태 — **CSV 전용판**(AC-35, R12: 1.3.0은 CSV만)
+    public static let emptyListFooter = "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요."
+    /// 2-C 팩이 있을 때
+    public static let listFooter = "위에 있는 줄이 먼저 떠요 — 같은 문구 단축어는 위 줄이, 같은 단축어 틀은 위 팩이 가져요. 「내 채움글」도 이 순서에 들어가요.\n"
+        + "한도는 외부 팩만 위에서부터 채워요(내 채움글은 늘 써요). 가져온 팩은 이 기기에만 저장돼요."
+    /// 순서 목록의 「내 채움글」 줄(U1) — 아래 「내 채움글」 절과 헷갈리지 않게 「(순서)」
+    public static let userSlotTitle = "내 채움글 (순서)"
+    public static let userSlotDetail = "순서 표시 전용 · 눌리지 않아요 · 문구는 아래 「내 채움글」 절에서"
+    /// 행 값 — 사용자가 켰나(쉬는 중이어도 켬, 쉬는 이유는 `statusLine`)
+    public static let enabledValue = "켬"
+    public static let disabledValue = "끔"
+
+    /// 종류 · 항목 수 — 종류를 모르면 nil(읽을 수 없는 옛 팩)
+    public static func packKind(_ summary: PackSummary) -> String? {
+        guard let mode = summary.mode else { return nil }
+        return "\(mode == .numbered ? "번호형" : "문구형") · \(summary.itemCount)개"
+    }
+
+    /// 2-C 행 보조줄 — 종류 · 항목 수 · 대표 틀(번호형만)
+    public static func packRowDetail(_ summary: PackSummary) -> String? {
+        guard let kind = packKind(summary) else { return nil }
+        guard summary.mode == .numbered, let format = summary.titleFormat else { return kind }
+        return kind + " · " + format
+    }
+
+    // MARK: 순서 화면 (2-D·2-G)
+
+    public static let orderTitle = "팩 순서"
+    public static let orderDone = "완료"
+    public static let cancel = "취소"
+    /// 이 화면엔 아래 「내 채움글」 절이 없어 「(순서)」를 붙이지 않는다(시안 2-D)
+    public static let orderUserTitle = "내 채움글"
+
+    public static func orderUserDetail(count: Int) -> String {
+        "내가 만든 문구 \(count)개 · 지울 수 없어요"
+    }
+
+    /// 순서 행 보조줄 — 2-C 행과 같고, 순서와 무관하게 변하지 않는 상태(꺼짐·읽을 수 없음)만 덧붙인다(쉬는 중은 순서에 따라 바뀌어 아래 안내가 맡는다)
+    public static func orderPackDetail(_ summary: PackSummary) -> String? {
+        let state: String? = summary.status == .unavailable ? "읽을 수 없어요" : (summary.isEnabled ? nil : "꺼짐")
+        let parts = [packRowDetail(summary), state].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    public static let orderFooter = "끌어서 순서를 바꿔요. 위에 있는 줄이 먼저 떠요 — 「내 채움글」도 끌 수 있어요. 한도는 외부 팩만 위에서부터 채워요."
+
+    /// 완료 전 안내 한 줄(주황) — 본문 + 작은 둘째 줄
+    public struct ImpactLine: Equatable, Sendable {
+        public let message: String
+        public let detail: String?
+
+        public init(message: String, detail: String?) {
+            self.message = message
+            self.detail = detail
+        }
+    }
+
+    /// 2-D·2-G 완료 전 안내(G3) — ① 쉬게 될 팩(㉤ — 가장 큰 변화라 먼저) ② 틀 주인 변화(10-4 ③) ③ 단축어 주인 변화(U1). 영향이 없으면 빈 배열.
+    /// 「완료」는 막지 않는다(거부가 아니라 안내)
+    public static func impactLines(_ impact: PackImpact, in library: PackImpact.Library) -> [ImpactLine] {
+        var lines: [ImpactLine] = []
+        if !impact.restingPacks.isEmpty {
+            lines.append(ImpactLine(message: reorderWarning(names: impact.restingPacks.map(library.name(of:))), detail: nil))
+        }
+        for group in impact.templateOwnerGroups {
+            let shown = group.patterns.map { library.display($0) }
+            let last = shown.last ?? ""
+            let to = library.name(of: group.to)
+            lines.append(ImpactLine(
+                message: "이렇게 바꾸면 \(shown.map { "「\($0)」" }.joined(separator: "·"))\(objectParticle(after: last)) "
+                    + "「\(library.name(of: group.from))」 대신 「\(to)」\(subjectParticle(after: to)) 가져요.",
+                detail: shown.count == 1 ? "「\(last)」\(objectParticle(after: last)) 치면 지금과 다른 팩의 글이 떠요."
+                    : "이 틀을 치면 지금과 다른 팩의 글이 떠요."))
+        }
+        for group in impact.triggerOwnerGroups {
+            let from = sourceName(group.from, name: library.name(of:))
+            let to = sourceName(group.to, name: library.name(of:))
+            let listed = group.triggers.prefix(shownTriggerCount).joined(separator: ", ")
+                + (group.triggers.count > shownTriggerCount ? " 외 \(group.triggers.count - shownTriggerCount)개" : "")
+            lines.append(ImpactLine(message: "이렇게 바꾸면 단축어 \(group.triggers.count)개가 \(from) 대신 \(to)의 문구로 떠요.",
+                                    detail: "\(listed) — \(from)의 같은 단축어는 안 떠요."))
+        }
+        return lines
+    }
+
+    /// 안내 둘째 줄에 이름을 다 보일 단축어 수 — 넘으면 「외 n개」
+    static let shownTriggerCount = 5
+
+    /// 단축어 주인 이름 — 내 채움글·「팩 이름」·내장 팩(시안 2-G는 「내 채움글」을 괄호 없이 쓴다)
+    private static func sourceName(_ source: PackImpact.Source, name: (String) -> String) -> String {
+        switch source {
+        case .userSnippets: "내 채움글"
+        case .pack(let id): "「\(name(id))」"
+        case .builtIn: "내장 팩"
+        }
+    }
+
+    // MARK: 팩 상세 (2-E·U1)
+
+    public static let useToggle = "이 팩 사용"
+    public static let infoHeader = "정보"
+    public static let kindLabel = "종류"
+    public static let licenseLabel = "권리 표기"
+    public static let infoFooter = "권리 표기는 가져올 때 확인한 문구 그대로예요."
+    public static let templatesHeader = "단축어 틀"
+    public static let templatesFooter = "같은 틀을 두 팩이 쓰면 위에 있는 팩이 가져요. 고유한 앞 글자(예: 고사성어 {n}번)를 쓰면 겹치지 않아요."
+
+    /// 틀 상태 배지(10-4 ③) — 사용 중 · 뒤 순서 · 가려짐
+    public static func patternBadge(_ status: PackStanding.PatternStatus) -> String {
+        switch status {
+        case .owned: "사용 중"
+        case .outranked: "뒤 순서"
+        case .shadowed: "가려짐"
+        }
+    }
+
+    /// 틀 행 설명 줄 — 이름은 다른 팩 이름(`PackDetail.name(of:)`)
+    public static func patternLine(_ status: PackStanding.PatternStatus, name: (String) -> String) -> String {
+        switch status {
+        case .owned(let shared):
+            guard let first = shared.first else { return "이 팩이 써요" }
+            let others = shared.count > 1 ? "「\(name(first))」 외 \(shared.count - 1)개 팩도" : "「\(name(first))」도"
+            return "아래 \(others) 같은 틀 — 위에 있는 이 팩이 써요"
+        case .outranked(let owner):
+            let ownerName = name(owner)
+            return "위에 있는 「\(ownerName)」\(subjectParticle(after: ownerName)) 같은 틀을 써요"
+        case .shadowed(let triggers):
+            let first = triggers.first ?? ""
+            let subject = triggers.count > 1 ? "「\(first)」 외 \(triggers.count - 1)개가" : "「\(first)」\(subjectParticle(after: first))"
+            return "단축어 \(subject) 먼저 떠서 이 틀은 안 떠요"
+        }
+    }
+
+    /// U1 — 문구형 팩에서 위 줄에 밀린 단축어 절
+    public static func hiddenTriggersHeader(count: Int) -> String { "지금 안 뜨는 단축어 \(count)개" }
+    public static let hiddenTriggerBadge = "뒤 순서"
+
+    public static func hiddenTriggerLine(owner: PackImpact.Source, name: (String) -> String) -> String {
+        let shown = rowName(owner, name: name)
+        return "위에 있는 \(shown)\(subjectParticle(after: shown)) 먼저 떠요"
+    }
+
+    /// 위 줄이 하나면 그 이름 위로, 여럿이면 「더 위로」
+    public static func hiddenTriggersFooter(owners: [PackImpact.Source], name: (String) -> String) -> String {
+        let distinct = owners.reduce(into: [PackImpact.Source]()) { if !$0.contains($1) { $0.append($1) } }
+        let target = distinct.count == 1 ? "이 팩을 \(rowName(distinct[0], name: name)) 위로" : "이 팩을 더 위로"
+        return "목록에서 위에 있는 쪽이 먼저 떠요. 이 팩 문구를 쓰려면 \(target) 올려 주세요."
+    }
+
+    /// 목록 줄 이름 — 「내 채움글」·「팩 이름」(U1 컷은 내 채움글에도 괄호를 쓴다)
+    private static func rowName(_ source: PackImpact.Source, name: (String) -> String) -> String {
+        switch source {
+        case .userSnippets: "「내 채움글」"
+        case .pack(let id): "「\(name(id))」"
+        case .builtIn: "내장 팩"
+        }
+    }
+
+    public static let usageHeader = "사용법"
+    /// 내장 팩 상세와 같은 문구
+    public static let usageFooter = "단축어를 커서 끝까지 치면 툴바에 칩이 떠요. 칩을 누르면 단축어가 전문으로 바뀌어요."
+
+    public static func usageResult(_ title: String) -> String { "→ \(title)" }
+
+    public static let deletePackButton = "팩 삭제"
+
+    // MARK: 삭제 확인 (2-F)
+
+    public static func deleteTitle(name: String) -> String { "「\(name)」\(objectParticle(after: name)) 지울까요?" }
+
+    /// 항목 수를 모르면(읽을 수 없는 팩을 복구해 stats가 0) 숫자 없이
+    public static func deleteMessage(itemCount: Int) -> String {
+        let subject = itemCount > 0 ? "이 팩의 채움글 \(itemCount)개가" : "이 팩이"
+        return subject + " 이 기기에서 지워져요. 다시 쓰려면 파일을 다시 가져와야 해요."
+    }
+
     static func label(_ action: PackChangeNotice.Action) -> String {
         switch action {
         case .confirm: "확인"
@@ -176,14 +357,23 @@ public enum PackNoticeCopy {
     /// (2·4·5·9 = 이·사·오·구 → 「가」), 그 밖(로마자 등 읽는 법을 모르는 글자)이면 「이(가)」.
     /// 계획서 표는 「○○」가로 적었지만 이름은 사용자가 정한다 — 「…팩」가처럼 틀린 조사를 보이지 않는다
     public static func subjectParticle(after name: String) -> String {
+        particle(after: name, consonant: "이", vowel: "가")
+    }
+
+    /// 이름 뒤 목적격 조사 — 규칙은 주격과 같다(받침 → 「을」, 없으면 「를」, 모르면 「을(를)」). 삭제 확인(2-F)·틀 주인 안내(2-D)
+    public static func objectParticle(after name: String) -> String {
+        particle(after: name, consonant: "을", vowel: "를")
+    }
+
+    private static func particle(after name: String, consonant: String, vowel: String) -> String {
         guard let last = name.last(where: { $0.isLetter || $0.isNumber }),
-              let scalar = last.unicodeScalars.first, last.unicodeScalars.count == 1 else { return "이(가)" }
+              let scalar = last.unicodeScalars.first, last.unicodeScalars.count == 1 else { return "\(consonant)(\(vowel))" }
         if (0xAC00...0xD7A3).contains(scalar.value) {
-            return (scalar.value - 0xAC00) % 28 == 0 ? "가" : "이"
+            return (scalar.value - 0xAC00) % 28 == 0 ? vowel : consonant
         }
         if last.isASCII, let digit = last.wholeNumberValue {
-            return [2, 4, 5, 9].contains(digit) ? "가" : "이"
+            return [2, 4, 5, 9].contains(digit) ? vowel : consonant
         }
-        return "이(가)"
+        return "\(consonant)(\(vowel))"
     }
 }

@@ -29,8 +29,8 @@ struct SnippetNoticeBanner: View {
 }
 
 extension View {
-    /// 채움글 변경 알림 — 사유별 제목·문구(`PackChangeNotice`, 계획서 4-2절). 2단계는 **정리하기·목록 복구** 버튼을 단다
-    /// (`onAction`이 정리 화면·복구 시트로 보낸다). 팩 순서 바꾸기·지우기·꺼 둔 채로 가져오기는 그 화면이 생기는 단계(3~5)에서 붙인다
+    /// 채움글 변경 알림 — 사유별 제목·문구(`PackChangeNotice`, 계획서 4-2절). **정리하기·목록 복구**(2단계)와 **팩 순서 바꾸기·지우기**(3단계)
+    /// 버튼을 단다(`onAction`이 정리 화면·복구 시트·순서 화면·삭제 확인으로 보낸다). 꺼 둔 채로 가져오기는 가져오기 화면이 생기는 단계(4·5)에서 붙인다
     func packChangeNoticeAlert(
         _ notice: Binding<PackChangeNotice?>, onAction: @escaping @MainActor (PackChangeNotice.Action) -> Void
     ) -> some View {
@@ -55,8 +55,9 @@ extension View {
 }
 
 extension PackChangeNotice.Action {
-    /// 지금 앱이 연결한 동작 — 나머지는 버튼을 그리지 않는다(누를 곳이 없는 버튼을 보이지 않게)
-    static let wiredInApp: Set<PackChangeNotice.Action> = [.organize, .recoverLibrary]
+    /// 지금 앱이 연결한 동작 — 나머지는 버튼을 그리지 않는다(누를 곳이 없는 버튼을 보이지 않게).
+    /// 팩 순서 바꾸기(C1)·지우기(E2)는 외부 팩 켜기에서만 나온다 — 그 알림을 띄우는 팩 상세(`ExternalPackDetailView`)가 받는다
+    static let wiredInApp: Set<PackChangeNotice.Action> = [.organize, .recoverLibrary, .reorderPacks, .deletePack]
 }
 
 private struct PackLibraryRecoveryFlow: ViewModifier {

@@ -30,6 +30,11 @@ struct SnippetSettingsView: View {
     @State private var showsCleanup = false
     @State private var showsRecovery = false
 
+    // 1-c 3단계 — 「외부 채움글」 절(2-B·2-C)의 목록과 순서 화면(2-D·2-G)
+    @State private var packSummaries: [PackSummary] = []
+    @State private var packOrder: [SnippetSourceSlot] = SnippetSourceSlot.defaultOrder
+    @State private var showsOrder = false
+
     var body: some View {
         Form {
             safetyNetBanners
@@ -67,6 +72,11 @@ struct SnippetSettingsView: View {
                 Text("팩을 누르면 설명과 사용법, 켜기/끄기가 나와요.")
             }
             .disabled(!settings.snippetsEnabled)
+
+            // 외부 채움글 — 내장 팩 바로 아래(U5). 순서 목록·팩 상세·순서 바꾸기는 `ExternalPackViews.swift`
+            ExternalSnippetSection(summaries: packSummaries, order: packOrder, onReorder: { showsOrder = true },
+                                   onChange: { Task { await reloadSafetyNet() } })
+                .disabled(!settings.snippetsEnabled)
 
             Section {
                 // **id 는 정규화 단축어를 이어 붙인 것**이다. `\.trigger` 는 더 이상 없고,
@@ -121,6 +131,13 @@ struct SnippetSettingsView: View {
         .packLibraryRecovery(isPresented: $showsRecovery) {
             Task { await reloadSafetyNet() }
         }
+        // 순서 화면 — 닫힌 뒤 알림(거부·그 사이 바뀐 결과만, 결정 ⓑ)을 띄우고 목록을 다시 읽는다
+        .sheet(isPresented: $showsOrder, onDismiss: {
+            showPendingNotice()
+            Task { await reloadSafetyNet() }
+        }) {
+            PackOrderView { pendingNotice = $0 }
+        }
         .sheet(isPresented: $showsEditor, onDismiss: showPendingNotice) {
             SnippetEditorView(editing: nil, onSave: save, onAction: { pendingAction = $0 })
         }
@@ -161,14 +178,18 @@ struct SnippetSettingsView: View {
         let fresh = await client.userSnippetBudget()
         budget = fresh
         userSnippets = fresh.entries
-        unavailablePackNames = await client.summaries().filter { $0.status == .unavailable }.map { $0.name ?? PackNoticeCopy.unnamedPack }
+        let summaries = await client.summaries()
+        packSummaries = summaries
+        packOrder = await client.order()
+        unavailablePackNames = summaries.filter { $0.status == .unavailable }.map { $0.name ?? PackNoticeCopy.unnamedPack }
     }
 
-    /// 알림 버튼(2단계) — 정리하기는 정리 화면, 목록 복구는 확인 시트
+    /// 알림 버튼 — 정리하기는 정리 화면, 목록 복구는 확인 시트(2단계), 팩 순서 바꾸기는 순서 화면(3단계)
     private func perform(_ action: PackChangeNotice.Action) {
         switch action {
         case .organize: showsCleanup = true
         case .recoverLibrary: showsRecovery = true
+        case .reorderPacks: showsOrder = true
         default: break
         }
     }

@@ -1596,3 +1596,109 @@ struct UserSnippetBudgetTests {
         #expect(UserSnippetBudget.displayEntries([a, a2, b]) == [a, b], "설정 화면 목록과 같은 중복 제거")
     }
 }
+
+// MARK: - 1-c 3단계 — 영향 계산 읽기·팩 상세 (G3 · 2-E · U1)
+
+@Suite("외부 채움글 1-c 3단계 — 영향 계산 읽기·팩 상세 (G3 · 2-E · U1)")
+struct PackImpactStoreTests {
+
+    @Test("★ impactLibrary — 목록 순서·읽기 모델·문구형 단축어·번호형 틀·revision을 한 번에. 읽을 수 없는 팩은 내용 없이")
+    func impactLibraryReadsEverything() throws {
+        let user = [entry("주소")]
+        let h = Harness(user: user, builtIn: [entry("새해인사")], limits: .candidate)
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 50), source: .csv))
+        let b = try h.importedID(h.store.importPack(numbered("사자성어 예시 팩", count: 12), source: .csv, enabled: false))
+        let c = try h.importedID(h.store.importPack(pack("못읽음", chars: 10), source: .csv))
+        try removePackFiles(h, of: c)
+        let library = try #require(h.store.impactLibrary())
+        #expect(library.revision == h.store.revision)
+        #expect(library.order == h.store.order)
+        #expect(library.packs.map(\.summary) == h.store.summaries(), "목록 행과 같은 읽기 모델")
+        #expect(library.packs[0].triggers == pack("회사 상용구", chars: 50).entries.flatMap(\.triggers))
+        #expect(library.packs[1].patterns == [TemplatePattern(prefix: "사자성어", suffix: "번")])
+        #expect(library.packs[2].triggers.isEmpty && library.packs[2].patterns.isEmpty, "읽을 수 없는 팩은 열지 않는다")
+        #expect(library.userTriggers == ["주소"] && library.builtInTriggers == ["새해인사"])
+        #expect(library.userSnippetCount == 1)
+        #expect([a, b, c] == library.packs.map(\.id))
+    }
+
+    @Test("목록을 읽을 수 없으면 nil — 순서 화면을 열지 않는다(E1)")
+    func impactLibraryNilWhenUnreadable() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        _ = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        try Data("{ 망가짐".utf8).write(to: h.sandbox.library.appendingPathComponent("library.json"))
+        #expect(h.store.impactLibrary() == nil)
+        #expect(h.store.packDetail("pack1") == nil)
+    }
+
+    /// 순서 — 0·1·2는 팩 a·b·c, -1은 「내 채움글」 줄. 시작 상태: a(70)·b(50) 포함, c(60)는 켠 채 쉬는 중(내 채움글 30 때문에)
+    static let reorderCases: [[Int]] = [
+        [-1, 2, 0, 1], [-1, 1, 2, 0], [-1, 0, 1, 2], [-1, 2, 1, 0], [-1, 1, 0, 2], [-1, 0, 2, 1],
+        [2, -1, 0, 1], [0, 1, 2, -1], [1, 2, -1, 0]
+    ]
+
+    @Test("★ G3 == 커밋 — 사전 안내의 「쉬게 될 팩」이 실제 reorder가 돌려준 newlyExcluded와 같다(같은 판정 함수)",
+          arguments: reorderCases)
+    func restingMatchesCommit(_ permutation: [Int]) throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        // 한도 needleChars 200 — 셋 다 켜도 180이라 들어간다
+        let ids = [try h.importedID(h.store.importPack(pack("가", chars: 70), source: .csv)),
+                   try h.importedID(h.store.importPack(pack("나", chars: 50), source: .csv)),
+                   try h.importedID(h.store.importPack(pack("다", chars: 60), source: .csv))]
+        // 내 채움글 30자를 저장하면 맨 아래 c가 한도 밖으로 — 받고 쉬게 한다(R14)
+        guard case .accepted(let saved) = h.store.saveUserSnippet(entry(String(repeating: "내", count: 30)), editing: nil) else {
+            Issue.record("내 채움글 저장은 외부 팩 때문에 막히지 않는다")
+            return
+        }
+        #expect(saved.newlyExcluded == [ids[2]])
+        let library = try #require(h.store.impactLibrary())
+        let order: [SnippetSourceSlot] = permutation.map { $0 < 0 ? .userSnippets : .pack(ids[$0]) }
+        let preview = PackImpact.of(PackImpact.Proposal(order: order), in: library)
+        guard case .accepted(let accepted) = h.store.reorder(order, expectedRevision: library.revision) else {
+            Issue.record("순서 바꾸기는 거부가 없다")
+            return
+        }
+        #expect(preview.restingPacks == accepted.newlyExcluded)
+        #expect(!accepted.rechecked)
+        // 표가 실제로 쉬는 경우를 덮는지 — c를 a·b 사이나 앞에 두면 뒤 팩이 밀린다
+        let cIndex = permutation.filter { $0 >= 0 }.firstIndex(of: 2)
+        #expect(accepted.newlyExcluded.isEmpty == (cIndex == 2))
+    }
+
+    @Test("★ packDetail — 권리·사용 예·자리. 번호형 예시는 첫 항목을 첫 틀 원문으로, 문구형은 처음 셋")
+    func packDetailNumbered() throws {
+        let h = Harness(user: [entry("장")], limits: .candidate)
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(numbered("사자성어 예시 팩", count: 12), source: .csv))
+        let detail = try #require(h.store.packDetail(a))
+        #expect(detail.summary.name == "사자성어 예시 팩")
+        #expect(detail.license == "자체 작성")
+        #expect(detail.examples == [.init(trigger: "사자성어 1번", title: "사자성어 1번")], "제목이 빈 항목은 틀로 채운 제목(칩과 같다)")
+        #expect(detail.standing?.patterns.map(\.status) == [.owned(sharedWith: [])])
+        #expect(detail.name(of: a) == "사자성어 예시 팩")
+        #expect(h.store.packDetail("없는 팩") == nil)
+
+        let phrasesID = try h.importedID(h.store.importPack(ExternalPack(name: "회사 상용구", license: "총무팀", mode: .phrases, entries: [
+            SnippetEntry(triggers: ["장", "회사장"], title: "장 제목", body: "본문"), SnippetEntry(trigger: "인사", title: "인사 제목", body: "본문"),
+            SnippetEntry(trigger: "회의", title: "회의 제목", body: "본문"), SnippetEntry(trigger: "넷째", title: "넷째 제목", body: "본문")
+        ]), source: .csv))
+        let phrasesDetail = try #require(h.store.packDetail(phrasesID))
+        #expect(phrasesDetail.examples == [.init(trigger: "장", title: "장 제목"), .init(trigger: "인사", title: "인사 제목"),
+                                           .init(trigger: "회의", title: "회의 제목")])
+        #expect(phrasesDetail.standing?.hiddenTriggers == [.init(trigger: "장", owner: .userSnippets)], "내 채움글이 위라 「장」은 뒤 순서")
+    }
+
+    @Test("읽을 수 없는 팩의 상세 — 이름·상태는 목록에서, 권리·예시·자리는 없다(열지 않는다)")
+    func packDetailUnavailable() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        try removePackFiles(h, of: a)
+        let detail = try #require(h.store.packDetail(a))
+        #expect(detail.summary.status == .unavailable && detail.summary.name == "회사 상용구")
+        #expect(detail.license == nil && detail.examples.isEmpty && detail.standing == nil)
+    }
+}

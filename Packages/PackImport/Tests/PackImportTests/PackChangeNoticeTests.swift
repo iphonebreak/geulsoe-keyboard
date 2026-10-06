@@ -378,6 +378,8 @@ private let everyCopy: [String] = {
               PackNoticeCopy.recoveredTitle, PackNoticeCopy.recoveredMessage(packCount: 41), PackNoticeCopy.recoveredMessage(packCount: 0),
               PackNoticeCopy.recoveryFailedTitle, PackNoticeCopy.recoveryFailedMessage]
     texts += [PackLibraryStatus.unreadable, .corrupt, .unknownSchema].compactMap(PackNoticeCopy.libraryBanner)
+    // 3단계 — 외부 채움글 절·순서 화면·팩 상세·삭제 확인(`PackImpactCopyTests.swift`)
+    texts += stage3Copy
     return texts
 }()
 

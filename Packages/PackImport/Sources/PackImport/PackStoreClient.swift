@@ -33,6 +33,10 @@ public struct PackStoreClient: Sendable {
     public func libraryStatus() async -> PackLibraryStatus { await run { $0.libraryStatus() } }
     public func userSnippetBudget() async -> UserSnippetBudget { await run { $0.userSnippetBudget() } }
     public func recoveryPreview() async -> Int? { await run { $0.recoveryPreview() } }
+    /// 순서 화면(2-D·2-G)의 사전 영향 계산 입력(G3) — 변환본을 열어 단축어·틀을 읽는다. 목록을 못 읽으면 nil
+    public func impactLibrary() async -> PackImpact.Library? { await run { $0.impactLibrary() } }
+    /// 팩 상세(2-E·U1) — 없는 팩·목록을 못 읽으면 nil
+    public func packDetail(_ id: String) async -> PackDetail? { await run { $0.packDetail(id) } }
     /// 앱 실행 때 한 번(옛 세대·안 쓰는 변환본 정리 · 내 채움글 세대 올림 · 변환본 내용 검사 — 1-c G6·G9)
     public func maintain() async { await run { $0.maintain() } }
 
@@ -118,4 +122,14 @@ public struct PackChangeOutcome: Equatable, Sendable {
     }
 
     public var isAccepted: Bool { result.isAccepted }
+
+    /// 순서 바꾸기 뒤 띄울 알림(코디네이터 결정 ⓑ 2026-10-06) — 「완료」 전에 사전 안내(`PackImpact`)로 이미 보였으므로 **같은 말을
+    /// 다시 하지 않는다.** 거부면 언제나 알린다. 받았으면 **그 사이 저장본이 바뀌어 다시 판정했을 때**(`rechecked`)만 쉬게 된 팩을
+    /// 알린다 — 다시 판정하지 않았는데 쉬게 된 팩이 안내와 다르면(같은 판정 함수라 있어선 안 되는 일) 그때도 숨기지 않는다.
+    /// - Parameter previewed: 완료 직전 사전 안내의 `PackImpact.restingPacks`
+    public func noticeAfterReorder(previewed: [String]) -> PackChangeNotice? {
+        guard case .accepted(let accepted) = result else { return notice }
+        guard accepted.rechecked || Set(accepted.newlyExcluded) != Set(previewed) else { return nil }
+        return notice
+    }
 }

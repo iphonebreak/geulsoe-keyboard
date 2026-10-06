@@ -192,6 +192,24 @@ public final class PackStore: @unchecked Sendable {
         }
     }
 
+    /// 순서·켬/끔 사전 영향(G3 `PackImpact`)과 팩 상세의 입력 — 목록·내 채움글·켜진 내장을 **한 번의 큐 작업**에서 읽는다. 읽을 수 있는 팩은
+    /// 변환본을 열어 단축어·틀을 담는다(최대 16 × 3MB 디코드 — 메인에서 부르지 않는다, `PackStoreClient.impactLibrary`). 목록을 못 읽으면 nil
+    public func impactLibrary() -> PackImpact.Library? {
+        queue.sync { makeImpactLibrary(keeping: nil)?.library }
+    }
+
+    /// 팩 상세(2-E·U1) — 읽기 모델·권리·사용 예·자리(틀 소유·가림·뒤 순서). 같은 큐 작업 안에서 `impactLibrary`와 같은 입력으로 계산한다.
+    /// 없는 팩·목록을 못 읽으면 nil. 읽을 수 없는 팩은 이름·상태만(권리·예·자리 없음)
+    public func packDetail(_ id: String) -> PackDetail? {
+        queue.sync {
+            guard let made = makeImpactLibrary(keeping: id), let pack = made.library.pack(id) else { return nil }
+            return PackDetail(summary: pack.summary, license: made.kept?.license, examples: made.kept.map(PackDetail.examples(of:)) ?? [],
+                              standing: PackImpact.standing(of: id, in: made.library),
+                              names: Dictionary(made.library.packs.map { ($0.id, made.library.name(of: $0.id)) },
+                                                uniquingKeysWith: { first, _ in first }))
+        }
+    }
+
     // MARK: - 목록 복구 (R24)
 
     /// 복구하면 불러올 팩 수(읽을 수 없는 변환본 포함) — 확인 시트의 「가져온 팩 N개를 찾았어요」. 목록이 읽히면 nil(복구할 것이 없다)
@@ -730,6 +748,38 @@ public final class PackStore: @unchecked Sendable {
         return try? JSONDecoder().decode(StoredExternalPack.self, from: data)
     }
 
+    /// `impactLibrary`·`packDetail`의 몸통 — 큐 안에서만. `keeping` 팩의 변환본 내용은 따로 돌려준다(두 번 디코드하지 않게)
+    private func makeImpactLibrary(keeping keptID: String?) -> (library: PackImpact.Library, kept: ExternalPack?)? {
+        guard let library = readLibrary() else { return nil }
+        let unavailable = unavailablePackIDs(in: library)
+        let user = userSnippets.entries()
+        let disabled = disabledBuiltIns()
+        let builtIn = builtInEntries(Set(disabled))
+        let input = budgetInput(library: library, user: user, disabled: disabled, unavailable: unavailable)
+        let evaluation = withUnavailable(ActivePackBudget.evaluate(baseline: input.baseline, packs: input.packs, limits: limits),
+                                         library: library, unavailable: unavailable)
+        var kept: ExternalPack?
+        let packs = library.order.compactMap(\.packID).compactMap { id -> PackImpact.Pack? in
+            guard let entry = library.packs[id] else { return nil }
+            let isUnavailable = unavailable.contains(id)
+            let content: ExternalPack? = isUnavailable ? nil : autoreleasepool { readStoredPack(file: entry.file)?.pack }
+            if id == keptID { kept = content }
+            // 표시 칸은 `display(of:isUnavailable:)`(`summaries()`)와 같은 규칙 — 목록 칸이 비었으면(1-b 목록) 방금 읽은 내용에서
+            let display = entry.name == nil ? content.map { ($0.name, $0.mode, $0.template?.titleFormat) } : nil
+            let summary = PackSummary(id: id, name: display?.0 ?? entry.name, mode: display?.1 ?? entry.mode,
+                                      itemCount: entry.stats.items, titleFormat: display == nil ? entry.titleFormat : display?.2,
+                                      isEnabled: entry.isEnabled,
+                                      status: PackSummary.status(of: id, isEnabled: entry.isEnabled, isUnavailable: isUnavailable,
+                                                                 in: evaluation))
+            return PackImpact.Pack(summary: summary, stats: entry.stats, content: content)
+        }
+        let impactLibrary = PackImpact.Library(
+            revision: library.revision, order: library.order, packs: packs, userSnippets: input.userSnippets, builtIn: input.builtIn,
+            userTriggers: user.flatMap(\.triggers), builtInTriggers: builtIn.flatMap(\.triggers),
+            userSnippetCount: UserSnippetBudget.displayEntries(user).count, limits: limits)
+        return (impactLibrary, kept)
+    }
+
     private func loadState() -> State? {
         readLibrary().map { State(library: $0, user: userSnippets.entries(), disabled: disabledBuiltIns()) }
     }
@@ -750,10 +800,16 @@ public final class PackStore: @unchecked Sendable {
         let packs = library.order.compactMap(\.packID).filter { !unavailable.contains($0) }.compactMap { id in
             library.packs[id].map { ActivePackBudget.Candidate(id: id, isEnabled: $0.isEnabled, stats: $0.stats) }
         }
-        // 내 채움글 stats는 키보드 로더와 **같은 함수**로 센다(AC-8) — 항목마다 한 번 인코드, 배열 재인코드 없음(R23)
-        let builtIn = PackStats.of(entries: builtInEntries(Set(disabled)))
-        return PackBudgetInput(userSnippets: ActivePackBudget.userSnippetUsage(user, builtIn: builtIn, limits: limits).stats,
-                               builtIn: builtIn, packs: packs)
+        let baseline = Self.baselineStats(user: user, builtInEntries: builtInEntries(Set(disabled)), limits: limits)
+        return PackBudgetInput(userSnippets: baseline.user, builtIn: baseline.builtIn, packs: packs)
+    }
+
+    /// 내 채움글·켜진 내장의 예산 몫 — 커밋 판정과 사전 영향 계산(`PackImpact.Library`)이 이 하나를 쓴다. 내 채움글 stats는 키보드 로더와
+    /// **같은 함수**로 센다(AC-8) — 항목마다 한 번 인코드, 배열 재인코드 없음(R23)
+    static func baselineStats(user: [SnippetEntry], builtInEntries: [SnippetEntry],
+                              limits: PackBudgetLimits) -> (user: PackStats, builtIn: PackStats) {
+        let builtIn = PackStats.of(entries: builtInEntries)
+        return (ActivePackBudget.userSnippetUsage(user, builtIn: builtIn, limits: limits).stats, builtIn)
     }
 
     /// 지금 저장본(내 채움글·끈 내장은 저장된 값)의 판정 — `evaluation()`·`summaries()`가 같은 계산을 쓴다
