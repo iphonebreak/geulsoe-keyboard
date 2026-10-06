@@ -44,13 +44,7 @@ public final class PackStore: @unchecked Sendable {
         case libraryUnreadable
         /// 변환본을 읽을 수 없는 팩은 켤 수 없다(검증 C5) — 다시 가져오기·삭제로 복구(1-c)
         case packUnavailable(String)
-
-        /// 예산 게이트(한도·밀림·팩 수) 거부인가 — 화면의 「한도」 문구는 이것만, 나머지는 「저장하지 못했어요」(검증 F3).
-        /// 최종 문구는 1-c 기획 검토에서 다시 본다
-        public var isBudgetLimit: Bool {
-            if case .gate = self { return true }
-            return false
-        }
+        // 화면 문구는 거부 사유만으로 정하지 않는다 — 무엇을 하다 막혔는지·저장 전 상태가 함께 정한다(`PackChangeNotice`, 1-c G7)
     }
 
     public struct Accepted: Equatable, Sendable {
@@ -137,11 +131,35 @@ public final class PackStore: @unchecked Sendable {
     public func evaluation() -> ActivePackBudget.Evaluation {
         queue.sync {
             let library = readLibrary() ?? PackLibrary()
+            return currentEvaluation(library: library, unavailable: unavailablePackIDs(in: library))
+        }
+    }
+
+    /// 팩 목록의 읽기 모델(1-c G1) — **목록 순서대로**, 이름·종류·항목 수·대표 틀·켬/끔·상태 5갈래. 판정은 `evaluation()`과 같다.
+    /// 표시 칸은 목록(`library.json`)에서 읽어 **변환본을 못 읽는 팩도 이름이 보인다.** 표시 칸이 없는 옛 목록(1-b)이면 그 팩만 변환본을
+    /// 열어 채운다(못 열면 이름 nil — 화면은 「이름 없는 팩」). 목록을 못 읽으면 빈 목록이다(`isLibraryReadable`로 가른다)
+    public func summaries() -> [PackSummary] {
+        queue.sync {
+            let library = readLibrary() ?? PackLibrary()
             let unavailable = unavailablePackIDs(in: library)
-            let input = budgetInput(library: library, user: userSnippets.entries(), disabled: disabledBuiltIns(),
-                                    unavailable: unavailable)
-            return withUnavailable(ActivePackBudget.evaluate(baseline: input.baseline, packs: input.packs, limits: limits),
-                                   library: library, unavailable: unavailable)
+            let evaluation = currentEvaluation(library: library, unavailable: unavailable)
+            return library.order.compactMap(\.packID).compactMap { id in
+                guard let entry = library.packs[id] else { return nil }
+                let isUnavailable = unavailable.contains(id)
+                let display = display(of: entry, isUnavailable: isUnavailable)
+                return PackSummary(id: id, name: display.name, mode: display.mode, itemCount: entry.stats.items,
+                                   titleFormat: display.titleFormat, isEnabled: entry.isEnabled,
+                                   status: PackSummary.status(of: id, isEnabled: entry.isEnabled, isUnavailable: isUnavailable,
+                                                              in: evaluation))
+            }
+        }
+    }
+
+    /// 팩 이름 하나 — 알림(`PackChangeNotice`)용. `summaries()`와 같은 표시 칸을 쓰되 판정은 하지 않는다. 모르면 nil
+    func packName(_ id: String) -> String? {
+        queue.sync {
+            guard let library = readLibrary(), let entry = library.packs[id] else { return nil }
+            return display(of: entry, isUnavailable: unavailablePackIDs(in: library).contains(id)).name
         }
     }
 
@@ -224,7 +242,7 @@ public final class PackStore: @unchecked Sendable {
             let stored = StoredExternalPack(packID: id, source: source, pack: pack)
             var proposal = Proposal(change: enabled ? .importPack(id: id) : .importDisabledPack(id: id), state: state)
             proposal.library.order.append(.pack(id))
-            proposal.library.packs[id] = PackLibrary.Entry(file: "", isEnabled: enabled, stats: stored.stats)
+            proposal.library.packs[id] = PackLibrary.Entry(file: "", isEnabled: enabled, stored: stored)
             proposal.newPack = stored
             proposal.packID = id
             return .success(proposal)
@@ -250,7 +268,7 @@ public final class PackStore: @unchecked Sendable {
             guard let entry = state.library.packs[id] else { return .failure(.notFound) }
             let stored = StoredExternalPack(packID: id, source: source, pack: pack)
             var proposal = Proposal(change: entry.isEnabled ? .replaceActivePack(id: id) : .replaceInactivePack(id: id), state: state)
-            proposal.library.packs[id] = PackLibrary.Entry(file: "", isEnabled: entry.isEnabled, stats: stored.stats)
+            proposal.library.packs[id] = PackLibrary.Entry(file: "", isEnabled: entry.isEnabled, stored: stored)
             proposal.newPack = stored
             return .success(proposal)
         }
@@ -477,6 +495,21 @@ public final class PackStore: @unchecked Sendable {
         return library
     }
 
+    /// 목록의 표시 칸 — 비었으면(1-b 목록) 변환본에서 채운다. 못 읽는 팩은 열지 않는다
+    private func display(of entry: PackLibrary.Entry,
+                         isUnavailable: Bool) -> (name: String?, mode: ExternalPack.Mode?, titleFormat: String?) {
+        if entry.name == nil, !isUnavailable, let stored = readStoredPack(file: entry.file) {
+            return (stored.pack.name, stored.pack.mode, stored.pack.template?.titleFormat)
+        }
+        return (entry.name, entry.mode, entry.titleFormat)
+    }
+
+    /// 변환본 하나 — 표시 칸이 없는 옛 목록의 이름 채우기에만 쓴다(최대 3MB 디코드라 커밋 경로에서는 부르지 않는다)
+    private func readStoredPack(file: String) -> StoredExternalPack? {
+        guard !file.isEmpty, let data = try? Data(contentsOf: packsDirectory.appendingPathComponent(file)) else { return nil }
+        return try? JSONDecoder().decode(StoredExternalPack.self, from: data)
+    }
+
     private func loadState() -> State? {
         readLibrary().map { State(library: $0, user: userSnippets.entries(), disabled: disabledBuiltIns()) }
     }
@@ -498,6 +531,13 @@ public final class PackStore: @unchecked Sendable {
         let builtIn = PackStats.of(entries: builtInEntries(Set(disabled)))
         return PackBudgetInput(userSnippets: ActivePackBudget.userSnippetUsage(user, builtIn: builtIn, limits: limits).stats,
                                builtIn: builtIn, packs: packs)
+    }
+
+    /// 지금 저장본(내 채움글·끈 내장은 저장된 값)의 판정 — `evaluation()`·`summaries()`가 같은 계산을 쓴다
+    private func currentEvaluation(library: PackLibrary, unavailable: Set<String>) -> ActivePackBudget.Evaluation {
+        let input = budgetInput(library: library, user: userSnippets.entries(), disabled: disabledBuiltIns(), unavailable: unavailable)
+        return withUnavailable(ActivePackBudget.evaluate(baseline: input.baseline, packs: input.packs, limits: limits),
+                               library: library, unavailable: unavailable)
     }
 
     /// 판정 결과에 **켜진** 못 읽는 팩을 `.unavailable` 제외로 싣는다(목록 순서) — 1-c가 이유를 보일 수 있게(C5)
@@ -530,7 +570,7 @@ public final class PackStore: @unchecked Sendable {
     }
 }
 
-/// 앱 전용 목록 — 순서(U1 「내 채움글」 줄 포함)·켬/끔·변환본 파일·stats(앱이 계산, 판정용). 파일 하나, 원자적 쓰기.
+/// 앱 전용 목록 — 순서(U1 「내 채움글」 줄 포함)·켬/끔·변환본 파일·stats(앱이 계산, 판정용)·표시 칸(1-c). 파일 하나, 원자적 쓰기.
 struct PackLibrary: Codable, Equatable {
     static let schemaVersion = 1
 
@@ -538,6 +578,30 @@ struct PackLibrary: Codable, Equatable {
         var file: String
         var isEnabled: Bool
         var stats: PackStats
+        // MARK: 표시 칸(1-c G1) — 커밋 때 변환본과 함께 채운다. 목록 행·알림의 팩 이름이 변환본을 열지 않고(못 읽는 팩도) 여기서 나온다.
+        // **선택 칸이라 이행이 없다** — 1-b 목록에는 이 키가 없고 그대로 디코드된다(nil), schema 번호도 그대로다.
+        // 항목 수는 `stats.items`를 쓴다(따로 두지 않는다). 팩 이름은 사용자 입력이다 — 로그·네트워크 0
+        /// 팩 이름(40자 이하)
+        var name: String?
+        var mode: ExternalPack.Mode?
+        /// 대표 틀 — 번호형의 첫 `#틀` 원문(`PackTemplate.titleFormat`), 문구형은 nil
+        var titleFormat: String?
+
+        init(file: String, isEnabled: Bool, stats: PackStats,
+             name: String? = nil, mode: ExternalPack.Mode? = nil, titleFormat: String? = nil) {
+            self.file = file
+            self.isEnabled = isEnabled
+            self.stats = stats
+            self.name = name
+            self.mode = mode
+            self.titleFormat = titleFormat
+        }
+
+        /// 새 변환본으로 — stats·표시 칸을 그 파일에서
+        init(file: String, isEnabled: Bool, stored: StoredExternalPack) {
+            self.init(file: file, isEnabled: isEnabled, stats: stored.stats, name: stored.pack.name, mode: stored.pack.mode,
+                      titleFormat: stored.pack.template?.titleFormat)
+        }
     }
 
     var schema = PackLibrary.schemaVersion

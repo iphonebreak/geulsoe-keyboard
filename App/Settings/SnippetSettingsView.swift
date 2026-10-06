@@ -7,7 +7,8 @@ import TadakData
 ///
 /// 내 채움글은 App Group에 앱이 쓰고 키보드가 읽는다 (단방향 — 권한 불필요).
 /// **쓰기는 전부 `PackStore` 하나를 거친다**(외부 채움글 1-b, PDR `external-snippet-packs.md` 9-1·AC-2) — 예산 판정·snapshot·
-/// 세대·알림이 그 안에 있고, 키보드는 세대가 바뀔 때만 매처를 다시 만든다(AC-9).
+/// 세대·알림이 그 안에 있고, 키보드는 세대가 바뀔 때만 매처를 다시 만든다(AC-9). 화면은 **메인 밖 래퍼** `PackStoreClient`로 부르고
+/// (1-c G8 — `PackStore`는 `queue.sync`라 메인에서 부르면 저장 동안 화면이 멈춘다), 결과는 사유별 알림 `PackChangeNotice`로 보인다(1-c G7).
 struct SnippetSettingsView: View {
 
     @Binding var settings: KeyboardSettings
@@ -16,12 +17,12 @@ struct SnippetSettingsView: View {
     @State private var showsEditor = false
     /// 고치는 중인 항목. nil이면 **추가**다 — 시트 하나가 두 모드를 다 맡는다.
     @State private var editingEntry: EditingSnippet?
-    /// 알림 — 반영하지 못한 이유(사유별, 검증 F3) 또는 저장은 됐지만 팩이 쉬게 됐다(AC-4, 검증 C6). 1-c 전의 최소 문구
-    @State private var failure: SnippetChangeFailure?
+    /// 알림 — 반영하지 못한 이유(사유별) 또는 저장은 됐지만 팩이 쉬게 됐다(이름 있는 G1·G2, AC-4). 문구는 `PackNoticeCopy`
+    @State private var notice: PackChangeNotice?
     /// 편집 시트가 닫힌 뒤 띄울 알림 — 시트가 닫히는 중에 부모가 알림을 띄우지 않게 미뤄 둔다
-    @State private var pendingNotice: SnippetChangeFailure?
+    @State private var pendingNotice: PackChangeNotice?
 
-    /// 읽기 전용 — 쓰기는 `PackStore.live`
+    /// 읽기 전용 — 쓰기는 `PackStoreClient.live`(메인 밖에서 `PackStore.live`)
     private let repository = AppGroupSnippetRepository()
 
     var body: some View {
@@ -106,7 +107,7 @@ struct SnippetSettingsView: View {
         .navigationTitle("채움글")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: reloadUserSnippets)
-        .snippetChangeFailureAlert($failure)
+        .packChangeNoticeAlert($notice)
         .sheet(isPresented: $showsEditor, onDismiss: showPendingNotice) {
             SnippetEditorView(editing: nil, onSave: save)
         }
@@ -129,32 +130,39 @@ struct SnippetSettingsView: View {
     ///
     /// ★ 단축어 파싱은 **`SnippetEntry.parseTriggers` 한 곳**이다 — 새 파서를 쓰면
     /// 중복 제거·정규화 규칙이 갈린다.
-    /// - Returns: 거부 이유 — **nil이 아니면 시트가 닫히지 않고 입력이 남는다**(검증 C6). 받았는데 쉬게 된 팩이 있으면
-    ///   시트가 닫힌 뒤 한 줄 알린다(AC-4)
-    private func save(_ entry: SnippetEntry, editing original: SnippetEntry?) -> SnippetChangeFailure? {
+    /// - Returns: 거부 알림 — **nil이 아니면 시트가 닫히지 않고 입력이 남는다**(검증 C6). 받았는데 쉬게 된 팩이 있으면
+    ///   시트가 닫힌 뒤 팩 이름과 함께 알린다(AC-4, G1·G2)
+    private func save(_ entry: SnippetEntry, editing original: SnippetEntry?) async -> PackChangeNotice? {
         // ★ 규칙은 `SnippetEntry.applying(_:editing:to:)`에 있다 — **여기 두면 테스트가 못 닿는다.**
         //   그래서 「고치면 자리가 맨 뒤로 튄다」를 아무도 못 잡았다(검증자 2026-09-23).
         //   추가는 맨 뒤, 편집은 **제자리**다. 겹쳐 지워진 항목만큼의 인덱스 보정도 거기 있다.
         // ★ 저장은 `PackStore` 한 길 — 한 번에 **한 항목**(1-b 계약). 판정·snapshot·키보드 알림이 그 안에 있다.
-        let result = PackStore.live.saveUserSnippet(entry, editing: original)
+        let outcome = await PackStoreClient.live.saveUserSnippet(entry, editing: original)
         reloadUserSnippets()
-        if case .accepted(let accepted) = result, !accepted.newlyExcluded.isEmpty { pendingNotice = .packsRested }
-        return SnippetChangeFailure(result)
+        // 거부면 언제나 알림이 있다(`PackChangeNoticeTableTests`) — 시트가 그것을 띄우고 닫히지 않는다
+        guard outcome.isAccepted else { return outcome.notice }
+        pendingNotice = outcome.notice
+        return nil
     }
 
     private func showPendingNotice() {
-        guard let notice = pendingNotice else { return }
+        guard let pending = pendingNotice else { return }
         pendingNotice = nil
-        failure = notice
+        notice = pending
     }
 
     /// 지울 때도 한 항목씩 — 여러 개를 고르면 하나씩 커밋한다(1-b 「저장 1회 = 항목 1개」)
     private func deleteSnippets(at offsets: IndexSet) {
-        // 지우기는 화면과 같은 기준(정규화 단축어)으로 겹치는 저장분까지 지운다(`PackStore.deleteUserSnippet`, 검증 F7)
-        for entry in offsets.map({ userSnippets[$0] }) {
-            if let reason = SnippetChangeFailure(PackStore.live.deleteUserSnippet(entry)) { failure = reason }
+        let targets = offsets.map { userSnippets[$0] }
+        // 화면에서 먼저 뺀다 — 저장은 메인 밖이라 기다리는 동안 지운 행이 되살아나 보이지 않게. 거부되면(드묾) 아래 다시 읽기가 되돌린다
+        userSnippets.remove(atOffsets: offsets)
+        Task {
+            // 지우기는 화면과 같은 기준(정규화 단축어)으로 겹치는 저장분까지 지운다(`PackStore.deleteUserSnippet`, 검증 F7)
+            for entry in targets {
+                if let shown = await PackStoreClient.live.deleteUserSnippet(entry).notice { notice = shown }
+            }
+            reloadUserSnippets()
         }
-        reloadUserSnippets()
     }
 
     private func reloadUserSnippets() {
@@ -165,67 +173,50 @@ struct SnippetSettingsView: View {
     }
 }
 
-/// 내장 팩 켜기·끄기 — 목록과 팩 상세가 **이 하나**를 쓴다(외부 채움글 AC-6). 판정·snapshot은 `PackStore`가 하고, 받으면 설정에
-/// 반영한다(설정 저장 지점은 `RootView` 하나 — 여기서 저장하지 않는다). 거부되면 스위치는 그대로 두고 알린다.
+/// 내장 팩 켜기·끄기 — 목록과 팩 상세가 **이 하나**를 쓴다(외부 채움글 AC-6). 판정·snapshot은 `PackStore`가 메인 밖에서 하고
+/// (`PackStoreClient`, 1-c G8), 받으면 설정에 반영한다(설정 저장 지점은 `RootView` 하나 — 여기서 저장하지 않는다. **판정 뒤에** 바꾼다 —
+/// 먼저 바꾸면 키보드가 판정 전 설정을 읽는다). 거부되면 스위치는 제자리로 돌아가고 알린다(B1·B2).
+///
+/// `pending`은 저장하는 동안 스위치가 보일 값이다 — 기다리는 동안 스위치가 옛 값으로 튀었다 다시 넘어가지 않게. 그 사이 다시 누르면 무시한다
 @MainActor
 private func builtInPackBinding(
-    _ packID: String, settings: Binding<KeyboardSettings>, onReject: @escaping @MainActor (SnippetChangeFailure) -> Void
+    _ packID: String, settings: Binding<KeyboardSettings>, pending: Binding<Bool?>,
+    onNotice: @escaping @MainActor (PackChangeNotice) -> Void
 ) -> Binding<Bool> {
     Binding(
-        get: { !settings.wrappedValue.disabledSnippetPacks.contains(packID) },
+        get: { pending.wrappedValue ?? !settings.wrappedValue.disabledSnippetPacks.contains(packID) },
         set: { enabled in
+            guard pending.wrappedValue == nil else { return }
+            pending.wrappedValue = enabled
             let current = settings.wrappedValue.disabledSnippetPacks
-            if let reason = SnippetChangeFailure(PackStore.live.setBuiltInPack(packID, enabled: enabled, currentDisabled: current)) {
-                onReject(reason)
-                return
-            }
-            if enabled {
-                settings.wrappedValue.disabledSnippetPacks.removeAll { $0 == packID }
-            } else if !current.contains(packID) {
-                settings.wrappedValue.disabledSnippetPacks.append(packID)
+            Task {
+                let outcome = await PackStoreClient.live.setBuiltInPack(packID, enabled: enabled, currentDisabled: current)
+                if outcome.isAccepted {
+                    if enabled {
+                        settings.wrappedValue.disabledSnippetPacks.removeAll { $0 == packID }
+                    } else if !current.contains(packID) {
+                        settings.wrappedValue.disabledSnippetPacks.append(packID)
+                    }
+                }
+                pending.wrappedValue = nil
+                if let notice = outcome.notice { onNotice(notice) }
             }
         }
     )
 }
 
-/// 채움글 변경 알림 — **한도(예산 게이트) 거부만** 한도 문구, 그 밖(쓰기 실패·없는 항목·목록 손상 등)은 일반 문구(검증 F3),
-/// 받았지만 한도 때문에 외부 팩이 쉬게 됐으면 한 줄(AC-4, 검증 C6). 판정은 `PackStore.Rejection.isBudgetLimit`(테스트됨).
-/// 최종 문구는 1-c 기획 검토에서 다시 본다
-private enum SnippetChangeFailure: Equatable {
-    case limit
-    case other
-    /// 거부가 아니다 — 저장은 됐고 쉬게 된 팩이 있다
-    case packsRested
-
-    /// 거부 이유 — 받았으면 nil
-    init?(_ result: PackStore.CommitResult) {
-        guard case .rejected(let rejection, _) = result else { return nil }
-        self = rejection.isBudgetLimit ? .limit : .other
-    }
-
-    var title: String {
-        self == .packsRested ? "저장했어요" : "반영하지 못했어요"
-    }
-
-    var message: String {
-        switch self {
-        case .limit: "채움글 한도를 넘어요. 다른 문구를 줄이거나 지운 뒤 다시 해 주세요."
-        case .other: "저장하지 못했어요. 잠시 뒤 다시 해 주세요."
-        case .packsRested: "한도 때문에 쉬게 된 채움글 팩이 있어요."
-        }
-    }
-}
-
 private extension View {
-    /// 채움글 변경 알림 — 1-c의 안내·복구 화면 전까지의 최소 문구(문구는 기획 검토 대상)
-    func snippetChangeFailureAlert(_ failure: Binding<SnippetChangeFailure?>) -> some View {
-        alert(failure.wrappedValue?.title ?? "", isPresented: Binding(
-            get: { failure.wrappedValue != nil },
-            set: { if !$0 { failure.wrappedValue = nil } }
-        )) {
-            Button("확인", role: .cancel) {}
-        } message: {
-            Text(failure.wrappedValue?.message ?? "")
+    /// 채움글 변경 알림 — 사유별 제목·문구(`PackChangeNotice`, 1-c 계획서 4-2절). 팩 이름은 **표시만** 한다(로그·분석 이벤트 0).
+    /// 1-c 1단계는 **닫는 버튼만** 단다 — 알림 모델의 다른 동작(정리하기·목록 복구·팩 순서 바꾸기·지우기·꺼 둔 채로 가져오기)은
+    /// 그 화면이 생기는 단계(2~5)에서 붙인다
+    func packChangeNoticeAlert(_ notice: Binding<PackChangeNotice?>) -> some View {
+        alert(notice.wrappedValue?.title ?? "", isPresented: Binding(
+            get: { notice.wrappedValue != nil },
+            set: { if !$0 { notice.wrappedValue = nil } }
+        ), presenting: notice.wrappedValue) { shown in
+            Button(shown.dismiss.label, role: .cancel) {}
+        } message: { shown in
+            Text(shown.message)
         }
     }
 }
@@ -265,18 +256,20 @@ private struct SnippetEditorView: View {
     /// ★ **마이그레이션으로 조용히 바꾸지 않는다.** 사용자가 등록한 값을 우리가 해석해
     /// 덮어쓰는 것이고 되돌릴 근거도 안 남는다. **알리고 사용자가 정한다** — 저장도 막지 않는다.
     private var loadedCommaTrigger: Bool { editing?.hasCommaInTrigger ?? false }
-    /// 거부 이유를 돌려준다 — nil이면 저장됨(시트를 닫는다), 아니면 **시트·입력을 그대로 두고** 알린다(검증 C6)
-    let onSave: (SnippetEntry, SnippetEntry?) -> SnippetChangeFailure?
+    /// 거부 알림을 돌려준다 — nil이면 저장됨(시트를 닫는다), 아니면 **시트·입력을 그대로 두고** 알린다(검증 C6)
+    let onSave: @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?
 
     @Environment(\.dismiss) private var dismiss
-    @State private var failure: SnippetChangeFailure?
+    @State private var notice: PackChangeNotice?
+    /// 저장 중 — 메인 밖에서 판정·쓰기를 기다리는 동안 「저장」을 다시 누르지 못하게
+    @State private var isSaving = false
     @State private var triggerText: String
     @State private var title: String
     @State private var body_: String
 
     /// ★ 불러올 때 **쉼표로 합치고**, 저장할 때 `SnippetEntry.parseTriggers`가 **쉼표로 나눈다** —
     /// 왕복이 같은 규약을 탄다. 구분자를 여기서 새로 정하지 않는다.
-    init(editing: SnippetEntry?, onSave: @escaping (SnippetEntry, SnippetEntry?) -> SnippetChangeFailure?) {
+    init(editing: SnippetEntry?, onSave: @escaping @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?) {
         self.editing = editing
         self.onSave = onSave
         _triggerText = State(initialValue: editing?.triggers.joined(separator: ", ") ?? "")
@@ -375,19 +368,23 @@ private struct SnippetEditorView: View {
                     Button("저장") {
                         let heading = title.trimmingCharacters(in: .whitespacesAndNewlines)
                         let triggers = parsedTriggers
-                        let rejected = onSave(SnippetEntry(
+                        let entry = SnippetEntry(
                             triggers: triggers,
                             // 제목을 비우면 **첫 단축어**가 제목이 된다
                             title: heading.isEmpty ? (triggers.first ?? "") : heading,
                             body: trimmedBody
-                        ), editing)
-                        // 거부면 닫지 않는다 — 친 내용을 잃지 않게(검증 C6)
-                        if let rejected { failure = rejected } else { dismiss() }
+                        )
+                        isSaving = true
+                        Task {
+                            // 거부면 닫지 않는다 — 친 내용을 잃지 않게(검증 C6)
+                            if let rejected = await onSave(entry, editing) { notice = rejected } else { dismiss() }
+                            isSaving = false
+                        }
                     }
-                    .disabled(parsedTriggers.isEmpty || trimmedBody.isEmpty || tooLong)
+                    .disabled(parsedTriggers.isEmpty || trimmedBody.isEmpty || tooLong || isSaving)
                 }
             }
-            .snippetChangeFailureAlert($failure)
+            .packChangeNoticeAlert($notice)
         }
     }
 }
@@ -456,7 +453,9 @@ struct SnippetPackDetailView: View {
 
     let pack: SnippetPackInfo
     @Binding var settings: KeyboardSettings
-    @State private var failure: SnippetChangeFailure?
+    @State private var notice: PackChangeNotice?
+    /// 켜기·끄기를 저장하는 동안 스위치가 보일 값(`builtInPackBinding`)
+    @State private var pendingEnabled: Bool?
 
     var body: some View {
         Form {
@@ -565,7 +564,7 @@ struct SnippetPackDetailView: View {
         .settingsFormWidth()
         .navigationTitle(pack.name)
         .navigationBarTitleDisplayMode(.inline)
-        .snippetChangeFailureAlert($failure)
+        .packChangeNoticeAlert($notice)
     }
 
     /// 스위치 한 행의 **제목 + 설명** — 설명이 어느 스위치 것인지 붙어 있어야 한다.
@@ -581,7 +580,7 @@ struct SnippetPackDetailView: View {
     }
 
     private var enabledBinding: Binding<Bool> {
-        builtInPackBinding(pack.id, settings: $settings) { failure = $0 }
+        builtInPackBinding(pack.id, settings: $settings, pending: $pendingEnabled) { notice = $0 }
     }
 }
 

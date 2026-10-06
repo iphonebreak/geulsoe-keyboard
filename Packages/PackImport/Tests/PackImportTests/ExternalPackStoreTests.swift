@@ -44,6 +44,14 @@ private final class Counter: @unchecked Sendable {
     func next() -> Int { lock.withLock { value += 1; return value } }
 }
 
+/// 한 번이라도 켜졌나 — PackStore 일이 메인 스레드에서 돌았는지 본다(G8)
+private final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var raised = false
+    func raise() { lock.withLock { raised = true } }
+    var isRaised: Bool { lock.withLock { raised } }
+}
+
 private final class DisabledBox: @unchecked Sendable {
     private let lock = NSLock()
     private var value: [String] = []
@@ -124,6 +132,8 @@ private struct Harness {
     let limits: PackBudgetLimits
     let ids = Counter()
     let notifications = Counter()
+    /// 판정 입력(내장 문구)을 메인 스레드에서 만든 적이 있으면 켜진다 — 큐 안의 일은 모두 이 갈고리를 지난다(G8 탐침)
+    let workedOnMain = Flag()
     let store: PackStore
 
     init(user: [SnippetEntry] = [], builtIn: [SnippetEntry] = [], limits: PackBudgetLimits = small) {
@@ -131,9 +141,13 @@ private struct Harness {
         self.builtIn = builtIn
         self.limits = limits
         let ids = self.ids, notifications = self.notifications, disabled = self.disabled, builtIn = builtIn
+        let workedOnMain = self.workedOnMain
         store = PackStore(
             libraryRoot: sandbox.library, snapshotRoot: sandbox.snapshot, generations: generations, userSnippets: self.user,
-            builtInEntries: { off in off.contains("anthem") ? [] : builtIn }, disabledBuiltIns: { disabled.current },
+            builtInEntries: { off in
+                if Thread.isMainThread { workedOnMain.raise() }
+                return off.contains("anthem") ? [] : builtIn
+            }, disabledBuiltIns: { disabled.current },
             notify: { _ = notifications.next() }, makeID: { "pack\(ids.next())" }, limits: limits)
     }
 
@@ -546,7 +560,6 @@ struct PackStoreTests {
         #expect(try FileManager.default.contentsOfDirectory(atPath: packsDirectory) == files)
         #expect(h.user.entries() == [entry("원래")])
         #expect((h.generations.userSnippetsGeneration, h.generations.packsGeneration) == generations)
-        #expect(!PackStore.Rejection.libraryUnreadable.isBudgetLimit)
     }
 
     @Test("C1 — library.json이 아예 없으면(처음) 빈 목록으로 시작한다")
@@ -586,17 +599,6 @@ struct PackStoreTests {
         defer { h.sandbox.cleanup() }
         #expect(h.store.deleteUserSnippet(home).isAccepted)
         #expect(h.user.entries() == [homeOffice])
-    }
-
-    // MARK: F3 — 알림 사유
-
-    @Test("F3 — 한도(게이트) 거부만 「한도」 사유, 쓰기 실패·없는 항목·계약 위반·순서 오류는 아니다")
-    func rejectionKinds() {
-        #expect(PackStore.Rejection.gate(.tooManyPacks).isBudgetLimit)
-        #expect(PackStore.Rejection.gate(.baselineOverLimit([.needleChars])).isBudgetLimit)
-        for other in [PackStore.Rejection.writeFailed, .notFound, .moreThanOneItem, .invalidOrder, .libraryUnreadable, .packUnavailable("x")] {
-            #expect(!other.isBudgetLimit)
-        }
     }
 
     // MARK: AC-26 — GC
@@ -894,4 +896,217 @@ private final class InterleaveProbe: @unchecked Sendable {
     private var observed = false
     func set(_ value: Bool) { lock.withLock { observed = value } }
     var value: Bool { lock.withLock { observed } }
+}
+
+// MARK: - 1-c 1단계 — 읽기 모델 (G1)
+
+/// 번호형 팩 — 틀 하나, 항목 `count`개
+private func numbered(_ name: String, count: Int) -> ExternalPack {
+    ExternalPack(name: name, license: "자체 작성", mode: .numbered, template: PackTemplate(
+        patterns: [TemplatePattern(prefix: "사자성어", suffix: "번")], titleFormat: "사자성어 {n}번",
+        items: (1...count).map { PackTemplateItem(n: $0, title: "", body: "예시 본문 \($0)") }))
+}
+
+private func removePackFiles(_ h: Harness, of id: String) throws {
+    let packsDirectory = h.sandbox.library.appendingPathComponent("packs")
+    for name in try FileManager.default.contentsOfDirectory(atPath: packsDirectory.path) where name.hasPrefix(id) {
+        try FileManager.default.removeItem(at: packsDirectory.appendingPathComponent(name))
+    }
+}
+
+@Suite("외부 채움글 1-c 1단계 — 읽기 모델 PackSummary (G1·상태 5갈래)")
+struct PackSummaryTests {
+
+    @Test("★ G1 — 목록 순서대로 이름·종류·항목 수·대표 틀·켬/끔. 변환본이 없어도 이름은 목록에 있다")
+    func summariesComeFromLibrary() throws {
+        let h = Harness(limits: .candidate)
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 50), source: .csv))
+        let b = try h.importedID(h.store.importPack(numbered("사자성어 예시 팩", count: 12), source: .csv, enabled: false))
+        #expect(h.store.summaries() == [
+            PackSummary(id: a, name: "회사 상용구", mode: .phrases, itemCount: 2, titleFormat: nil, isEnabled: true, status: .on),
+            PackSummary(id: b, name: "사자성어 예시 팩", mode: .numbered, itemCount: 12, titleFormat: "사자성어 {n}번",
+                        isEnabled: false, status: .off)
+        ])
+        // ★ 「읽을 수 없는 팩」도 이름이 보인다 — 이름이 변환본 안에만 있으면 이름 없는 행이 된다(G1)
+        try removePackFiles(h, of: b)
+        let unreadable = try #require(h.store.summaries().last)
+        #expect(unreadable.name == "사자성어 예시 팩")
+        #expect(unreadable.titleFormat == "사자성어 {n}번")
+        #expect(unreadable.status == .unavailable, "꺼진 팩도 읽을 수 없으면 「읽을 수 없어요」(켜면 거부된다)")
+    }
+
+    @Test("★ 상태 5갈래 — 켬 · 끔 · 쉬는 중(한도) · 쉬는 중(내 채움글) · 읽을 수 없어요")
+    func fiveStatuses() throws {
+        let h = Harness(user: [entry(String(repeating: "가", count: 100))])
+        defer { h.sandbox.cleanup() }
+        let on = try h.importedID(h.store.importPack(pack("켬", chars: 40), source: .csv))
+        let off = try h.importedID(h.store.importPack(pack("끔", chars: 10), source: .csv, enabled: false))
+        let unreadable = try h.importedID(h.store.importPack(pack("못읽음", chars: 10), source: .csv))
+        let resting = try h.importedID(h.store.importPack(pack("쉼", chars: 40), source: .csv))
+        try removePackFiles(h, of: unreadable)
+        // 내 채움글을 늘려 마지막 팩만 한도 밖으로(overflow)
+        #expect(h.store.saveUserSnippet(entry(String(repeating: "나", count: 30)), editing: nil).isAccepted)
+        #expect(h.store.summaries().map(\.status) == [.on, .off, .unavailable, .restingOverLimit])
+        #expect(h.store.summaries().map(\.id) == [on, off, unreadable, resting])
+
+        // 내 채움글만으로 한도를 넘은 저장본(옛 버전에서 써 온 것 — PackStore를 거치지 않았다): 켠 외부 팩은 전부
+        // 「내 채움글을 정리하면 다시 떠요」 쪽(4-N). 읽을 수 없는 팩은 그대로 「읽을 수 없어요」, 끈 팩은 「끔」
+        let legacy = (0..<30).map { entry(String(repeating: "다", count: 9) + String(UnicodeScalar(0xAC00 + $0)!)) }
+        #expect(h.user.save(legacy))
+        #expect(h.store.summaries().map(\.status) == [.restingForUserSnippets, .off, .unavailable, .restingForUserSnippets])
+    }
+
+    @Test("상태 판정 표 — 읽을 수 없음이 끔보다 먼저, 켬은 포함일 때만",
+          arguments: [
+            (true, false, nil as ActivePackBudget.ExclusionReason?, true, PackSummary.Status.on),
+            (false, false, nil, false, .off),
+            (false, true, nil, false, .unavailable),
+            (true, true, .unavailable, false, .unavailable),
+            (true, false, .overflow([.bytes]), false, .restingOverLimit),
+            (true, false, .afterEarlierOverflow, false, .restingOverLimit),
+            (true, false, .baselineOverflow, false, .restingForUserSnippets),
+            (true, false, nil, false, .restingOverLimit)
+          ])
+    func statusTable(_ isEnabled: Bool, _ isUnavailable: Bool, _ reason: ActivePackBudget.ExclusionReason?,
+                     _ included: Bool, _ expected: PackSummary.Status) {
+        let packs = [ActivePackBudget.Candidate(id: "x", isEnabled: true, stats: .zero)]
+        var evaluation = ActivePackBudget.evaluate(baseline: .zero, packs: included ? packs : [])
+        if let reason { evaluation.excluded = [ActivePackBudget.Exclusion(id: "x", reason: reason)] }
+        #expect(PackSummary.status(of: "x", isEnabled: isEnabled, isUnavailable: isUnavailable, in: evaluation) == expected)
+    }
+
+    @Test("★ 이행 없음 — 표시 칸이 없는 1-b 목록(schema 1)도 그대로 읽히고, 이름은 변환본에서 채운다")
+    func legacyLibraryWithoutDisplayFields() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        let b = try h.importedID(h.store.importPack(numbered("사자성어 예시 팩", count: 3), source: .csv))
+        // 1-b가 쓰던 모양으로 되돌린다 — 팩 항목에 file·isEnabled·stats만
+        let libraryURL = h.sandbox.library.appendingPathComponent("library.json")
+        var json = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: libraryURL)) as? [String: Any])
+        var packs = try #require(json["packs"] as? [String: [String: Any]])
+        for (id, var item) in packs {
+            #expect(item["name"] != nil, "새 목록은 이름을 담는다")
+            item = item.filter { ["file", "isEnabled", "stats"].contains($0.key) }
+            packs[id] = item
+        }
+        json["packs"] = packs
+        #expect(json["schema"] as? Int == 1, "schema 번호는 그대로")
+        try JSONSerialization.data(withJSONObject: json).write(to: libraryURL)
+
+        #expect(h.store.isLibraryReadable)
+        #expect(h.store.summaries().map(\.name) == ["회사 상용구", "사자성어 예시 팩"])
+        #expect(h.store.summaries().map(\.mode) == [.phrases, .numbered])
+        #expect(h.store.summaries().map(\.titleFormat) == [nil, "사자성어 {n}번"])
+        // 표시 칸도 변환본도 없으면 이름을 모른다(nil) — 알림은 「이름 없는 팩」(문구 표)
+        try removePackFiles(h, of: a)
+        #expect(h.store.summaries().first?.name == nil)
+        #expect(h.store.summaries().first?.itemCount == 1, "항목 수는 목록의 stats에서 — 변환본 없이도")
+        // 옛 목록 위에서도 커밋은 그대로 된다
+        #expect(h.store.setPackEnabled(b, enabled: false).isAccepted)
+    }
+
+    @Test("교체하면 표시 칸도 새 파일 것으로 — 위치·켬/끔은 그대로(9-1)")
+    func replaceUpdatesDisplay() throws {
+        let h = Harness(limits: .candidate)
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        #expect(h.store.replacePack(a, with: numbered("사자성어 예시 팩", count: 5), source: .csv).isAccepted)
+        #expect(h.store.summaries() == [PackSummary(id: a, name: "사자성어 예시 팩", mode: .numbered, itemCount: 5,
+                                                    titleFormat: "사자성어 {n}번", isEnabled: true, status: .on)])
+    }
+}
+
+// MARK: - 1-c 1단계 — 메인 밖 래퍼 (G8)
+
+private func onMainThread() -> Bool { Thread.isMainThread }
+
+@Suite("외부 채움글 1-c 1단계 — PackStoreClient (G8 메인 밖 · 사유별 알림)")
+struct PackStoreClientTests {
+
+    @MainActor
+    @Test("★ G8 — 메인에서 불러도 PackStore 일(판정·파일 IO)은 메인 밖에서 돌고, 결과는 메인에서 받는다")
+    func runsOffMain() async throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let client = PackStoreClient(store: h.store)
+        let saved = await client.saveUserSnippet(entry("문구"), editing: nil)
+        #expect(onMainThread(), "await 뒤는 메인(화면이 그대로 상태를 바꾼다)")
+        #expect(saved.isAccepted)
+        _ = await client.deleteUserSnippet(entry("문구"))
+        _ = await client.setBuiltInPack("anthem", enabled: false, currentDisabled: [])
+        _ = await client.summaries()
+        _ = await client.evaluation()
+        _ = await client.isLibraryReadable()
+        await client.maintain()
+        #expect(onMainThread())
+        #expect(!h.workedOnMain.isRaised, "PackStore 일은 한 번도 메인에서 돌지 않았다")
+        // 탐침이 살아 있는지 — 메인에서 직접 부르면 켜진다(이 시험이 헛돌지 않게)
+        _ = h.store.evaluation()
+        #expect(h.workedOnMain.isRaised)
+    }
+
+    @Test("★ G8 — 일은 주입한 GCD 큐에서 돈다(협력 스레드 풀·부른 액터를 queue.sync로 막지 않는다)")
+    func runsOnInjectedQueue() async {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let key = DispatchSpecificKey<String>()
+        let queue = DispatchQueue(label: "client-test")
+        queue.setSpecific(key: key, value: "client-test")
+        let client = PackStoreClient(store: h.store, queue: queue)
+        #expect(await client.run { _ in DispatchQueue.getSpecific(key: key) } == "client-test")
+        #expect(await client.saveUserSnippet(entry("문구"), editing: nil).isAccepted, "쓰기도 같은 길")
+    }
+
+    @Test("★ AC-4·G2 — 받았지만 팩이 쉬게 되면 이름 있는 알림(G1)")
+    func restedPackIsNamed() async throws {
+        let h = Harness(user: [entry(String(repeating: "가", count: 100))])
+        defer { h.sandbox.cleanup() }
+        let client = PackStoreClient(store: h.store)
+        #expect(await client.importPack(pack("회사 상용구", chars: 90), source: .csv).isAccepted)
+        let outcome = await client.saveUserSnippet(entry(String(repeating: "나", count: 50)), editing: nil)
+        #expect(outcome.isAccepted)
+        #expect(outcome.notice?.reason == .packRested)
+        #expect(outcome.notice?.message == "대신 「회사 상용구」가 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
+    }
+
+    @Test("★ A2·A3 — 같은 baseline 거부도 저장 전 상태로 갈린다(옛 초과본이면 A3)")
+    func userSaveRejections() async {
+        let h = Harness(user: [entry(String(repeating: "가", count: 190))])
+        defer { h.sandbox.cleanup() }
+        let fresh = await PackStoreClient(store: h.store).saveUserSnippet(entry(String(repeating: "나", count: 20)), editing: nil)
+        #expect(!fresh.isAccepted)
+        #expect(fresh.notice?.reason == .userSaveTooLong)
+
+        let legacy = (0..<30).map { entry(String(repeating: "다", count: 9) + String(UnicodeScalar(0xAC00 + $0)!)) }
+        let h2 = Harness(user: legacy)
+        defer { h2.sandbox.cleanup() }
+        let over = await PackStoreClient(store: h2.store).saveUserSnippet(entry("새것"), editing: nil)
+        #expect(over.notice?.reason == .userSaveWhileOverLimit)
+        #expect(over.notice?.actions == [.organize])
+    }
+
+    @Test("★ D2·E1·E2 — 가져오기(내 채움글 초과)·목록 손상·읽을 수 없는 팩 켜기")
+    func otherRejections() async throws {
+        let legacy = (0..<30).map { entry(String(repeating: "다", count: 9) + String(UnicodeScalar(0xAC00 + $0)!)) }
+        let h = Harness(user: legacy)
+        defer { h.sandbox.cleanup() }
+        let client = PackStoreClient(store: h.store)
+        let imported = await client.importPack(pack("회사 상용구", chars: 10), source: .csv)
+        #expect(imported.notice?.reason == .importWhileUserOverLimit)
+        #expect(imported.notice?.actions == [.organize, .importDisabled])
+        let disabled = await client.importPack(pack("회사 상용구", chars: 10), source: .csv, enabled: false)
+        #expect(disabled.isAccepted && disabled.notice == nil)
+        let id = try h.importedID(disabled.result)
+        try removePackFiles(h, of: id)
+        let enable = await client.setPackEnabled(id, enabled: true)
+        #expect(enable.notice?.reason == .packUnavailable)
+        #expect(enable.notice?.packIDs == [id])
+
+        try Data("{ 망가짐".utf8).write(to: h.sandbox.library.appendingPathComponent("library.json"))
+        let delete = await client.deleteUserSnippet(legacy[0])
+        #expect(delete.notice?.reason == .libraryUnreadable)
+        #expect(await client.isLibraryReadable() == false)
+    }
 }
