@@ -21,7 +21,9 @@ let package = Package(
     targets: [
         .target(
             name: "PackImport",
-            dependencies: ["TadakDomain", "KeyboardCore", "TadakData"]
+            dependencies: ["TadakDomain", "KeyboardCore", "TadakData"],
+            // 고정 샘플 CSV 2종(3-C) — `.copy`라 바이트가 그대로 실린다(해시 = 제작 기록, AC-29). 앱만 이 모듈을 링크한다
+            resources: [.copy("Resources/Samples")]
         ),
         .testTarget(
             name: "PackImportTests",

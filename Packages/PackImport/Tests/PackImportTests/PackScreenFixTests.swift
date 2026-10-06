@@ -148,13 +148,11 @@ struct ExternalSectionFooterTests {
         #expect(PackNoticeCopy.externalSectionFooter(isEmpty: isEmpty, libraryStatus: status) == expected)
     }
 
-    @Test("문구 — 지시 그대로 · U6·금칙어·숫자 0")
+    /// U6·금칙어·xlsx는 6단계 `PackCopyLintTests`가 본다(`allScreenCopy`에 이 줄이 들어 있다)
+    @Test("문구 — 지시 그대로 · 숫자 0")
     func copy() {
         #expect(PackNoticeCopy.unreadableListFooter == "외부 채움글 목록을 읽을 수 없어요. 위에서 목록을 복구해 주세요.")
-        for text in [PackNoticeCopy.unreadableListFooter] {
-            for word in churchWords + ["트리거", "잠시 뒤", "xlsx", "엑셀"] { #expect(!text.contains(word)) }
-            #expect(!text.contains { $0.isNumber })
-        }
+        #expect(!PackNoticeCopy.unreadableListFooter.contains { $0.isNumber })
     }
 }
 

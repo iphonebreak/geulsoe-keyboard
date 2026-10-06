@@ -160,8 +160,10 @@ public enum PackNoticeCopy {
     public static let externalSectionTitle = "외부 채움글"
     /// 가져오기 입구 — 4단계가 3-A 첫 화면(`PackImportStartView`)으로 연결했다. 그 화면의 제목이기도 하다
     public static let addPack = "외부 채움글 추가"
-    /// 2-B 빈 상태 — **CSV 전용판**(AC-35, R12: 1.3.0은 CSV만)
-    public static let emptyListFooter = "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요."
+    /// 2-B 빈 상태 — 첫 문장은 판이 바꾼다(`PackCopySet`: CSV 전용판 「CSV 파일로…」 / xlsx 중심판 「엑셀 파일로…」, AC-35·R12)
+    public static var emptyListFooter: String {
+        PackCopySet.current.lines.listIntro + " 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요."
+    }
     /// 2-C 팩이 있을 때
     public static let listFooter = "위에 있는 줄이 먼저 떠요 — 같은 문구 단축어는 위 줄이, 같은 단축어 틀은 위 팩이 가져요. 「내 채움글」도 이 순서에 들어가요.\n"
         + "한도는 외부 팩만 위에서부터 채워요(내 채움글은 늘 써요). 가져온 팩은 이 기기에만 저장돼요."

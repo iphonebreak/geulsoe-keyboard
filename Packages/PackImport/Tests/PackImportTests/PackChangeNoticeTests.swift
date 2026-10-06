@@ -341,18 +341,11 @@ private let allRejections: [PackStore.Rejection] = {
     return all
 }()
 
-// MARK: - 문구 검사 (④ — U6·금칙어·한도 숫자 0)
+// MARK: - 문구 검사 (④ — 한도 숫자 0. U6·금칙어·xlsx는 6단계 `PackCopyLintTests`가 한 곳에서 본다)
 
-/// 교회·성경 소재(U6) — 화면 문구·예시에 쓰지 않는다
-let churchWords = [
-    "성경", "찬송", "찬양", "성가", "예배", "교회", "기도", "설교", "목사", "장로", "주일", "복음", "하나님", "하느님",
-    "예수", "그리스도", "말씀", "구절", "창세기", "시편", "요한", "개역", "아멘", "할렐루야", "성도", "선교", "십자가", "성탄"
-]
-/// 금칙어 — 「트리거」(용어는 「단축어」, CLAUDE.md) · 「잠시 뒤」(틀린 안내, 4-2절) · xlsx·엑셀(1.3.0은 CSV판, AC-35)
-private let bannedWords = ["트리거", "잠시 뒤", "xlsx", "XLSX", "엑셀"]
-
-/// 1단계가 내는 모든 문구 — 표의 알림 전부(rechecked 줄 포함)·G3 줄·버튼·이름 대체어
-private let everyCopy: [String] = {
+/// 1~3단계가 내는 모든 문구 — 표의 알림 전부(rechecked 줄 포함)·G3 줄·버튼·이름 대체어 · 2단계 상태·배너·정리·복구 · 3단계 절·순서·상세.
+/// **부를 때마다 지금 판(`PackCopySet.current`)으로 만든다** — 6단계 시험이 판을 바꿔 가며 읽는다
+var stage1To3Copy: [String] {
     var texts = table.flatMap { row -> [String] in
         let plain = notice(row.operation, row.result, overLimit: row.overLimit)
         let recheckedResult: PackStore.CommitResult
@@ -381,31 +374,17 @@ private let everyCopy: [String] = {
     // 3단계 — 외부 채움글 절·순서 화면·팩 상세·삭제 확인(`PackImpactCopyTests.swift`)
     texts += stage3Copy
     return texts
-}()
+}
 
 /// 문구에 들어가는 **표시 개수**(한도 숫자가 아니다) — 숫자 검사에서 이것만 지운다
 private let countSentinels = ["37개", "41개"]
 
-@Suite("외부 채움글 1-c 1단계 — 문구 표 검사 (U6·금칙어·한도 숫자 0)")
+@Suite("외부 채움글 1-c 1단계 — 문구 표 검사 (한도 숫자 0 · 해요체)")
 struct PackNoticeCopyLintTests {
-
-    @Test("★ U6 — 교회·성경 소재 0")
-    func noChurchWords() {
-        for text in everyCopy {
-            for word in churchWords { #expect(!text.contains(word), "「\(word)」: \(text)") }
-        }
-    }
-
-    @Test("★ 금칙어 0 — 트리거·잠시 뒤·xlsx·엑셀")
-    func noBannedWords() {
-        for text in everyCopy {
-            for word in bannedWords { #expect(!text.contains(word), "「\(word)」: \(text)") }
-        }
-    }
 
     @Test("★ 8절 #3 — 한도 숫자를 쓰지 않는다: 숫자는 「외 n개」의 개수뿐")
     func noLimitNumbers() {
-        for text in everyCopy {
+        for text in stage1To3Copy {
             var withoutCount = text.replacingOccurrences(of: #"외 \d+개"#, with: "", options: .regularExpression)
             for sentinel in countSentinels { withoutCount = withoutCount.replacingOccurrences(of: sentinel, with: "") }
             #expect(!withoutCount.contains { $0.isNumber }, "\(text)")

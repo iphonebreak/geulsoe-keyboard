@@ -3,19 +3,22 @@ import UniformTypeIdentifiers
 import PackImport
 import TadakDomain
 
-// 외부 채움글 1-c 4단계 — 가져오기 입구: 3-A 첫 화면 · 3-B 만드는 법 · 3-D 파일 고르기 · 3-E 붙여넣기
-// (계획서 `external-snippet-packs-1c-plan.md` 3-2절·5절 4행, 시안 `docs/design/external-snippet-packs/index.html` 3-A·3-B·3-D·3-E — **CSV 전용판**).
-// 고른 파일·붙인 글은 `PackImportFlowView`(4-A~4-I)가 읽는다. 문구는 전부 `PackImportCopy`(U6·금칙어·숫자 검사가 `swift test`로 돈다).
+// 외부 채움글 1-c 4단계 — 가져오기 입구: 3-A 첫 화면 · 3-B 만드는 법 · 3-C 샘플 받기(6단계) · 3-D 파일 고르기 · 3-E 붙여넣기
+// (계획서 `external-snippet-packs-1c-plan.md` 3-2절·5절 4·6행, 시안 `docs/design/external-snippet-packs/index.html` 3-A~3-E).
+// 문구는 전부 `PackImportCopy` — 판(`PackCopySet`, 1.3.0은 CSV 전용판)이 바꾸는 줄도 그 표가 판에서 읽는다. 이 화면에 문구를 직접 쓰지 않는다
+// (U6·금칙어·숫자·AC-35 검사가 `swift test`로 돈다 — AC-35 검색은 이 파일의 문자열도 본다).
+// 고른 파일·붙인 글은 `PackImportFlowView`(4-A~4-I)가 읽는다.
 //
 // 보안: 파일 내용·붙인 글은 **메모리에만** 있다 — 로그·파일·분석 이벤트로 내보내지 않는다. 클립보드는 「붙여넣기」를 눌렀을 때만 읽는다(시스템
-// `PasteButton` — 누르기 전에는 읽지 않고 확인 창도 없다). 샘플 받기(3-C)는 6단계, xlsx는 1-e라 이 화면에 없다.
+// `PasteButton` — 누르기 전에는 읽지 않고 확인 창도 없다). 샘플 받기는 번들의 고정 파일(가짜 내용)을 앱 임시 폴더에 보이는 이름으로 복사해
+// 시스템 공유 시트로 넘긴다 — 사용자 입력은 담기지 않고, 무엇을 받았는지 기록하지 않는다.
 
 /// 3-D 파일 선택기가 받는 형식 — `.csv`·`.tsv`·`.txt`(계획서 3-2절). 나머지는 선택기에서 고를 수 없다
 let packImportContentTypes: [UTType] = [.commaSeparatedText, .tabSeparatedText, .plainText]
 
 // MARK: - 3-A 첫 화면
 
-/// 「외부 채움글 추가」 — 주 버튼 하나(CSV 파일 고르기) · 처음이라면(만드는 법) · 그 밖의 방법(붙여넣기) · 받지 않는 파일 안내
+/// 「외부 채움글 추가」 — 주 버튼 하나(CSV 파일 고르기) · 처음이라면(만드는 법 · 샘플 받기) · 그 밖의 방법(붙여넣기) · 받지 않는 파일 안내
 struct PackImportStartView: View {
     /// 가져오기를 마쳤다(4-M) — 채움글 화면으로 돌아가 그 팩 행을 강조한다(U5). 가져오기 시트가 **닫힌 뒤** 부른다
     let onFinished: @MainActor (_ packID: String) -> Void
@@ -26,6 +29,8 @@ struct PackImportStartView: View {
     @State private var picksAgain = false
     /// 가져오기 시트가 완료를 알렸다 — 시트가 닫히면(버튼·끌어 내림) 목록으로
     @State private var completedPackID: String?
+    /// 3-C 공유 시트에 넘길 샘플 사본(보이는 이름) — 준비되기 전·실패한 파일은 알약이 안 보인다
+    @State private var sampleLinks: [PackSample.File: URL] = [:]
 
     var body: some View {
         Form {
@@ -61,11 +66,33 @@ struct PackImportStartView: View {
                 } label: {
                     Label(PackImportCopy.guideTitle, systemImage: "book")
                 }
+                ForEach(PackSample.Kind.allCases, id: \.self) { kind in
+                    PackSampleRow(kind: kind, links: PackSample.files(kind).compactMap { file in sampleLinks[file].map { (file, $0) } })
+                }
             } header: {
                 Text(PackImportCopy.firstTimeHeader)
+            } footer: {
+                Text(PackImportCopy.samplesFooter)
             }
 
             Section {
+                // xlsx 중심판에만 — 주 버튼이 엑셀이라 CSV를 따로 둔다(CSV 전용판은 nil)
+                if let row = PackImportCopy.otherFileRow {
+                    Button {
+                        showsImporter = true
+                    } label: {
+                        Label {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(row.title)
+                                Text(row.detail)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        } icon: {
+                            Image(systemName: "doc")
+                        }
+                    }
+                }
                 NavigationLink {
                     PackPasteView(onFinished: onFinished)
                 } label: {
@@ -89,6 +116,10 @@ struct PackImportStartView: View {
         .settingsFormWidth()
         .navigationTitle(PackNoticeCopy.addPack)
         .navigationBarTitleDisplayMode(.inline)
+        // 3-C — 샘플 사본을 메인 밖에서 만든다(고정 파일 2개, 수 KB)
+        .task {
+            sampleLinks = await PackSample.prepareForSharing(PackSample.Kind.allCases.flatMap { PackSample.files($0) })
+        }
         // 3-D — 고르지 않고 닫으면 아무 일도 없다. 고른 파일은 아직 읽지 않는다(크기 확인·제한 읽기는 가져오기 시트가 메인 밖에서)
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: packImportContentTypes) { result in
             switch result {
@@ -116,10 +147,47 @@ struct PackImportStartView: View {
     }
 }
 
+// MARK: - 3-A 「처음이라면」 샘플 줄 · 3-C 샘플 받기
+
+/// 번호형·문구형 샘플 한 줄 — 오른쪽 형식 알약(CSV판은 「CSV」 하나)을 누르면 그 파일로 시스템 공유 시트가 열린다(파일에 저장·AirDrop·메일…).
+/// 받는 쪽에는 보이는 이름(「번호형 샘플.csv」)으로 남는다
+private struct PackSampleRow: View {
+    let kind: PackSample.Kind
+    let links: [(file: PackSample.File, url: URL)]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(PackImportCopy.sampleTitle(kind))
+                    Text(PackImportCopy.sampleDetail(kind))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "arrow.down.doc")
+            }
+            Spacer(minLength: 8)
+            ForEach(links, id: \.file) { link in
+                ShareLink(item: link.url) {
+                    Text(PackImportCopy.sampleFormatLabel(link.file.format))
+                        .font(.subheadline.weight(.semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(Color.accentColor.opacity(0.15)))
+                }
+                // 줄 전체가 아니라 알약만 눌린다(형식이 둘인 판에서 알약마다 따로)
+                .buttonStyle(.borderless)
+                .accessibilityLabel(PackImportCopy.sampleShareLabel(link.file))
+            }
+        }
+    }
+}
+
 // MARK: - 3-B 만드는 법
 
-/// CSV로 팩 만드는 법 — 글 중심 한 화면(시안 3-B CSV판). 시트 그림은 샘플과 같은 가짜 내용(U6).
-/// 「이런 칸」 절은 PDR 6-7의 CSV 전용판 안내(R20 — 바뀐 값은 파서가 모르므로 안내만)로 바꿨다
+/// 팩 만드는 법 — 글 중심 한 화면(시안 3-B). 시트 그림은 샘플과 같은 가짜 내용(U6). 제목·3절·4절 저장 방법은 판이 바꾼다 —
+/// CSV 전용판의 3절은 PDR 6-7 안내(R20 — 바뀐 값은 파서가 모르므로 안내만)
 struct PackImportGuideView: View {
     var body: some View {
         Form {

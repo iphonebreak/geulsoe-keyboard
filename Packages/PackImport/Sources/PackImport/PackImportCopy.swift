@@ -1,30 +1,68 @@
 import TadakDomain
 
 /// 외부 채움글 **가져오기** 문구 표 — 한 곳(계획서 `external-snippet-packs-1c-plan.md` 4-4절·5절 4행 ②, 시안
-/// `docs/design/external-snippet-packs/index.html` 3-A·3-B·3-E·4-A~4-C·4-E~4-I·4-G 표). **CSV 전용판**이다(AC-35 — xlsx를 가져오는
-/// 안내 0, 「엑셀에서 CSV로 저장」 안내는 CSV판 시안 그대로 쓴다).
+/// `docs/design/external-snippet-packs/index.html` 3-A·3-B·3-E·4-A~4-C·4-E~4-I·4-G 표). 판(`PackCopySet` — CSV 전용판/xlsx 중심판)이
+/// 바꾸는 줄은 판에서 읽고, 나머지는 두 판이 공유한다. 1.3.0은 **CSV 전용판**이다(AC-35 — xlsx를 가져오는 안내 0, 「엑셀에서 CSV로 저장」
+/// 안내는 CSV판 시안 그대로 쓴다).
 ///
 /// 규칙은 `PackNoticeCopy`와 같다: 해요체 · 「단축어」「채움글」 · 예산 한도 숫자 0(R2 — 보이는 숫자는 위치·개수와, 편집기·파일 형식이 이미
 /// 알리는 **필드 상한**뿐이고 그 값은 `PackLimits`에서 온다) · 예시는 교회·성경 소재 0(U6) · 원인과 해결을 한 줄로(6-6).
 /// **오류 문구에 파일 내용·파일 이름을 넣지 않는다**(AC-34) — 사유 코드(`PackImportFailure`·`SkipReason`)에는 위치 번호뿐이다.
-/// 문구 검사는 `PackImportCopyLintTests`가 `swift test`로 돈다.
+/// 문구 검사는 `PackImportCopyLintTests`(숫자)·`PackCopyLintTests`(U6·금칙어·xlsx — 한 곳)가 `swift test`로 돈다.
 public enum PackImportCopy {
+
+    /// 판이 바꾸는 줄(`PackCopySet` — 시안 6절 비교표)
+    private static var lines: PackCopySet.Lines { PackCopySet.current.lines }
 
     // MARK: - 3-A 첫 화면
 
-    public static let heroTitle = "CSV 파일 가져오기"
-    public static let heroMessage = "첫 줄에 머리글이 있는 CSV 파일을 골라요. UTF-8을 권해요.\n번호형(사자성어 12번처럼)·문구형(단축어 → 문구) 둘 다 돼요."
-    public static let pickFile = "CSV 파일 고르기"
+    public static var heroTitle: String { lines.heroTitle }
+    public static var heroMessage: String { lines.heroLead + "\n번호형(사자성어 12번처럼)·문구형(단축어 → 문구) 둘 다 돼요." }
+    public static var pickFile: String { lines.pickFile }
     public static let firstTimeHeader = "처음이라면"
     public static let otherWaysHeader = "그 밖의 방법"
+    /// 「그 밖의 방법」의 파일 줄 — xlsx 중심판에만(CSV 전용판은 주 버튼이 곧 CSV다)
+    public static var otherFileRow: PackCopySet.Row? { lines.otherFileRow }
     public static let pasteTitle = "붙여넣기로 가져오기"
     public static let pasteRowDetail = "표를 복사해 그대로 붙여 넣어요"
-    public static let startFooter = "엑셀·Numbers·구글 시트에서는 「CSV UTF-8」로 저장한 뒤 가져와요. CSV가 아닌 파일(Numbers 파일, .json 등)은 받지 않아요."
-        + "\n\n가져온 팩은 이 기기에만 저장되고, 파일 내용은 어디에도 보내지 않아요."
+    public static var startFooter: String {
+        lines.unsupportedFiles + "\n\n가져온 팩은 이 기기에만 저장되고, 파일 내용은 어디에도 보내지 않아요."
+    }
+
+    // MARK: 3-A 「처음이라면」 샘플 · 3-C 샘플 받기(공유 시트)
+
+    public static func sampleTitle(_ kind: PackSample.Kind) -> String {
+        switch kind {
+        case .numbered: "번호형 샘플"
+        case .phrases: "문구형 샘플"
+        }
+    }
+
+    public static func sampleDetail(_ kind: PackSample.Kind) -> String {
+        switch kind {
+        case .numbered: "사자성어·상용 영어처럼 번호로 고르는 자료"
+        case .phrases: "단축어를 치면 문구가 떠요"
+        }
+    }
+
+    /// 샘플 줄 오른쪽 알약 — 누르면 그 형식의 파일로 공유 시트가 열린다
+    public static func sampleFormatLabel(_ format: PackSample.Format) -> String {
+        switch format {
+        case .csv: "CSV"
+        case .xlsx: "엑셀"
+        }
+    }
+
+    /// 알약의 손쉬운 사용 이름 — 알약 글자(「CSV」)만으로는 무엇을 받는지 모른다
+    public static func sampleShareLabel(_ file: PackSample.File) -> String {
+        "\(sampleTitle(file.kind)) \(sampleFormatLabel(file.format)) 받기"
+    }
+
+    public static let samplesFooter = "샘플은 가짜 내용이에요. 열어서 내용만 바꿔 저장하면 팩이 돼요."
 
     // MARK: - 3-B 만드는 법 — 절 제목의 번호(1.~4.)는 화면이 붙인다
 
-    public static let guideTitle = "CSV로 팩 만드는 법"
+    public static var guideTitle: String { lines.guideTitle }
     public static let guideHeaderSection = "첫 줄은 머리글"
     /// 시트 그림 — 샘플과 같은 **가짜 내용**(U6). 행마다 A·B·C 칸
     public static let guideSheet: [[String]] = [
@@ -40,16 +78,12 @@ public enum PackImportCopy {
     public static let guideColumns = "번호형은 번호 · 제목 · 본문, 문구형은 단축어 · 제목 · 본문. 열 순서는 상관없고 영어 이름(number·trigger·title·body)도 돼요. 제목은 비워도 돼요."
     public static let guideMetaSection = "팩 정보 줄(선택)"
     public static let guideMeta = "머리글 위에 #이름 · #틀 · #권리 줄을 두면 가져올 때 미리 채워져요. 정렬하다 아래로 내려가지 않게 해 주세요."
-    /// CSV에는 셀 타입이 없어 바뀐 값을 파서가 알 수 없다 — 안내로만 다룬다(PDR 6-7, R20 「가 — 안내 문구만」 CSV 전용판 문구)
-    public static let guideCellsSection = "모양이 바뀌기 쉬운 칸"
-    public static let guideCells = [
-        "숫자·날짜처럼 보이는 글(예: 007, 1-2) → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요. 그렇지 않으면 CSV에 바뀐 모양으로 저장돼요.",
-        "= + - @로 시작하는 글 → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요. 앞에 작은따옴표(')를 붙이면 붙여넣을 때 글자로 남을 수 있어요."
-    ]
-    public static let guideCellsFooter = "가져오기 미리보기에서 처음 몇 개를 확인해 주세요."
+    /// CSV에는 셀 타입이 없어 바뀐 값을 파서가 알 수 없다 — 안내로만 다룬다(PDR 6-7, R20 「가 — 안내 문구만」). 판마다 다르다
+    public static var guideCellsSection: String { lines.guideCellsSection }
+    public static var guideCells: [String] { lines.guideCells }
+    public static var guideCellsFooter: String { lines.guideCellsFooter }
     public static let guideSaveSection = "저장하고 옮기기"
-    public static let guideSave = "파일 ▸ 다른 이름으로 저장 ▸ CSV UTF-8(쉼표로 분리). 쉼표·세미콜론·탭 모두 알아서 읽어요. "
-        + "파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「\(pickFile)」를 눌러요."
+    public static var guideSave: String { lines.guideSaveSteps + " 파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「\(pickFile)」를 눌러요." }
 
     // MARK: - 3-E 붙여넣기
 

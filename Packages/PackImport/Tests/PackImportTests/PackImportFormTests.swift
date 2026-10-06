@@ -717,10 +717,10 @@ struct PackImportCommitStoreTests {
     }
 }
 
-// MARK: - 문구 표(5단계) — 매핑 전부 · U6 · 금칙어 · 숫자
+// MARK: - 문구 표(5단계) — 매핑 전부 · 숫자 (U6·금칙어·xlsx는 6단계 `PackCopyLintTests`가 한 곳에서 본다)
 
-/// 5단계가 내는 문구 — 문구 검사를 받는다
-private let stage5Copy: [String] = {
+/// 5단계가 내는 문구 — 문구 검사(숫자 · `allScreenCopy`의 U6·금칙어·xlsx)를 받는다. 부를 때마다 지금 판으로 만든다
+var stage5Copy: [String] {
     var texts = [
         PackFormCopy.formTitle, PackFormCopy.importButton, PackFormCopy.nameLabel, PackFormCopy.namePlaceholder,
         PackFormCopy.fromFileTag, PackFormCopy.aliasTag, PackFormCopy.nameEmptyFromFile, PackFormCopy.nameTooLongFromFile,
@@ -748,7 +748,7 @@ private let stage5Copy: [String] = {
              PackFormCopy.reviewDetail(status, replacing: true, name: { names[$0] ?? "" })].compactMap { $0 }
         }
     return texts
-}()
+}
 
 private let allPatternFailures: [TemplatePatternSpec.Failure] = [
     .placeholderCount, .prefixTooShort, .prefixEndsWithDigit, .prefixAllDigits, .suffixEmpty, .literalContainsNewline,
@@ -763,10 +763,6 @@ private let allCompileFailures: [PackCompileFailure] = [
 /// 숫자 허용 — 시안 예시(사자성어 {n}번 · 회차{n}시간)와 **필드 상한**(이름 40자 · 권리 120자 · 틀 literal 40자 · 틀+번호 48자 ·
 /// 틀 8개 · 앞 글자 2자)뿐. 개수 표시(37개)는 시험 값. 예산 한도(R2) 숫자는 여기에 없다
 private let stage5AllowedNumbers = ["40자까지", "120자까지", "48자 이내", "8개까지", "2자 이상", "37개", "예시 번호 팩 2", "업무 상용구 A"]
-
-/// U6 예외 — **키보드의 기존 성경 기능**을 가리키는 거부 사유 한 줄(시안 5-C 표 그대로, 계획서 5절 6행 ③ 「기존 성경 기능 설명은 대상이 아니다」).
-/// 예시·샘플이 아니라 「왜 이 틀을 못 쓰나」의 이유다. 정확히 이 문자열만 뺀다
-private let bibleFeatureLine = PackFormCopy.templateFailure(.collidesWithBible(n: 51))
 
 @Suite("외부 채움글 1-c 5단계 — 문구 표 (5-A·5-B·5-C·U3·4-M)")
 struct PackFormCopyTests {
@@ -796,20 +792,6 @@ struct PackFormCopyTests {
                     == "「사자성어 예시 팩」이 이미 있어요. 바꾸면 목록 자리와 켬/끔은 그대로고 내용만 새 파일로 바뀌어요.")
         #expect(PackFormCopy.doneSummary(name: "사자성어 예시 팩", count: 641) == "「사자성어 예시 팩」 · 641개")
         #expect(PackFormCopy.skippedLine(4) == "건너뛴 4개는 가져오지 않았어요.")
-    }
-
-    @Test("★ U6 — 교회·성경 소재 0(기존 성경 기능을 가리키는 사유 한 줄만 예외)")
-    func noChurchWords() {
-        for text in stage5Copy where text != bibleFeatureLine {
-            for word in churchWords { #expect(!text.contains(word), "「\(word)」: \(text)") }
-        }
-    }
-
-    @Test("★ 금칙어 0 — 트리거·잠시 뒤·xlsx·엑셀")
-    func noBannedWords() {
-        for text in stage5Copy {
-            for word in ["트리거", "잠시 뒤", "xlsx", "XLSX", "엑셀"] { #expect(!text.contains(word), "「\(word)」: \(text)") }
-        }
     }
 
     @Test("★ 숫자는 필드 상한·시안 예시뿐 — 예산 한도 숫자 0")

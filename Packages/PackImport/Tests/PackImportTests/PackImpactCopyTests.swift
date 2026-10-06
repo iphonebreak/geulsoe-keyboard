@@ -4,7 +4,8 @@ import TadakDomain
 
 // 외부 채움글 1-c 3단계 문구 — 외부 채움글 절(2-B·2-C)·순서 화면(2-D·2-G)·팩 상세(2-E·U1)·삭제 확인(2-F).
 // 기준: 시안 `docs/design/external-snippet-packs/index.html` 2절·U1 컷의 화면 글자(**글자 그대로** 옮겼다), 계획서 4-2·4-3절.
-// 이름은 사용자가 정한다 — 조사는 받침을 따른다. U6·금칙어·한도 숫자 검사는 `PackChangeNoticeTests`의 `everyCopy`가 이 목록(`stage3Copy`)까지 돈다.
+// 이름은 사용자가 정한다 — 조사는 받침을 따른다. 한도 숫자 검사는 `PackChangeNoticeTests`의 `stage1To3Copy`가, U6·금칙어·xlsx 검사는
+// `PackCopyLintTests`(6단계 — 한 곳)가 이 목록(`stage3Copy`)까지 돈다.
 
 // MARK: - 시험 도구
 
@@ -179,8 +180,9 @@ struct PackImpactCopyTests {
     }
 }
 
-/// 3단계 문구 전부 — `everyCopy`(U6·금칙어·한도 숫자 검사)에 들어간다. 개수는 `37`·`41`만 쓴다(숫자 검사가 이것만 지운다)
-let stage3Copy: [String] = {
+/// 3단계 문구 전부 — `stage1To3Copy`(한도 숫자 검사)·`allScreenCopy`(U6·금칙어·xlsx)에 들어간다. 개수는 `37`·`41`만 쓴다(숫자 검사가 이것만 지운다).
+/// 부를 때마다 지금 판으로 만든다(6단계 — 판을 바꿔 가며 읽는다)
+var stage3Copy: [String] {
     let lib = library([sajaseongeo, examplePack, company])
     var texts = [
         PackNoticeCopy.externalSectionTitle, PackNoticeCopy.addPack, PackNoticeCopy.emptyListFooter, PackNoticeCopy.listFooter,
@@ -206,4 +208,4 @@ let stage3Copy: [String] = {
             + manyTriggers.map { .init(trigger: $0 + "글", from: .pack("c"), to: .builtIn) })
     texts += PackNoticeCopy.impactLines(impact, in: lib).flatMap { [$0.message] + ($0.detail.map { [$0] } ?? []) }
     return texts
-}()
+}

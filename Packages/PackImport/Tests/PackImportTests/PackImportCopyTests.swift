@@ -6,7 +6,7 @@ import TadakDomain
 // 외부 채움글 1-c 4단계 — 가져오기 문구 표 `PackImportCopy`(계획서 `external-snippet-packs-1c-plan.md` 4-4절 · 5절 4행 ②,
 // 시안 `docs/design/external-snippet-packs/index.html` 3-A·3-B·3-E·4-A~4-C·4-E~4-I, 4-G 표). **CSV 전용판**(AC-35 — xlsx 안내 0).
 // 사유 → 문구 매핑은 **전부**(새 사유가 생기면 아래 `exhaustive` switch가 컴파일되지 않는다). 오류 문구에 파일 내용·파일 이름이 없다(AC-34).
-// U6(교회·성경 소재 0)·금칙어·숫자 검사는 1~3단계와 같은 잣대 — 숫자는 위치·개수·필드 상한(편집기가 이미 보이는 값)만 허용한다.
+// 숫자 검사는 1~3단계와 같은 잣대 — 숫자는 위치·개수·필드 상한(편집기가 이미 보이는 값)만 허용한다. U6·금칙어·xlsx(AC-35)는 6단계 `PackCopyLintTests`가 한 곳에서 본다.
 
 // MARK: - 사유 전부
 
@@ -277,8 +277,9 @@ struct PackImportCopyContentLeakTests {
     }
 }
 
-/// 4단계가 내는 모든 문구 — 문구 검사(U6·금칙어·숫자)를 받는다. 개수·위치는 1~3단계와 같은 표시 값(37·41 · 12번째·40번째)으로 만든다
-let stage4Copy: [String] = {
+/// 4단계가 내는 모든 문구 — 문구 검사(숫자 · `allScreenCopy`의 U6·금칙어·xlsx)를 받는다. 개수·위치는 1~3단계와 같은 표시 값(37·41 · 12번째·40번째)으로 만든다.
+/// 부를 때마다 지금 판으로 만든다(6단계 — 판을 바꿔 가며 읽는다)
+var stage4Copy: [String] {
     var texts = [
         PackImportCopy.heroTitle, PackImportCopy.heroMessage, PackImportCopy.pickFile, PackImportCopy.firstTimeHeader,
         PackImportCopy.guideTitle, PackImportCopy.otherWaysHeader, PackImportCopy.pasteTitle, PackImportCopy.pasteRowDetail,
@@ -332,10 +333,7 @@ let stage4Copy: [String] = {
         PackSummary(id: "a", name: "인사말 예시", mode: .phrases, itemCount: 3, titleFormat: nil, isEnabled: false, status: .off)
     }).flatMap { [$0.message] + $0.details }
     return texts
-}()
-
-/// 4단계 금칙어 — 「트리거」·「잠시 뒤」 + **xlsx 형식을 가져오는 안내**(AC-35 기준 — 「엑셀에서 CSV로 저장」 안내는 CSV판 시안이 쓴다)
-private let stage4BannedWords = ["트리거", "잠시 뒤", "xlsx", "XLSX", ".xls", "엑셀 파일", "통합 문서"]
+}
 
 /// 숫자 검사가 지우는 것 — 글자 방식 이름 · 시안 예시(사자성어 12번 · 007 · 1-2) · 표시 위치·개수(12번째·40번째·37·41·57%) ·
 /// 편집기·파일 형식이 이미 사용자에게 보이는 **필드 상한**(단축어 10개·40자, 제목 60자, 본문 3,000자 — P-8 잠정, 번호 1~9999, #틀 1~8개).
@@ -343,29 +341,11 @@ private let stage4BannedWords = ["트리거", "잠시 뒤", "xlsx", "XLSX", ".xl
 private let stage4AllowedNumbers = ["UTF-8", "UTF-16", "CP949", "사자성어 12번", "007", "1-2", "12번째", "40번째", "37개", "37행",
                                     "37줄", "41개", "57%", "10개까지", "40자까지", "60자까지", "3,000자까지", "1~9999", "1~8개"]
 
-/// U6 목록의 글자 조각이 평범한 낱말 안에 든 경우 — 「필요한」의 「요한」(계획서 4-4절 「필요한 칸만 남겨 주세요」). 이것만 지우고 본다
-private let churchWordFalsePositives = ["필요한"]
-
 /// 표시 개수 — 「외 n개」와 4-I 「같은 단축어 n개」
 private let countPatterns = [#"외 \d+개"#, #"같은 단축어 \d+개"#]
 
-@Suite("외부 채움글 1-c 4단계 — 문구 검사 (U6·금칙어·숫자)")
+@Suite("외부 채움글 1-c 4단계 — 문구 검사 (숫자)")
 struct PackImportCopyLintTests {
-
-    @Test("★ U6 — 교회·성경 소재 0(만드는 법 표의 예시 칸 포함)")
-    func noChurchWords() {
-        for text in stage4Copy + PackImportCopy.guideSheet.flatMap { $0 } {
-            let checked = churchWordFalsePositives.reduce(text) { $0.replacingOccurrences(of: $1, with: "") }
-            for word in churchWords { #expect(!checked.contains(word), "「\(word)」: \(text)") }
-        }
-    }
-
-    @Test("★ 금칙어 0 — 트리거·잠시 뒤·xlsx 가져오기 안내")
-    func noBannedWords() {
-        for text in stage4Copy + PackImportCopy.guideSheet.flatMap { $0 } {
-            for word in stage4BannedWords { #expect(!text.contains(word), "「\(word)」: \(text)") }
-        }
-    }
 
     @Test("★ 숫자는 허용 목록뿐 — 예산 한도 숫자 0(8절 #3)")
     func onlyAllowedNumbers() {
