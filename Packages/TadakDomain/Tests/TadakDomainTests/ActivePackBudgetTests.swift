@@ -345,6 +345,22 @@ struct PackCountGateTests {
             Issue.record("꺼진 채 맨 아래는 받아야 한다"); return
         }
     }
+
+    /// v3.9 N2 잔여(하) — 맨 아래·꺼짐은 맞아도 **앞의 나머지가 현재 저장본과 다르면**(같은 id가 또 있음·다른 팩 상태 바뀜) 거부.
+    /// 1-b 착수 메모의 `proposed.dropLast == current` 한 줄을 게이트에 넣었다(모든 호출자가 같이 막힌다)
+    @Test("★ 꺼 둔 채로 가져오기 — 새 팩을 뺀 나머지가 현재 저장본과 같아야 한다 (N2 잔여 · dropLast)")
+    func importDisabledRestMustEqualCurrent() {
+        let a = ActivePackBudget.Candidate(id: "a", isEnabled: true, stats: PackStats(needleCount: 1, needleChars: 50_000, bytes: 10, items: 1))
+        let aOff = ActivePackBudget.Candidate(id: "a", isEnabled: false, stats: a.stats)
+        let current = input([a])
+        let duplicateEarlier = input([newPack(enabled: true, chars: 20_000), a, newPack(enabled: false)])
+        let otherStateChanged = input([aOff, newPack(enabled: false)])
+        let otherDropped = input([newPack(enabled: false)])
+        for proposed in [duplicateEarlier, otherStateChanged, otherDropped] {
+            #expect(PackCommitGate.judge(.importDisabledPack(id: "new"), current: current, proposed: proposed)
+                    == .reject(.invalidDisabledImport(id: "new")))
+        }
+    }
 }
 
 extension JSONEncoder {

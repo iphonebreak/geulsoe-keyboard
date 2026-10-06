@@ -244,7 +244,7 @@ public enum PackCommitGate {
         case baselineOverLimit([PackBudgetDimension])
         /// 외부 팩 수가 `PackLimits.externalPacks`를 넘는다(꺼진 팩 포함, v3.6 ⑭)
         case tooManyPacks
-        /// 「꺼 둔 채로 가져오기」의 전제 — 새 팩이 **꺼진 채 목록 맨 아래** — 를 어겼다. 예산을 보지 않는 경로라 어기면 기존 팩을
+        /// 「꺼 둔 채로 가져오기」의 전제 — 새 팩이 **꺼진 채 목록 맨 아래**, 나머지는 현재 저장본 그대로 — 를 어겼다. 예산을 보지 않는 경로라 어기면 기존 팩을
         /// 밀어내고도 받게 된다(재검증 N2). 부르는 쪽(1-b)의 계약 위반이라 화면 문구 대상이 아니다
         case invalidDisabledImport(id: String)
     }
@@ -270,7 +270,10 @@ public enum PackCommitGate {
         case .enablePack(let id), .replaceActivePack(let id):
             return judgeActivation(of: id, after: after, newlyExcluded: newlyExcluded)
         case .importDisabledPack(let id):
-            guard let last = proposed.packs.last, last.id == id, !last.isEnabled else {
+            // 전제 셋: 새 팩이 **꺼진 채 맨 아래**이고, 그 팩을 뺀 나머지가 **현재 저장본 그대로**(v3.9 N2 잔여 — 앞에 같은 id가
+            // 또 있거나 다른 팩 상태가 바뀐 제안을 받지 않는다). 예산을 보지 않는 경로라 어기면 기존 팩을 밀어내고도 받게 된다
+            guard let last = proposed.packs.last, last.id == id, !last.isEnabled,
+                  Array(proposed.packs.dropLast()) == current.packs else {
                 return .reject(.invalidDisabledImport(id: id))
             }
             guard proposed.packs.count <= PackLimits.externalPacks else { return .reject(.tooManyPacks) }

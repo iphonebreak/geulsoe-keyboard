@@ -65,6 +65,13 @@ final class KeyboardViewController: UIInputViewController {
     private let bundledSnippetRepository: SnippetRepository = BundledSnippetRepository()
     private let greetingsSnippetRepository: SnippetRepository = BundledSnippetRepository(resourceName: "Greetings")
     private let userSnippetRepository: SnippetRepository = AppGroupSnippetRepository()
+    /// 외부 채움글 snapshot 세대(읽기만) — 매처 재구성 키(9-5, AC-9)
+    private let packGenerations = AppGroupPackGenerations()
+    /// 지금 매처를 만든 키 — 같으면 다시 만들지 않는다(테마·슬라이더 같은 다른 설정 알림에서 0회, AC-9)
+    private var snippetMatcherKey: SnippetRebuildKey?
+    /// 외부 채움글 읽기 결과 — **프로세스 수명**이다(VC는 등장마다 새로 만들어진다). 세대·켜진 내장이 같으면 snapshot을 다시 읽지
+    /// 않는다(최대 3MB 디코드를 등장마다 하지 않게). 매처는 성경 저장소가 VC마다라 VC마다 만든다
+    private static var snippetSourcesCache: (key: SnippetSourcesKey, result: PackSnapshotLoader.Result)?
 
     private var settings: KeyboardSettings = .default
     private var inputController: InputController?
@@ -332,7 +339,7 @@ final class KeyboardViewController: UIInputViewController {
         reloadSettingsIfChanged()
         // 이모지 최근 사용 — 저장소에서 다시 읽고, 설정 앱이 껐으면 여기서 비운다(설정이 그대로여도 매번)
         refreshEmojiHistory()
-        // 설정이 그대로여도 사용자 문구는 설정 앱에서 바뀌었을 수 있다 — 항상 다시 만든다
+        // 사용자 문구·외부 팩이 설정 앱에서 바뀌었으면 세대가 올라 있다 — 재구성 키가 다를 때만 다시 만든다(AC-9)
         rebuildSnippetMatcher()
         rebuildSuggestionEngineIfNeeded()
         // 같은 값 대입도 Observation에 통지되므로 바뀐 경우에만 갱신한다.
@@ -498,7 +505,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func applySettingsLive() {
         reloadSettingsIfChanged()
-        rebuildSnippetMatcher()            // 내 채움글 저장도 같은 알림을 쓴다
+        rebuildSnippetMatcher()            // 내 채움글·외부 팩 저장도 같은 알림 — 키(세대·채움글 설정)가 같으면 0회(AC-9)
         rebuildSuggestionEngineIfNeeded()  // 학습 초기화 토큰
         updateHeight()
         refreshLayout()
@@ -598,31 +605,55 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: - 채움글 · 추천단어
 
-    /// 설정이 켜져 있을 때만 매처를 만든다. 사용자 문구 → 내장 팩 순서 = 우선순위.
-    /// 끈 팩(`disabledSnippetPacks`)은 구성에서 뺀다.
+    /// 설정이 켜져 있을 때만 매처를 만든다. 순서(10-3): U1 순서 목록(내 채움글·외부 문구형 팩) → 내장 팩 → 날짜·시간 → 외부 팩
+    /// 템플릿 → 성경. 끈 팩(`disabledSnippetPacks`)은 구성에서 뺀다.
+    ///
+    /// ★ **재구성 키가 같으면 아무것도 하지 않는다**(외부 채움글 9-5·AC-9) — 키 = 사용자 문구·팩 세대 + 채움글 관계 설정.
+    /// 테마·진동·슬라이더 알림에서는 다시 만들지 않는다. 내 채움글 저장은 `PackStore`가 세대를 올리므로 키가 바뀐다.
+    ///
+    /// ★ P-2 피크 측정 자리 — 이 함수의 `loadSnippetSources` + `SnippetMatcher(...)` 앞뒤(옛 매처는 새 매처를 만든 **뒤** 놓는다, R17 기본).
     private func rebuildSnippetMatcher() {
+        let key = SnippetRebuildKey(settings: settings, userSnippetsGeneration: packGenerations.userSnippetsGeneration,
+                                    packsGeneration: packGenerations.packsGeneration)
+        guard key != snippetMatcherKey else { return }
+        snippetMatcherKey = key
         guard settings.snippetsEnabled else {
             snippetMatcher = nil
             return
         }
         let disabled = settings.disabledSnippetPacks
-        var entries = userSnippetRepository.entries()
-        if !disabled.contains(SnippetPack.anthem) {
-            entries += bundledSnippetRepository.entries()
-        }
-        if !disabled.contains(SnippetPack.greetings) {
-            entries += greetingsSnippetRepository.entries()
-        }
+        let builtIn = BuiltInSnippetEntries.enabled(
+            disabled: Set(disabled), anthem: bundledSnippetRepository, greetings: greetingsSnippetRepository)
+        let sources = loadSnippetSources(builtIn: builtIn, disabled: Set(disabled))
+        let composed = SnippetSourceComposer.compose(order: sources.order, userEntries: sources.userEntries,
+                                                     packs: sources.packs, builtIn: builtIn)
         snippetMatcher = SnippetMatcher(
             bible: disabled.contains(SnippetPack.bible) ? nil : bibleRepository,
-            entries: entries,
+            entries: composed.entries,
             biblePrefix: settings.bibleSnippetPrefixEnabled,
             // 날짜·시간 팩 — 문구 JSON이 없는 **계산 팩**이다. 끄면 파서를 아예 싣지 않는다(세 갈래 전부 빠진다).
             // 값은 미리 계산하지 않는다 — 매처가 적중한 순간 `now()`를 읽는다(PDR 1절).
             dates: disabled.contains(SnippetPack.date)
                 ? nil
-                : DateSnippetParser(style: settings.dateSnippetStyle, calendar: dateSnippetCalendar)
+                : DateSnippetParser(style: settings.dateSnippetStyle, calendar: dateSnippetCalendar),
+            templates: composed.templates
         )
+    }
+
+    /// 외부 채움글 순차 로드(9-4) — 사용자 문구·snapshot을 **일관되게** 읽고(8절), 예산 안의 팩만 돌려준다. 세대와 켜진 내장이
+    /// 같으면 프로세스 캐시를 쓴다. App Group이 없으면(있을 수 없는 구성) 사용자 문구만 — 지금과 같은 동작.
+    private func loadSnippetSources(builtIn: [SnippetEntry], disabled: Set<String>) -> PackSnapshotLoader.Result {
+        let builtInDisabled = disabled.intersection([SnippetPack.anthem, SnippetPack.greetings])
+        let wanted = SnippetSourcesKey(userSnippetsGeneration: packGenerations.userSnippetsGeneration,
+                                       packsGeneration: packGenerations.packsGeneration, builtInDisabled: builtInDisabled)
+        if let cached = Self.snippetSourcesCache, cached.key == wanted { return cached.result }
+        guard let loader = PackSnapshotLoader.live() else { return .userOnly(userSnippetRepository.entries()) }
+        let result = loader.load(builtIn: builtIn)
+        // 캐시 키는 **실제로 읽은** 세대 — 그사이 바뀌었으면 다음 재구성이 다시 읽는다
+        Self.snippetSourcesCache = (SnippetSourcesKey(userSnippetsGeneration: result.userSnippetsGeneration,
+                                                      packsGeneration: result.packsGeneration,
+                                                      builtInDisabled: builtInDisabled), result)
+        return result
     }
 
     /// 켬/끔 또는 학습 초기화 토큰이 바뀔 때만 만들고 버린다 — 유지 이유는 프로퍼티 주석 참조.
@@ -2200,3 +2231,9 @@ private struct InputModeSwitchButton: UIViewRepresentable {
     func updateUIView(_ uiView: UIButton, context: Context) {}
 }
 
+/// 외부 채움글 읽기 결과의 캐시 키 — 세대 둘 + 켜진 내장(baseline에 든다)
+private struct SnippetSourcesKey: Equatable {
+    var userSnippetsGeneration: Int
+    var packsGeneration: Int
+    var builtInDisabled: Set<String>
+}

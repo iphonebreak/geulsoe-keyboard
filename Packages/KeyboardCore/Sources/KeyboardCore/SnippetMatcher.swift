@@ -80,7 +80,8 @@ public struct SnippetSuggestion: Equatable, Sendable {
 
 /// 입력 꼬리에서 채움글 **단축어**를 찾는다.
 ///
-/// 우선순위: 문구 목록(entries — 사용자 문구를 내장 팩보다 앞에 넣는다) > 날짜·시간(`dates`) > 성경 참조(단일 절·절 범위).
+/// 우선순위: 문구 목록(entries — U1 순서 목록(내 채움글·외부 문구형 팩) 다음 내장 팩, `SnippetSourceComposer`) > 날짜·시간(`dates`)
+/// > 외부 팩 번호형 **템플릿**(`templates`, 외부 채움글 1-b) > 성경 참조(단일 절·절 범위) — PDR `external-snippet-packs.md` 10-3.
 /// 문구끼리 겹치면 **정규화 길이가 긴** 단축어가 이기고, 같으면 앞선 항목(=사용자)이 이긴다.
 /// 후보는 1건만 낸다 — 다중 후보는 Phase 5 추천단어 바에 합류할 때 확장한다 (PDR).
 ///
@@ -126,16 +127,20 @@ public struct SnippetMatcher: Sendable {
     /// (설정 `bibleSnippetPrefixEnabled`, 2026-09-07)
     private let biblePrefix: Bool
     private let dates: DateSnippetParser?
+    /// 외부 팩 번호형 템플릿(`사자성어{n}번`) — 날짜 다음·성경 앞(10-3). nil이면 이 분기를 건너뛴다
+    private let templates: PackTemplateMatcher?
 
     /// - Parameter biblePrefix: 성경 머리말 여부 (기본 켬)
+    /// - Parameter templates: 외부 팩 템플릿 — 소유권·동점은 `PackTemplateMatcher`가 목록 순서로 정한다(10-4)
     public init(
         bible: (any BibleVerseRepository)?, entries: [SnippetEntry], biblePrefix: Bool = true,
-        dates: DateSnippetParser? = nil
+        dates: DateSnippetParser? = nil, templates: PackTemplateMatcher? = nil
     ) {
         self.bible = bible
         self.entries = entries
         self.biblePrefix = biblePrefix
         self.dates = dates
+        self.templates = templates
         // 정규화는 **여기서 한 번만** 한다 (핫패스 규율).
         // 공백만으로 이뤄진 단축어와 빈 단축어는 아예 목록에 넣지 않는다 — 꼬리 어디에나
         // 맞아 버리는 것을 원천 차단한다.
@@ -221,6 +226,13 @@ public struct SnippetMatcher: Sendable {
         // 끝말(날짜·시간·시각)이 아니면 두어 번의 글자 비교로 끝난다. 값은 맞았을 때만 계산한다.
         if let dates, let suggestion = dates.suggestion(characters: characters, reversed: reversed) {
             return suggestion
+        }
+
+        // 외부 팩 번호형 템플릿 — **날짜 다음, 성경 앞**(10-3). 정적 단축어가 같은 꼬리를 먼저 가져가면 그 패턴은 가려진다.
+        // 소유 팩에 그 번호가 없으면 nil이고 다른 판본으로 후퇴하지 않는다(10-4 5번). 지울 구간은 꼬리에서 잘라낸 원문이다.
+        // 성경 참조와 겹치는 패턴은 가져오기에서 이미 거부됐다(10-2, 1~9,999 전체 검사).
+        if let templates, let match = templates.match(tail: tail) {
+            return match.suggestion
         }
 
         if let bible,

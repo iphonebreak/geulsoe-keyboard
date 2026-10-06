@@ -5,7 +5,8 @@ import TadakData
 /// 채움글 설정 — 전체 on/off, 내장 팩 on/off, 내 채움글 관리(추가·고치기·삭제).
 ///
 /// 내 채움글은 App Group에 앱이 쓰고 키보드가 읽는다 (단방향 — 권한 불필요).
-/// 키보드는 표시될 때마다 매처를 다시 만들므로 다음 키보드 표시부터 반영된다.
+/// **쓰기는 전부 `PackStore` 하나를 거친다**(외부 채움글 1-b, PDR `external-snippet-packs.md` 9-1·AC-2) — 예산 판정·snapshot·
+/// 세대·알림이 그 안에 있고, 키보드는 세대가 바뀔 때만 매처를 다시 만든다(AC-9).
 struct SnippetSettingsView: View {
 
     @Binding var settings: KeyboardSettings
@@ -14,7 +15,10 @@ struct SnippetSettingsView: View {
     @State private var showsEditor = false
     /// 고치는 중인 항목. nil이면 **추가**다 — 시트 하나가 두 모드를 다 맡는다.
     @State private var editingEntry: EditingSnippet?
+    /// 한도 때문에 반영하지 않았다 — 1-c(복구·안내 화면) 전의 최소 알림
+    @State private var showsLimitAlert = false
 
+    /// 읽기 전용 — 쓰기는 `PackStore.live`
     private let repository = AppGroupSnippetRepository()
 
     var body: some View {
@@ -43,7 +47,7 @@ struct SnippetSettingsView: View {
                     NavigationLink {
                         SnippetPackDetailView(pack: pack, settings: $settings)
                     } label: {
-                        LabeledContent(pack.name, value: packBinding(pack.id).wrappedValue ? "켬" : "끔")
+                        LabeledContent(pack.name, value: settings.disabledSnippetPacks.contains(pack.id) ? "끔" : "켬")
                     }
                 }
             } header: {
@@ -98,12 +102,8 @@ struct SnippetSettingsView: View {
         .settingsFormWidth()
         .navigationTitle("채움글")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear {
-            // 저장분에 중복 단축어가 있으면(외부 쓰기·스키마 진화) ForEach id가 겹친다 — 방어 dedup.
-            // 기준은 **정규화 단축어**다 — "우리집주소"와 "우리집 주소"는 같은 것으로 본다.
-            var seen = Set<String>()
-            userSnippets = repository.entries().filter { seen.insert($0.snippetListID).inserted }
-        }
+        .onAppear(perform: reloadUserSnippets)
+        .snippetLimitAlert(isPresented: $showsLimitAlert)
         .sheet(isPresented: $showsEditor) {
             SnippetEditorView(editing: nil, onSave: save)
         }
@@ -130,28 +130,58 @@ struct SnippetSettingsView: View {
         // ★ 규칙은 `SnippetEntry.applying(_:editing:to:)`에 있다 — **여기 두면 테스트가 못 닿는다.**
         //   그래서 「고치면 자리가 맨 뒤로 튄다」를 아무도 못 잡았다(검증자 2026-09-23).
         //   추가는 맨 뒤, 편집은 **제자리**다. 겹쳐 지워진 항목만큼의 인덱스 보정도 거기 있다.
-        userSnippets = SnippetEntry.applying(entry, editing: original, to: userSnippets)
-        repository.save(userSnippets)
-        SettingsChangeNotifier.post()  // 떠 있는 키보드의 매처를 즉시 갱신
+        // ★ 저장은 `PackStore` 한 길 — 한 번에 **한 항목**(1-b 계약). 판정·snapshot·키보드 알림이 그 안에 있다.
+        if !PackStore.live.saveUserSnippet(entry, editing: original).isAccepted { showsLimitAlert = true }
+        reloadUserSnippets()
     }
 
-    private func packBinding(_ packID: String) -> Binding<Bool> {
-        Binding(
-            get: { !settings.disabledSnippetPacks.contains(packID) },
-            set: { enabled in
-                if enabled {
-                    settings.disabledSnippetPacks.removeAll { $0 == packID }
-                } else if !settings.disabledSnippetPacks.contains(packID) {
-                    settings.disabledSnippetPacks.append(packID)
-                }
-            }
-        )
-    }
-
+    /// 지울 때도 한 항목씩 — 여러 개를 고르면 하나씩 커밋한다(1-b 「저장 1회 = 항목 1개」)
     private func deleteSnippets(at offsets: IndexSet) {
-        userSnippets.remove(atOffsets: offsets)
-        repository.save(userSnippets)
-        SettingsChangeNotifier.post()
+        for entry in offsets.map({ userSnippets[$0] }) {
+            PackStore.live.deleteUserSnippet(entry)
+        }
+        reloadUserSnippets()
+    }
+
+    private func reloadUserSnippets() {
+        // 저장분에 중복 단축어가 있으면(외부 쓰기·스키마 진화) ForEach id가 겹친다 — 방어 dedup.
+        // 기준은 **정규화 단축어**다 — "우리집주소"와 "우리집 주소"는 같은 것으로 본다.
+        var seen = Set<String>()
+        userSnippets = repository.entries().filter { seen.insert($0.snippetListID).inserted }
+    }
+}
+
+/// 내장 팩 켜기·끄기 — 목록과 팩 상세가 **이 하나**를 쓴다(외부 채움글 AC-6). 판정·snapshot은 `PackStore`가 하고, 받으면 설정에
+/// 반영한다(설정 저장 지점은 `RootView` 하나 — 여기서 저장하지 않는다). 거부되면 스위치는 그대로 두고 알린다.
+@MainActor
+private func builtInPackBinding(
+    _ packID: String, settings: Binding<KeyboardSettings>, onReject: @escaping @MainActor () -> Void
+) -> Binding<Bool> {
+    Binding(
+        get: { !settings.wrappedValue.disabledSnippetPacks.contains(packID) },
+        set: { enabled in
+            let current = settings.wrappedValue.disabledSnippetPacks
+            guard PackStore.live.setBuiltInPack(packID, enabled: enabled, currentDisabled: current).isAccepted else {
+                onReject()
+                return
+            }
+            if enabled {
+                settings.wrappedValue.disabledSnippetPacks.removeAll { $0 == packID }
+            } else if !current.contains(packID) {
+                settings.wrappedValue.disabledSnippetPacks.append(packID)
+            }
+        }
+    )
+}
+
+private extension View {
+    /// 채움글 한도 알림 — 1-c의 안내·복구 화면 전까지의 최소 문구(문구는 기획 검토 대상)
+    func snippetLimitAlert(isPresented: Binding<Bool>) -> some View {
+        alert("반영하지 못했어요", isPresented: isPresented) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text("채움글 한도를 넘어요. 다른 문구를 줄이거나 지운 뒤 다시 해 주세요.")
+        }
     }
 }
 
@@ -377,6 +407,7 @@ struct SnippetPackDetailView: View {
 
     let pack: SnippetPackInfo
     @Binding var settings: KeyboardSettings
+    @State private var showsLimitAlert = false
 
     var body: some View {
         Form {
@@ -485,6 +516,7 @@ struct SnippetPackDetailView: View {
         .settingsFormWidth()
         .navigationTitle(pack.name)
         .navigationBarTitleDisplayMode(.inline)
+        .snippetLimitAlert(isPresented: $showsLimitAlert)
     }
 
     /// 스위치 한 행의 **제목 + 설명** — 설명이 어느 스위치 것인지 붙어 있어야 한다.
@@ -500,16 +532,7 @@ struct SnippetPackDetailView: View {
     }
 
     private var enabledBinding: Binding<Bool> {
-        Binding(
-            get: { !settings.disabledSnippetPacks.contains(pack.id) },
-            set: { enabled in
-                if enabled {
-                    settings.disabledSnippetPacks.removeAll { $0 == pack.id }
-                } else if !settings.disabledSnippetPacks.contains(pack.id) {
-                    settings.disabledSnippetPacks.append(pack.id)
-                }
-            }
-        )
+        builtInPackBinding(pack.id, settings: $settings) { showsLimitAlert = true }
     }
 }
 

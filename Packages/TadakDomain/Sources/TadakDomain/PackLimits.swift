@@ -58,6 +58,11 @@ public enum PackLimits {
     public static let numberRange = 1...9_999
     /// 외부 팩 수 — **꺼진 팩도 센다**(9-4 ② 팩 수 cap). 후보값 — P-2 「비활성 16팩」 시험값, P-2에서 확정(v3.6 ⑭)
     public static let externalPacks = 16
+    /// 공유 snapshot의 manifest 바이트(9-4 ①) — 키보드가 **읽기 전에** 자른다. 팩 16개의 목차라 넉넉하다(후보값)
+    public static let snapshotManifestBytes = 64 * 1024
+    /// 변환본 파일이 예산 `bytes`(도메인 값 직렬화) 위에 더 쓰는 감싸기(schema·packID·source·stats·키) 여유 —
+    /// 키보드의 파일 바이트 cap(9-4 ③) = 남은 예산 바이트 + 이 값. 후보값
+    public static let storedPackOverheadBytes = 4 * 1024
     /// 건너뜀 비율이 이 값 이상이면 자동 진행 금지 — 경험적 초안(R10, 5-5)
     public static let skipRatioRequiringConfirmation = 0.5
 }
