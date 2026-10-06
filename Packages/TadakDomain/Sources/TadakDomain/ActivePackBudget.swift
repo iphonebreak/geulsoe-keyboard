@@ -100,6 +100,9 @@ public enum ActivePackBudget {
         case afterEarlierOverflow
         /// baseline이 이미 넘어 외부 팩 전부가 빠졌다
         case baselineOverflow
+        /// 앱 저장본에서 이 팩의 변환본을 읽을 수 없어 판정에서 뺐다(검증 C5) — 예산과 무관, 이 함수는 내지 않는다.
+        /// `PackStore`가 판정 단계에서 붙인다(snapshot도 이 판정대로 — 앱 판정 == 키보드, AC-8)
+        case unavailable
     }
 
     public struct Exclusion: Equatable, Sendable {
@@ -331,7 +334,7 @@ public enum PackCommitGate {
         switch evaluation.excluded.first(where: { $0.id == id })?.reason {
         case .overflow(let dimensions): dimensions
         case .baselineOverflow: evaluation.baselineOverflow
-        case .afterEarlierOverflow, nil: []
+        case .afterEarlierOverflow, .unavailable, nil: []
         }
     }
 }

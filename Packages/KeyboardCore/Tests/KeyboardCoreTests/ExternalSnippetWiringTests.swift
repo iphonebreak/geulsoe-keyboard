@@ -63,6 +63,13 @@ struct ExternalSnippetWiringTests {
         #expect(sources.entries.first == Self.userThanks)
     }
 
+    @Test("C3 — 「내 채움글」 줄이 순서에 두 번 있어도 사용자 문구는 한 번만 싣는다(방어 — 로더는 그런 manifest를 손상으로 거절)")
+    func duplicateUserSlotOnce() {
+        let sources = SnippetSourceComposer.compose(order: [.userSnippets, .pack("phr"), .userSnippets],
+                                                    userEntries: [Self.userThanks], packs: ["phr": Self.phrasePack], builtIn: [])
+        #expect(sources.entries == [Self.userThanks] + Self.phrasePack.entries)
+    }
+
     @Test("긴 단축어가 이기는 규칙은 그대로 — 순서는 같은 길이일 때만")
     func longestStillWins() {
         let long = SnippetEntry(trigger: "회의끝인사", title: "긴", body: "긴 본문")
@@ -100,21 +107,36 @@ struct ExternalSnippetWiringTests {
         #expect(SnippetMatcher(bible: nil, entries: sources.entries).suggestion(forTail: "새해인사")?.body == "팩 새해")
     }
 
-    @Test("★ 날짜가 템플릿보다 먼저 — 「오늘 날짜」는 날짜 칩")
+    /// 두 분기가 **같은 꼬리**에 함께 맞는다 — 순서를 바꾸면 결과가 바뀐다(검증 F5 ⑤: 겹치지 않는 꼬리로는 순서를 못 잠근다).
+    /// 실제 가져오기는 10-1 예약 접미(`날짜`로 끝나는 틀 거부)가 이 겹침을 막지만, 매처의 순서 자체를 여기서 고정한다
+    @Test("★ 날짜가 템플릿보다 먼저 — 같은 꼬리 「기한 3일 후 날짜」에 둘 다 맞아도 날짜 칩")
     func datesBeforeTemplate() throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
         let now = calendar.date(from: DateComponents(year: 2026, month: 10, day: 6, hour: 10))!
         let dates = DateSnippetParser(style: .formal, calendar: calendar, now: { now })
-        let hit = try #require(matcher(order: [.pack("num")], dates: dates).suggestion(forTail: "오늘 날짜"))
-        #expect(hit.kind != nil)
+        let clash = PackTemplateMatcher(sources: [.init(id: "clash", template: PackTemplate(
+            patterns: [TemplatePattern(prefix: "기한", suffix: "일후날짜")], titleFormat: "기한 {n}일 후 날짜",
+            items: [PackTemplateItem(n: 3, title: "", body: "템플릿 본문")]))])
+        #expect(clash.match(tail: "기한 3일 후 날짜") != nil, "전제 — 템플릿도 이 꼬리에 맞는다")
+        #expect(dates.suggestion(forTail: "기한 3일 후 날짜") != nil, "전제 — 날짜도 이 꼬리에 맞는다")
+        let hit = try #require(SnippetMatcher(bible: nil, entries: [], dates: dates, templates: clash)
+            .suggestion(forTail: "기한 3일 후 날짜"))
+        #expect(hit.kind != nil && hit.body != "템플릿 본문")
     }
 
-    @Test("★ 템플릿이 성경보다 먼저 — 템플릿이 없으면 성경은 지금처럼")
-    func templateBeforeBible() {
+    @Test("★ 템플릿이 성경보다 먼저 — 같은 꼬리 「창세기 1장 1절」에 둘 다 맞으면 템플릿 칩")
+    func templateBeforeBible() throws {
+        let clash = PackTemplateMatcher(sources: [.init(id: "clash", template: PackTemplate(
+            patterns: [TemplatePattern(prefix: "창세기", suffix: "장1절")], titleFormat: "창세기 {n}장 1절",
+            items: [PackTemplateItem(n: 1, title: "", body: "템플릿 본문")]))])
         let bible = GenesisBible()
-        #expect(matcher(order: [.pack("num")], bible: bible).suggestion(forTail: "사자성어 3번")?.body == "삼고초려")
-        #expect(matcher(order: [.pack("num")], bible: bible).suggestion(forTail: "창세기 1장 1절")?.body == "성경 1:1:1")
+        #expect(SnippetMatcher(bible: bible, entries: []).suggestion(forTail: "창세기 1장 1절")?.body == "성경 1:1:1",
+                "전제 — 성경도 이 꼬리에 맞는다")
+        let hit = try #require(SnippetMatcher(bible: bible, entries: [], templates: clash).suggestion(forTail: "창세기 1장 1절"))
+        #expect(hit.body == "템플릿 본문")
+        #expect(SnippetMatcher(bible: bible, entries: [], templates: clash).suggestion(forTail: "창세기 1장 2절")?.body == "성경 1:1:2",
+                "템플릿 소유 쌍이 아니면 성경은 지금처럼")
     }
 
     @Test("secure 입력란이면 템플릿도 아무것도 맞추지 않는다")

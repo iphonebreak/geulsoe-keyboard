@@ -154,8 +154,11 @@ public struct PackSnapshotLoader: Sendable {
         }
         guard manifest.schema == PackSnapshotManifest.schemaVersion else { return .dropped(.unknownSchema, filesRead: 0) }
         let ids = manifest.packs.map(\.id)
+        // 순서 목록: 「내 채움글」 줄 **정확히 하나**·줄 겹침 없음(검증 C3 — 겹치면 사용자 문구가 슬롯마다 붙어 예산보다 큰 매처가 된다)
         guard manifest.generation == generation, Set(ids).count == ids.count,
               manifest.order.compactMap(\.packID) == ids,
+              manifest.order.filter({ $0 == .userSnippets }).count == 1,
+              Set(manifest.order).count == manifest.order.count,
               manifest.packs.allSatisfy({ Self.isPlainFileName($0.file) }) else {
             return .dropped(.corruptManifest, filesRead: 0)
         }
@@ -245,6 +248,16 @@ public struct PackSnapshotLoader: Sendable {
 }
 
 extension PackSnapshotLoader.Result {
+    /// 프로세스 캐시에 넣어도 되는가(검증 F1). **일시적 실패**(세대가 계속 바뀜·파일이 사라짐)로 외부 팩을 뺀 결과는 넣지 않는다 —
+    /// 넣으면 그 세대가 그대로인 동안 다음 재구성도 캐시를 써서 외부 팩이 조용히 빠진 채 남는다. 정상·snapshot 없음과
+    /// **영구 실패**(손상·낯선 schema·크기 불일치·필드 상한)는 넣어도 된다 — 같은 세대를 다시 읽어도 같고, 앱의 다음 저장이 세대를 바꾼다.
+    public var isCacheable: Bool {
+        switch dropped {
+        case .inconsistentGenerations?, .vanished?: false
+        default: true
+        }
+    }
+
     /// 외부 팩 없이 사용자 문구만 — App Group을 못 여는(있을 수 없는) 구성의 안전한 기본값
     public static func userOnly(_ entries: [SnippetEntry]) -> Self {
         Self(order: SnippetSourceSlot.defaultOrder, userEntries: entries, packs: [:], includedPackIDs: [], excluded: [],

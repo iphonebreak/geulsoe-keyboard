@@ -25,9 +25,13 @@ public enum SnippetSourceComposer {
         var entries: [SnippetEntry] = []
         var templateSources: [PackTemplateMatcher.Source] = []
         var seenPacks = Set<String>()
+        var userAdded = false
         for slot in slots {
             switch slot {
             case .userSnippets:
+                // 겹친 「내 채움글」 줄은 한 번만 — 로더가 그런 manifest를 손상으로 거절하지만 여기서도 막는다(검증 C3)
+                guard !userAdded else { continue }
+                userAdded = true
                 entries += userEntries
             case .pack(let id):
                 guard seenPacks.insert(id).inserted, let pack = packs[id] else { continue }

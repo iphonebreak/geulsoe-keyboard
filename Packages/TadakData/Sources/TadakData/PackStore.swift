@@ -37,6 +37,17 @@ public final class PackStore: @unchecked Sendable {
         /// 순서 바꾸기가 지금 목록의 재배열이 아니다
         case invalidOrder
         case writeFailed
+        /// 앱 전용 목록(`library.json`)이 있는데 읽을 수 없다·손상·낯선 schema(검증 C1) — **아무것도 지우거나 덮어쓰지 않는다**(9-3)
+        case libraryUnreadable
+        /// 변환본을 읽을 수 없는 팩은 켤 수 없다(검증 C5) — 다시 가져오기·삭제로 복구(1-c)
+        case packUnavailable(String)
+
+        /// 예산 게이트(한도·밀림·팩 수) 거부인가 — 화면의 「한도」 문구는 이것만, 나머지는 「저장하지 못했어요」(검증 F3).
+        /// 최종 문구는 1-c 기획 검토에서 다시 본다
+        public var isBudgetLimit: Bool {
+            if case .gate = self { return true }
+            return false
+        }
     }
 
     public struct Accepted: Equatable, Sendable {
@@ -70,6 +81,8 @@ public final class PackStore: @unchecked Sendable {
     private let makeID: @Sendable () -> String
     private let limits: PackBudgetLimits
     private let queue = DispatchQueue(label: "com.charging.tadak.PackStore")
+    /// 시험 전용 갈고리 — 큐 안에서 판정과 쓰기 사이에 부른다(직렬성 결정적 시험, 검증 F5 ④). 제품에서는 nil
+    var beforeWriteForTesting: (@Sendable () -> Void)?
 
     /// - Parameters:
     ///   - libraryRoot: **앱 전용** 폴더 — 변환본(꺼진 팩 포함)과 목록
@@ -112,19 +125,35 @@ public final class PackStore: @unchecked Sendable {
 
     // MARK: - 읽기
 
-    public var revision: Int { queue.sync { loadLibrary().revision } }
+    public var revision: Int { queue.sync { (readLibrary() ?? PackLibrary()).revision } }
 
-    /// 지금 저장본의 예산 판정 — 화면의 포함·제외·「일부만 사용 중」 안내(9-3, 1-c)가 이 값을 쓴다
+    /// 앱 전용 목록을 읽을 수 있는가 — 거짓이면 모든 변경·정리를 멈춘 상태다(검증 C1). 1-c가 복구 안내를 보일 자리
+    public var isLibraryReadable: Bool { queue.sync { readLibrary() != nil } }
+
+    /// 지금 저장본의 예산 판정 — 화면의 포함·제외(못 읽는 팩은 `.unavailable`)·「일부만 사용 중」 안내(9-3, 1-c)가 이 값을 쓴다
     public func evaluation() -> ActivePackBudget.Evaluation {
         queue.sync {
-            let state = loadState()
-            let input = budgetInput(library: state.library, user: state.user, disabled: state.disabled)
-            return ActivePackBudget.evaluate(baseline: input.baseline, packs: input.packs, limits: limits)
+            let library = readLibrary() ?? PackLibrary()
+            let unavailable = unavailablePackIDs(in: library)
+            let input = budgetInput(library: library, user: userSnippets.entries(), disabled: disabledBuiltIns(),
+                                    unavailable: unavailable)
+            return withUnavailable(ActivePackBudget.evaluate(baseline: input.baseline, packs: input.packs, limits: limits),
+                                   library: library, unavailable: unavailable)
         }
     }
 
     /// 지금 순서 목록(U1 — 「내 채움글」 한 줄 포함)
-    public var order: [SnippetSourceSlot] { queue.sync { loadLibrary().order } }
+    public var order: [SnippetSourceSlot] { queue.sync { (readLibrary() ?? PackLibrary()).order } }
+
+    /// 목록에 있지만 변환본이 없거나 읽을 수 없는 팩(검증 F4·C5) — 판정에서 `.unavailable`로 빠지는 그 팩들. 1-c가 「이 팩을 읽을 수
+    /// 없어요」를 보일 자리(꺼진 팩도 포함). 화면은 아직 없다
+    public func unreadablePackIDs() -> [String] {
+        queue.sync {
+            let library = readLibrary() ?? PackLibrary()
+            let unavailable = unavailablePackIDs(in: library)
+            return library.order.compactMap(\.packID).filter(unavailable.contains)
+        }
+    }
 
     // MARK: - 내 채움글
 
@@ -148,12 +177,16 @@ public final class PackStore: @unchecked Sendable {
         }
     }
 
+    /// 지우기 한 건 — **화면 목록과 같은 기준**(`snippetListID` = 정규화 단축어)으로 겹치는 저장분을 **모두** 지운다(검증 F7).
+    /// 화면은 띄어쓰기만 다른 옛 중복을 하나로 보여 주므로, 하나만 지우면 지운 항목이 다시 보인다. 사용자에게 하나로 보이는
+    /// 항목 하나라 「저장 1회 = 항목 1개」에 맞고, 줄이는 쪽이라 예산 판정에 막히지 않는다(`.deleteUserSnippets`는 거부 없음).
     @discardableResult
     public func deleteUserSnippet(_ entry: SnippetEntry, expectedRevision: Int? = nil) -> CommitResult {
         perform(expectedRevision: expectedRevision) { state in
-            guard let index = state.user.firstIndex(of: entry) else { return .failure(.notFound) }
+            let target = entry.snippetListID
+            guard state.user.contains(where: { $0.snippetListID == target }) else { return .failure(.notFound) }
             var proposal = Proposal(change: .deleteUserSnippets, state: state)
-            proposal.user.remove(at: index)
+            proposal.user.removeAll { $0.snippetListID == target }
             return .success(proposal)
         }
     }
@@ -199,6 +232,7 @@ public final class PackStore: @unchecked Sendable {
     public func setPackEnabled(_ id: String, enabled: Bool, expectedRevision: Int? = nil) -> CommitResult {
         perform(expectedRevision: expectedRevision) { state in
             guard state.library.packs[id] != nil else { return .failure(.notFound) }
+            if enabled, unavailablePackIDs(in: state.library).contains(id) { return .failure(.packUnavailable(id)) }
             var proposal = Proposal(change: enabled ? .enablePack(id: id) : .disablePack(id: id), state: state)
             proposal.library.packs[id]?.isEnabled = enabled
             return .success(proposal)
@@ -248,7 +282,8 @@ public final class PackStore: @unchecked Sendable {
     /// 한도를 넘어도 지우지 않는다**(9-3).
     public func maintain() {
         queue.sync {
-            let library = loadLibrary()
+            // ★ 목록을 못 읽으면 **아무것도 지우지 않는다**(검증 C1) — 빈 목록으로 보면 변환본이 전부 「안 쓰는 파일」이 된다
+            guard let library = readLibrary() else { return }
             removeUnreferencedPackFiles(library: library)
             collectSnapshotGarbage(current: generations.packsGeneration)
         }
@@ -283,7 +318,8 @@ public final class PackStore: @unchecked Sendable {
 
     private func perform(expectedRevision: Int?, _ make: (State) -> Swift.Result<Proposal, Rejection>) -> CommitResult {
         queue.sync {
-            let state = loadState()
+            // ★ 목록이 있는데 못 읽으면 커밋하지 않는다 — 빈 목록으로 판정해 덮어쓰면 팩 목록이 사라진다(검증 C1, 9-3)
+            guard let state = loadState() else { return .rejected(.libraryUnreadable, rechecked: false) }
             let rechecked = expectedRevision.map { $0 != state.library.revision } ?? false
             var proposal: Proposal
             switch make(state) {
@@ -292,12 +328,19 @@ public final class PackStore: @unchecked Sendable {
             }
             proposal.userChanged = proposal.user != state.user
             let currentBase = proposal.currentOverride ?? (state.user, state.disabled)
-            let current = budgetInput(library: state.library, user: currentBase.user, disabled: currentBase.disabled)
-            let proposed = budgetInput(library: proposal.library, user: proposal.user, disabled: proposal.disabled)
+            // C5 — 변환본을 읽을 수 없는 팩은 **판정 단계에서** 뺀다(예산 자리도 차지하지 않는다). 이번에 새로 쓰는 변환본은 읽을 수 있다
+            var unavailable = unavailablePackIDs(in: proposal.library)
+            if let newID = proposal.newPack?.packID { unavailable.remove(newID) }
+            let current = budgetInput(library: state.library, user: currentBase.user, disabled: currentBase.disabled,
+                                      unavailable: unavailablePackIDs(in: state.library))
+            let proposed = budgetInput(library: proposal.library, user: proposal.user, disabled: proposal.disabled,
+                                       unavailable: unavailable)
             switch PackCommitGate.judge(proposal.change, current: current, proposed: proposed, limits: limits) {
             case .reject(let rejection):
                 return .rejected(.gate(rejection), rechecked: rechecked)
-            case .accept(let evaluation, let newlyExcluded):
+            case .accept(let judged, let newlyExcluded):
+                let evaluation = withUnavailable(judged, library: proposal.library, unavailable: unavailable)
+                beforeWriteForTesting?()
                 guard write(proposal, state: state, evaluation: evaluation) else {
                     return .rejected(.writeFailed, rechecked: rechecked)
                 }
@@ -342,7 +385,13 @@ public final class PackStore: @unchecked Sendable {
         }
         guard (try? ensureDirectory(libraryRoot)) != nil, let data = try? JSONEncoder().encode(library),
               (try? data.write(to: libraryURL, options: .atomic)) != nil else {
-            if proposal.userChanged { userSnippets.save(state.user) }
+            if proposal.userChanged {
+                userSnippets.save(state.user)
+                // ★ 되돌렸어도 세대는 올리고 알린다(검증 C2) — ③과 되돌리기 사이에 읽은 키보드가 **실패한 문구를 같은 세대 키로
+                //   캐시**하지 않게. 내용은 원래대로, 세대만 하나 오른다(다음 읽기가 원래 문구를 다시 읽는다)
+                generations.setUserSnippetsGeneration(newUserGeneration)
+                notify()
+            }
             rollback()
             return false
         }
@@ -358,7 +407,9 @@ public final class PackStore: @unchecked Sendable {
         return true
     }
 
-    /// snapshot 폴더 하나를 처음부터 쓴다 — 팩 파일을 다 쓴 **뒤** 마지막에 manifest(8절)
+    /// snapshot 폴더 하나를 처음부터 쓴다 — 팩 파일을 다 쓴 **뒤** 마지막에 manifest(8절). `included`는 판정이 이미 못 읽는 팩을 뺀
+    /// 목록이다(C5) — 여기서 팩을 **조용히 빼지 않는다**(판정 == snapshot, AC-8). 그 사이 파일이 사라지면(경쟁) 이 커밋은 실패하고
+    /// 다음 커밋의 판정이 그 팩을 `.unavailable`로 뺀다.
     private func publishSnapshot(library: PackLibrary, included: [String], generation: Int, userRevision: Int) -> URL? {
         let fileManager = FileManager.default
         let directory = PackStorageLocations.generationDirectory(generation, in: snapshotRoot)
@@ -413,23 +464,46 @@ public final class PackStore: @unchecked Sendable {
     private var libraryURL: URL { libraryRoot.appendingPathComponent("library.json") }
     private var packsDirectory: URL { libraryRoot.appendingPathComponent("packs", isDirectory: true) }
 
-    private func loadLibrary() -> PackLibrary {
+    /// 앱 전용 목록 — **파일이 없으면(처음) 빈 목록, 있는데 못 읽음·손상·낯선 schema면 nil**(검증 C1). 둘을 섞으면 손상된 목록을
+    /// 빈 목록으로 보고 정리가 변환본을 전부 지우고 다음 커밋이 빈 목록으로 덮어쓴다
+    private func readLibrary() -> PackLibrary? {
+        guard FileManager.default.fileExists(atPath: libraryURL.path) else { return PackLibrary() }
         guard let data = try? Data(contentsOf: libraryURL),
               let library = try? JSONDecoder().decode(PackLibrary.self, from: data),
-              library.schema == PackLibrary.schemaVersion else { return PackLibrary() }
+              library.schema == PackLibrary.schemaVersion else { return nil }
         return library
     }
 
-    private func loadState() -> State {
-        State(library: loadLibrary(), user: userSnippets.entries(), disabled: disabledBuiltIns())
+    private func loadState() -> State? {
+        readLibrary().map { State(library: $0, user: userSnippets.entries(), disabled: disabledBuiltIns()) }
     }
 
-    private func budgetInput(library: PackLibrary, user: [SnippetEntry], disabled: [String]) -> PackBudgetInput {
-        let packs = library.order.compactMap(\.packID).compactMap { id in
+    /// 목록이 가리키는 변환본이 없거나 읽을 수 없는 팩(검증 F4·C5) — 내용(디코드)까지는 보지 않는다(커밋마다 최대 3MB 디코드를 피함)
+    private func unavailablePackIDs(in library: PackLibrary) -> Set<String> {
+        Set(library.packs.compactMap { id, entry in
+            entry.file.isEmpty || !FileManager.default.isReadableFile(atPath: packsDirectory.appendingPathComponent(entry.file).path)
+                ? id : nil
+        })
+    }
+
+    /// 못 읽는 팩은 예산 후보에서 뺀다 — 앞에서 예산 자리를 차지하지 않는다(뒤 팩이 그 몫으로 들어올 수 있다 — 예산 쉼과 같은 결과)
+    private func budgetInput(library: PackLibrary, user: [SnippetEntry], disabled: [String], unavailable: Set<String>) -> PackBudgetInput {
+        let packs = library.order.compactMap(\.packID).filter { !unavailable.contains($0) }.compactMap { id in
             library.packs[id].map { ActivePackBudget.Candidate(id: id, isEnabled: $0.isEnabled, stats: $0.stats) }
         }
         return PackBudgetInput(userSnippets: PackStats.of(entries: user),
                                builtIn: PackStats.of(entries: builtInEntries(Set(disabled))), packs: packs)
+    }
+
+    /// 판정 결과에 **켜진** 못 읽는 팩을 `.unavailable` 제외로 싣는다(목록 순서) — 1-c가 이유를 보일 수 있게(C5)
+    private func withUnavailable(
+        _ evaluation: ActivePackBudget.Evaluation, library: PackLibrary, unavailable: Set<String>
+    ) -> ActivePackBudget.Evaluation {
+        var evaluation = evaluation
+        evaluation.excluded += library.order.compactMap(\.packID)
+            .filter { unavailable.contains($0) && library.packs[$0]?.isEnabled == true }
+            .map { ActivePackBudget.Exclusion(id: $0, reason: .unavailable) }
+        return evaluation
     }
 
     private func ensureDirectory(_ url: URL) throws {

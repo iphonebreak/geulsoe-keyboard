@@ -616,15 +616,19 @@ final class KeyboardViewController: UIInputViewController {
         let key = SnippetRebuildKey(settings: settings, userSnippetsGeneration: packGenerations.userSnippetsGeneration,
                                     packsGeneration: packGenerations.packsGeneration)
         guard key != snippetMatcherKey else { return }
-        snippetMatcherKey = key
         guard settings.snippetsEnabled else {
+            snippetMatcherKey = key
             snippetMatcher = nil
+            Self.snippetSourcesCache = nil   // 채움글을 끄면 읽어 둔 외부 팩(최대 약 3.5MB)도 놓는다(검증 F6)
             return
         }
         let disabled = settings.disabledSnippetPacks
         let builtIn = BuiltInSnippetEntries.enabled(
             disabled: Set(disabled), anthem: bundledSnippetRepository, greetings: greetingsSnippetRepository)
         let sources = loadSnippetSources(builtIn: builtIn, disabled: Set(disabled))
+        // ★ 키는 **캐시해도 되는(성공) 결과일 때만** 기록한다(검증 C4 · F1과 같은 판정 `Result.isCacheable`). 일시 실패(세대 불일치·
+        //   소실)면 키를 비워 두어 다음 알림·등장이 다시 읽는다 — 키를 먼저 기록하면 세대가 바뀔 때까지 같은 VC가 다시 읽지 않았다
+        snippetMatcherKey = sources.isCacheable ? key : nil
         let composed = SnippetSourceComposer.compose(order: sources.order, userEntries: sources.userEntries,
                                                      packs: sources.packs, builtIn: builtIn)
         snippetMatcher = SnippetMatcher(
@@ -649,6 +653,12 @@ final class KeyboardViewController: UIInputViewController {
         if let cached = Self.snippetSourcesCache, cached.key == wanted { return cached.result }
         guard let loader = PackSnapshotLoader.live() else { return .userOnly(userSnippetRepository.entries()) }
         let result = loader.load(builtIn: builtIn)
+        // ★ 일시적 실패(세대 불일치·소실)로 외부 팩을 뺀 결과는 캐시하지 않는다 — 판정은 `Result.isCacheable`(테스트됨, 검증 F1).
+        //   매처 키는 부르는 쪽이 같은 값으로 비운다(C4)
+        guard result.isCacheable else {
+            Self.snippetSourcesCache = nil
+            return result
+        }
         // 캐시 키는 **실제로 읽은** 세대 — 그사이 바뀌었으면 다음 재구성이 다시 읽는다
         Self.snippetSourcesCache = (SnippetSourcesKey(userSnippetsGeneration: result.userSnippetsGeneration,
                                                       packsGeneration: result.packsGeneration,

@@ -24,9 +24,17 @@ private final class MemoryGenerations: PackGenerationWriting, @unchecked Sendabl
 private final class MemorySnippets: UserSnippetStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var stored: [SnippetEntry]
+    /// 참이면 쓰기가 실패한다(저장하지 않고 false) — 실패 경로 시험(F5 ③)
+    var failSaves = false
     init(_ entries: [SnippetEntry] = []) { stored = entries }
     func entries() -> [SnippetEntry] { lock.withLock { stored } }
-    func save(_ entries: [SnippetEntry]) -> Bool { lock.withLock { stored = entries }; return true }
+    func save(_ entries: [SnippetEntry]) -> Bool {
+        lock.withLock {
+            guard !failSaves else { return false }
+            stored = entries
+            return true
+        }
+    }
 }
 
 private final class Counter: @unchecked Sendable {
@@ -47,12 +55,18 @@ private final class CountingReader: PackFileReading, @unchecked Sendable {
     private let base = SystemPackFileReader()
     private(set) var reads: [String] = []
     var beforeRead: (@Sendable (URL) -> Void)?
+    /// 이 이름의 파일은 **첫 읽기만** 없는 것처럼(nil) — 세대는 그대로인 일시 소실(F5 ①)
+    var vanishOnFirstRead: Set<String> = []
 
     func size(of url: URL) -> Int? { base.size(of: url) }
     func read(_ url: URL) -> Data? {
         beforeRead?(url)
-        lock.withLock { reads.append(url.lastPathComponent) }
-        return base.read(url)
+        let name = url.lastPathComponent
+        let vanish = lock.withLock { () -> Bool in
+            reads.append(name)
+            return vanishOnFirstRead.remove(name) != nil
+        }
+        return vanish ? nil : base.read(url)
     }
     var packReads: [String] { reads.filter { $0 != "manifest.json" } }
 }
@@ -148,13 +162,14 @@ private struct Harness {
     /// 앱을 거치지 않고 snapshot을 직접 만든다(옛 저장본·손상 흉내). bytes를 덮어쓰면 manifest가 거짓말을 한다
     func craft(generation: Int, order: [SnippetSourceSlot]? = nil, packs: [(String, ExternalPack)],
                lieBytes: [String: Int] = [:], packSchema: Int = StoredExternalPack.schemaVersion,
-               manifestSchema: Int = PackSnapshotManifest.schemaVersion) throws {
+               manifestSchema: Int = PackSnapshotManifest.schemaVersion, lieStoredStats: Set<String> = []) throws {
         let directory = sandbox.snapshot.appendingPathComponent("g\(generation)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var items: [PackSnapshotManifest.Item] = []
         for (id, pack) in packs {
             var stored = StoredExternalPack(packID: id, source: .csv, pack: pack)
             stored.schema = packSchema
+            if lieStoredStats.contains(id) { stored.stats = .zero }   // 변환본이 stats를 속인다(F5 ②)
             let data = try JSONEncoder().encode(stored)
             try data.write(to: directory.appendingPathComponent("\(id).json"))
             items.append(.init(id: id, file: "\(id).json", bytes: lieBytes[id] ?? data.count, stats: .zero))
@@ -372,6 +387,217 @@ struct PackStoreTests {
         #expect(h.generations.packsGeneration == 20)
     }
 
+    // MARK: F5 ③ — 실패 경로(쓰는 순서·롤백)
+
+    @Test("★ 내 채움글 쓰기가 실패하면 그대로 — 세대 둘·새 세대 폴더·사용자 문구·revision 모두 원래대로 (S10·S11)")
+    func failedUserSaveLeavesEverythingAsIs() throws {
+        let h = Harness(user: [entry("원래")])
+        defer { h.sandbox.cleanup() }
+        _ = try h.importedID(h.store.importPack(pack("팩", chars: 10), source: .csv))
+        let before = (user: h.generations.userSnippetsGeneration, packs: h.generations.packsGeneration,
+                      folders: h.sandbox.generationNames(), revision: h.store.revision)
+        h.user.failSaves = true
+        #expect(h.store.saveUserSnippet(entry("새것"), editing: nil) == .rejected(.writeFailed, rechecked: false))
+        #expect(h.generations.userSnippetsGeneration == before.user)
+        #expect(h.generations.packsGeneration == before.packs, "커밋 지점(packsGeneration)은 내 채움글 저장 뒤다")
+        #expect(h.sandbox.generationNames() == before.folders, "실패한 새 세대 폴더를 남기지 않는다")
+        #expect(h.user.entries() == [entry("원래")])
+        #expect(h.store.revision == before.revision)
+    }
+
+    @Test("★ snapshot 쓰기가 실패하면 새 변환본을 지우고 목록·세대 그대로 (S11 롤백)")
+    func failedSnapshotRollsBack() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))
+        let packsDirectory = h.sandbox.library.appendingPathComponent("packs").path
+        let filesBefore = try FileManager.default.contentsOfDirectory(atPath: packsDirectory)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: h.sandbox.snapshot.path)
+        #expect(h.store.importPack(pack("나", chars: 10), source: .csv) == .rejected(.writeFailed, rechecked: false))
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: h.sandbox.snapshot.path)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: packsDirectory) == filesBefore, "새 변환본을 지웠다")
+        #expect(h.store.order == [.userSnippets, .pack(a)])
+        #expect(h.generations.packsGeneration == 1)
+        #expect(h.sandbox.generationNames() == ["g1"])
+    }
+
+    // MARK: F5 ④ — 결정적 직렬 시험
+
+    @Test("★ 판정과 쓰기 사이에 다른 커밋이 끼어들지 못한다 — 끼어들기 갈고리로 결정적으로 (S09)")
+    func commitsDoNotInterleave() {
+        let h = Harness(limits: .candidate)
+        defer { h.sandbox.cleanup() }
+        let store = h.store
+        let calls = Counter()
+        let interleaved = InterleaveProbe()
+        // 둘째 커밋이 끝나면 두 번 신호한다 — 갈고리 안의 관찰과 시험 끝의 대기가 각각 하나씩(둘 다 시간 제한, 무한 대기 없음)
+        let secondFinished = DispatchSemaphore(value: 0)
+        store.beforeWriteForTesting = {
+            guard calls.next() == 1 else { return }
+            DispatchQueue.global().async {
+                _ = store.saveUserSnippet(entry("둘째"), editing: nil)
+                secondFinished.signal()
+                secondFinished.signal()
+            }
+            // 직렬이면 둘째는 큐에서 기다리므로 여기서 끝날 수 없다(시간 초과). 동시라면 이 사이에 끝난다
+            interleaved.set(secondFinished.wait(timeout: .now() + 0.3) == .success)
+        }
+        _ = store.saveUserSnippet(entry("첫째"), editing: nil)
+        _ = secondFinished.wait(timeout: .now() + 5)
+        #expect(!interleaved.value)
+        #expect(h.user.entries() == [entry("첫째"), entry("둘째")])
+        #expect(store.revision == 2)
+    }
+
+    // MARK: F7 — 화면 dedup과 같은 기준으로 지운다
+
+    @Test("★ 지우기는 정규화 단축어가 같은 저장분을 모두 지운다 — 화면에서 하나로 보이는 항목 하나 (F7)")
+    func deleteRemovesNormalizedDuplicates() {
+        let a = entry("우리집주소"), aSpaced = entry("우리집 주소"), other = entry("다른")
+        let h = Harness(user: [a, other, aSpaced])
+        defer { h.sandbox.cleanup() }
+        #expect(h.store.deleteUserSnippet(a).isAccepted)
+        #expect(h.user.entries() == [other], "띄어쓰기만 다른 옛 중복도 함께")
+        #expect(h.generations.userSnippetsGeneration == 1, "커밋 한 번")
+        #expect(h.store.deleteUserSnippet(a) == .rejected(.notFound, rechecked: false))
+    }
+
+    @Test("F7 — 한도를 넘은 옛 저장분에서도 중복 지우기는 막히지 않는다(줄이는 쪽)")
+    func deleteDuplicatesWhileOverLimit() {
+        let big = entry(String(repeating: "가", count: 150)), bigSpaced = entry(String(repeating: "가", count: 75) + " " + String(repeating: "가", count: 75))
+        let h = Harness(user: [big, bigSpaced])                // 300 > 200
+        defer { h.sandbox.cleanup() }
+        #expect(!h.store.evaluation().baselineOverflow.isEmpty)
+        #expect(h.store.deleteUserSnippet(bigSpaced).isAccepted)
+        #expect(h.user.entries().isEmpty)
+    }
+
+    // MARK: F4 — 읽을 수 없는 변환본은 그 팩만 뺀다
+
+    @Test("★ 목록이 가리키는 변환본이 없으면 판정에서 그 팩만 `.unavailable`로 빼고 커밋은 계속한다 — 판정 == snapshot·목록 그대로 (F4·C5)")
+    func unreadablePackIsSkipped() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))
+        let b = try h.importedID(h.store.importPack(pack("나", chars: 10), source: .csv))
+        let packsDirectory = h.sandbox.library.appendingPathComponent("packs")
+        for name in try FileManager.default.contentsOfDirectory(atPath: packsDirectory.path) where name.hasPrefix(a) {
+            try FileManager.default.removeItem(at: packsDirectory.appendingPathComponent(name))
+        }
+        #expect(h.store.unreadablePackIDs() == [a])
+        guard case .accepted(let accepted) = h.store.saveUserSnippet(entry("내문구"), editing: nil) else {
+            Issue.record("내 채움글 저장이 막히면 안 된다"); return
+        }
+        // C5 — snapshot에서 조용히 빼지 않고 **판정 단계에서 제외(.unavailable)** — 판정과 snapshot이 같다(AC-8)
+        #expect(accepted.evaluation.included == [b])
+        #expect(accepted.evaluation.excluded == [ActivePackBudget.Exclusion(id: a, reason: .unavailable)])
+        #expect(h.store.evaluation().excluded.map(\.id) == [a])
+        #expect(try h.manifest().packs.map(\.id) == [b])
+        #expect(try h.manifest().order == [.userSnippets, .pack(b)])
+        #expect(h.store.order == [.userSnippets, .pack(a), .pack(b)], "목록에서 지우지 않는다(9-3)")
+        #expect(h.load().includedPackIDs == h.store.evaluation().included, "AC-8 — 앱 판정 == 키보드")
+        guard case .accepted = h.store.setBuiltInPack("anthem", enabled: false, currentDisabled: []) else {
+            Issue.record("내장 토글도 막히지 않는다"); return
+        }
+        #expect(h.store.setPackEnabled(a, enabled: false).isAccepted)
+        #expect(h.store.setPackEnabled(a, enabled: true) == .rejected(.packUnavailable(a), rechecked: false),
+                "못 읽는 팩은 켤 수 없다 — 다시 가져오기·삭제로 복구(1-c)")
+    }
+
+    @Test("C5 — 못 읽는 팩이 앞에서 예산을 차지하지 않는다: 뒤 팩이 그 몫으로 들어온다(예산 쉼과 같은 결과)")
+    func unavailablePackFreesBudget() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 150), source: .csv))
+        let b = try h.importedID(h.store.importPack(pack("나", chars: 100), source: .csv, enabled: false))
+        guard case .rejected(.gate(.packExcluded), _) = h.store.setPackEnabled(b, enabled: true) else {
+            Issue.record("처음엔 a가 예산을 차지해 b를 켤 수 없다"); return
+        }
+        let packsDirectory = h.sandbox.library.appendingPathComponent("packs")
+        for name in try FileManager.default.contentsOfDirectory(atPath: packsDirectory.path) where name.hasPrefix(a) {
+            try FileManager.default.removeItem(at: packsDirectory.appendingPathComponent(name))
+        }
+        #expect(h.store.setPackEnabled(b, enabled: true).isAccepted, "a가 빠졌으니 b가 들어온다")
+        #expect(h.store.evaluation().included == [b])
+    }
+
+    // MARK: C1 — 목록 손상은 아무것도 지우거나 덮어쓰지 않는다
+
+    @Test("★ C1 — library.json이 손상·낯선 schema면 maintain은 변환본을 지우지 않고, 커밋은 거부하고 목록을 덮어쓰지 않는다",
+          arguments: ["{ 망가짐", #"{"schema":99,"revision":3,"order":["user"],"packs":{}}"#])
+    func damagedLibraryIsNeverOverwritten(_ damaged: String) throws {
+        let h = Harness(user: [entry("원래")])
+        defer { h.sandbox.cleanup() }
+        _ = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))
+        let libraryURL = h.sandbox.library.appendingPathComponent("library.json")
+        let packsDirectory = h.sandbox.library.appendingPathComponent("packs").path
+        let files = try FileManager.default.contentsOfDirectory(atPath: packsDirectory)
+        try Data(damaged.utf8).write(to: libraryURL)
+        let generations = (h.generations.userSnippetsGeneration, h.generations.packsGeneration)
+
+        h.store.maintain()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: packsDirectory) == files, "변환본 보존")
+        #expect(!h.store.isLibraryReadable)
+
+        #expect(h.store.saveUserSnippet(entry("새것"), editing: nil) == .rejected(.libraryUnreadable, rechecked: false))
+        #expect(h.store.importPack(pack("나", chars: 10), source: .csv) == .rejected(.libraryUnreadable, rechecked: false))
+        #expect(try Data(contentsOf: libraryURL) == Data(damaged.utf8), "목록 원본 그대로")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: packsDirectory) == files)
+        #expect(h.user.entries() == [entry("원래")])
+        #expect((h.generations.userSnippetsGeneration, h.generations.packsGeneration) == generations)
+        #expect(!PackStore.Rejection.libraryUnreadable.isBudgetLimit)
+    }
+
+    @Test("C1 — library.json이 아예 없으면(처음) 빈 목록으로 시작한다")
+    func missingLibraryIsFresh() {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        #expect(h.store.isLibraryReadable)
+        #expect(h.store.saveUserSnippet(entry("처음"), editing: nil).isAccepted)
+    }
+
+    // MARK: C2 — 내 채움글을 되돌린 실패 경로도 세대를 올린다
+
+    @Test("★ C2 — 내 채움글 저장 뒤 목록 쓰기가 실패해 되돌리면 사용자 세대를 올리고 알린다(그 사이 읽은 키보드가 같은 키로 캐시하지 않게)")
+    func rolledBackUserSaveStillBumpsGeneration() throws {
+        let h = Harness(user: [entry("원래")])
+        defer { h.sandbox.cleanup() }
+        #expect(h.store.saveUserSnippet(entry("첫"), editing: nil).isAccepted)     // library 폴더가 생긴다
+        let before = (user: h.generations.userSnippetsGeneration, packs: h.generations.packsGeneration,
+                      folders: h.sandbox.generationNames(), notified: h.notifications.next())
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: h.sandbox.library.path)
+        let result = h.store.saveUserSnippet(entry("둘째"), editing: nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: h.sandbox.library.path)
+        #expect(result == .rejected(.writeFailed, rechecked: false))
+        #expect(h.user.entries() == [entry("원래"), entry("첫")], "내 채움글은 되돌렸다")
+        #expect(h.generations.userSnippetsGeneration == before.user + 1, "되돌렸어도 세대는 올린다")
+        #expect(h.generations.packsGeneration == before.packs)
+        #expect(h.sandbox.generationNames() == before.folders)
+        #expect(h.notifications.next() == before.notified + 2, "알림 1회(이 호출이 +2번째)")
+    }
+
+    // MARK: C7 — 일괄 삭제는 snippetListID 완전 일치만
+
+    @Test("★ C7 — 「집」을 지워도 「집, 회사」는 남는다(단축어 하나가 겹친다고 지우지 않는다 — 완전 일치만)")
+    func deleteNeedsExactListID() {
+        let home = entry("집"), homeOffice = SnippetEntry(triggers: ["집", "회사"], title: "집·회사", body: "본문")
+        let h = Harness(user: [home, homeOffice])
+        defer { h.sandbox.cleanup() }
+        #expect(h.store.deleteUserSnippet(home).isAccepted)
+        #expect(h.user.entries() == [homeOffice])
+    }
+
+    // MARK: F3 — 알림 사유
+
+    @Test("F3 — 한도(게이트) 거부만 「한도」 사유, 쓰기 실패·없는 항목·계약 위반·순서 오류는 아니다")
+    func rejectionKinds() {
+        #expect(PackStore.Rejection.gate(.tooManyPacks).isBudgetLimit)
+        #expect(PackStore.Rejection.gate(.baselineOverLimit([.needleChars])).isBudgetLimit)
+        for other in [PackStore.Rejection.writeFailed, .notFound, .moreThanOneItem, .invalidOrder, .libraryUnreadable, .packUnavailable("x")] {
+            #expect(!other.isBudgetLimit)
+        }
+    }
+
     // MARK: AC-26 — GC
 
     @Test("★ AC-26 — GC는 현재 − 2 이하만, 앱의 변경·실행 때만")
@@ -507,6 +733,17 @@ struct PackSnapshotLoaderTests {
         #expect(loaded.order == [.userSnippets])
     }
 
+    @Test("★ C3 — manifest 순서에 「내 채움글」 줄이 정확히 하나가 아니거나 줄이 겹치면 손상으로 보고 외부 팩 제외",
+          arguments: [[SnippetSourceSlot.userSnippets, .userSnippets, .pack("a")], [.pack("a")], [.userSnippets, .pack("a"), .pack("a")]])
+    func manifestOrderSlots(_ order: [SnippetSourceSlot]) throws {
+        let h = Harness(user: [entry("내문구")])
+        defer { h.sandbox.cleanup() }
+        try h.craft(generation: 1, order: order, packs: [("a", pack("가", chars: 10))])
+        let loaded = h.load()
+        #expect(loaded.dropped == .corruptManifest)
+        #expect(loaded.userEntries == [entry("내문구")] && loaded.packs.isEmpty)
+    }
+
     @Test("manifest가 cap(64KB)을 넘으면 읽지 않고 외부 팩 제외")
     func manifestCap() throws {
         let h = Harness()
@@ -549,10 +786,12 @@ struct PackSnapshotLoaderTests {
         #expect(loaded.attempts == 3)
         #expect(loaded.dropped == .inconsistentGenerations)
         #expect(loaded.packs.isEmpty && loaded.userEntries == [entry("내문구")])
+        #expect(!loaded.isCacheable, "F1 — 일시적 실패는 캐시하지 않는다(다음 재구성이 다시 읽는다)")
     }
 
-    @Test("★ AC-26 — 읽는 중 파일이 사라지면(앱이 새 세대를 만들고 지움) 현재 세대로 다시")
-    func retriesWhenFileVanishes() throws {
+    /// 범위: 읽는 사이 앱이 **새 세대를 만들고 옛 세대를 지운** 경우 — 세대 불일치·소실이 함께 일어난다(실제 GC 경로)
+    @Test("★ AC-26 — 읽는 중 앱이 새 세대를 만들고 옛 세대를 지우면 새 세대로 다시")
+    func retriesWhenGenerationReplacedDuringRead() throws {
         let h = Harness()
         defer { h.sandbox.cleanup() }
         let first = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))
@@ -570,6 +809,56 @@ struct PackSnapshotLoaderTests {
         #expect(loaded.includedPackIDs == [first, "pack2"])
     }
 
+    @Test("★ AC-26 — 세대는 그대로인데 파일이 한 번 안 보이면 같은 세대로 다시 읽는다 (L08 · 소실 재시도 단독)")
+    func transientVanishRetriesSameGeneration() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))
+        let reader = CountingReader()
+        reader.vanishOnFirstRead = ["\(a).json"]
+        let loaded = h.load(reader: reader)
+        #expect(loaded.attempts == 2)
+        #expect(loaded.dropped == nil)
+        #expect(loaded.includedPackIDs == [a])
+        #expect(loaded.packsGeneration == 1)
+    }
+
+    @Test("★ AC-26·F1 — 파일이 계속 없으면 3회 뒤 외부 팩 제외(.vanished), 그 결과는 캐시하지 않는다")
+    func persistentVanishGivesUpUncacheable() throws {
+        let h = Harness(user: [entry("내문구")])
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))
+        try FileManager.default.removeItem(at: h.sandbox.snapshot.appendingPathComponent("g1/\(a).json"))
+        let loaded = h.load()
+        #expect(loaded.attempts == 3)
+        #expect(loaded.dropped == .vanished)
+        #expect(loaded.userEntries == [entry("내문구")] && loaded.packs.isEmpty)
+        #expect(!loaded.isCacheable)
+    }
+
+    @Test("★ 9-4·AC-8 — 변환본이 stats를 작게 속여도 키보드는 다시 세어 넘는 팩을 뺀다 (L09b)")
+    func storedStatsAreRecounted() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        try h.craft(generation: 1, packs: [("a", pack("가", chars: 150)), ("liar", pack("나", chars: 100))],
+                    lieStoredStats: ["a", "liar"])
+        let loaded = h.load()
+        #expect(loaded.includedPackIDs == ["a"])
+        #expect(loaded.excluded.map(\.id) == ["liar"])
+    }
+
+    @Test("F1 — 캐시해도 되는 결과: 정상·snapshot 없음·영구 손상(다음 저장이 세대를 바꾼다) / 안 되는 결과: 세대 불일치·소실")
+    func cacheability() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        #expect(h.load().isCacheable, "snapshot 없음")
+        try h.craft(generation: 1, packs: [("a", pack("가", chars: 10))])
+        #expect(h.load().isCacheable, "정상")
+        try h.craft(generation: 2, packs: [("a", pack("가", chars: 10))], manifestSchema: 9)
+        let unknown = h.load()
+        #expect(unknown.dropped == .unknownSchema && unknown.isCacheable)
+    }
+
     @Test("★ 전체 접근 없음 — 키보드는 읽기만 한다: 쓰기 권한 없는 snapshot 폴더에서도 그대로 싣는다(별도 분기 없음)")
     func readOnlySnapshot() throws {
         let h = Harness()
@@ -580,4 +869,12 @@ struct PackSnapshotLoaderTests {
         }
         #expect(h.load().includedPackIDs == [id])
     }
+}
+
+/// 끼어들기 갈고리의 관찰 값
+private final class InterleaveProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var observed = false
+    func set(_ value: Bool) { lock.withLock { observed = value } }
+    var value: Bool { lock.withLock { observed } }
 }
