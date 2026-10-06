@@ -17,10 +17,15 @@ let packImportContentTypes: [UTType] = [.commaSeparatedText, .tabSeparatedText, 
 
 /// 「외부 채움글 추가」 — 주 버튼 하나(CSV 파일 고르기) · 처음이라면(만드는 법) · 그 밖의 방법(붙여넣기) · 받지 않는 파일 안내
 struct PackImportStartView: View {
+    /// 가져오기를 마쳤다(4-M) — 채움글 화면으로 돌아가 그 팩 행을 강조한다(U5). 가져오기 시트가 **닫힌 뒤** 부른다
+    let onFinished: @MainActor (_ packID: String) -> Void
+
     @State private var showsImporter = false
     @State private var request: PackImportRequest?
     /// 4-G 「다른 파일 고르기」 — 가져오기 시트가 닫힌 뒤 선택기를 다시 연다
     @State private var picksAgain = false
+    /// 가져오기 시트가 완료를 알렸다 — 시트가 닫히면(버튼·끌어 내림) 목록으로
+    @State private var completedPackID: String?
 
     var body: some View {
         Form {
@@ -62,7 +67,7 @@ struct PackImportStartView: View {
 
             Section {
                 NavigationLink {
-                    PackPasteView()
+                    PackPasteView(onFinished: onFinished)
                 } label: {
                     Label {
                         VStack(alignment: .leading, spacing: 3) {
@@ -92,13 +97,20 @@ struct PackImportStartView: View {
             }
         }
         .sheet(item: $request, onDismiss: {
-            if picksAgain {
+            if let packID = completedPackID {
+                completedPackID = nil
+                onFinished(packID)
+            } else if picksAgain {
                 picksAgain = false
                 showsImporter = true
             }
         }) { request in
             PackImportFlowView(request: request) { exit in
-                if exit == .pickAnotherFile { picksAgain = true }
+                switch exit {
+                case .pickAnotherFile: picksAgain = true
+                case .completed(let packID): completedPackID = packID
+                case .closed: break
+                }
             }
         }
     }
@@ -184,9 +196,13 @@ struct PackImportGuideView: View {
 /// 붙여넣기로 가져오기 — 큰 입력칸 + 「붙여넣기」(누를 때만 클립보드를 읽는다) + 「읽기」. 붙여 넣은 글은 이미 글자라 인코딩 확인이 없다.
 /// 글은 **이 화면 메모리에만** 있다 — 화면을 떠나면 비운다. 직접 쳐서 고칠 수도 있다
 struct PackPasteView: View {
+    /// 가져오기를 마쳤다 — 채움글 화면으로(`PackImportStartView.onFinished`와 같다)
+    let onFinished: @MainActor (_ packID: String) -> Void
+
     @State private var text = ""
     @State private var overview: PasteOverview?
     @State private var request: PackImportRequest?
+    @State private var completedPackID: String?
 
     var body: some View {
         Form {
@@ -242,8 +258,18 @@ struct PackPasteView: View {
         .task(id: text) {
             overview = text.isEmpty ? nil : await PasteOverview.of(text)
         }
-        .sheet(item: $request) { request in
-            PackImportFlowView(request: request) { _ in }
+        .sheet(item: $request, onDismiss: {
+            guard let packID = completedPackID else { return }
+            completedPackID = nil
+            onFinished(packID)
+        }) { request in
+            PackImportFlowView(request: request) { exit in
+                guard case .completed(let packID) = exit else { return }
+                // 가져왔으면 붙여 넣은 글(클립보드에서 온 내용)을 바로 비운다 — 메모리에만, 완료 때 비움
+                text = ""
+                overview = nil
+                completedPackID = packID
+            }
         }
         // 화면을 떠나면 붙인 글을 비운다(메모리에만, 취소·완료 때 비움)
         .onDisappear {

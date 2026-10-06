@@ -2,12 +2,13 @@ import SwiftUI
 import PackImport
 import TadakDomain
 
-// 외부 채움글 1-c 4단계 — 가져오기 시트: 4-A 읽는 중 · 4-B·4-C 글자 확인 · 구분자 고르기 · 4-E·4-F·4-H·4-I 미리보기 · 4-G 거부
-// (계획서 `external-snippet-packs-1c-plan.md` 3-3절·5절 4행, 시안 4-A~4-C·4-E~4-I, PDR 5-1·5-2·5-3b·5-5, AC-17·18·19·34).
+// 외부 채움글 1-c 4·5단계 — 가져오기 시트: 4-A 읽는 중 · 4-B·4-C 글자 확인 · 구분자 고르기 · 4-E·4-F·4-H·4-I 미리보기 · 4-G 거부
+// → (5단계) 「팩 정보」 폼 · 확정 · 4-M 완료(`PackImportFormView.swift`)
+// (계획서 `external-snippet-packs-1c-plan.md` 3-3·3-4절·5절 4·5행, 시안 4-A~4-C·4-E~4-M·5-A~5-C, PDR 5-1·5-2·5-3b·5-5·5-6·9-2, AC-3·17~20·34).
 //
 // 상태는 `PackImportSession`(값) 하나다. 무거운 일(파일 제한 읽기·디코드·파싱·겹침 계산)은 전부 메인 밖(`PackFileReader.read`·
 // `PackImportSession.perform`)이고, 결과는 세대를 맞춰 받는다 — 취소하거나 선택을 바꾸면 늦게 온 결과는 버려진다. 시트가 닫히면 원본을 비운다.
-// **확정(저장)은 5단계다** — 미리보기의 「다음」은 자리만 있다(눌리지 않는다).
+// 미리보기의 「다음」(R10 확인 뒤)이 「팩 정보」 폼을 밀어 넣고, 폼의 「가져오기」가 확정이다. 완료하면 원본(세션)·초안을 비우고 완료 화면을 보인다.
 // 보안: 파일 내용·이름은 로그·분석 이벤트로 내보내지 않는다. 오류 문구에도 없다(사유 코드는 위치 번호뿐, AC-34). 파일 이름은 화면에도 보이지 않는다.
 
 /// 시트 하나 = 가져오기 한 번
@@ -29,10 +30,12 @@ struct PackImportRequest: Identifiable {
     }
 }
 
-/// 시트를 닫은 이유 — 4-G 「다른 파일 고르기」면 부른 화면이 선택기를 다시 연다
+/// 시트가 부른 화면에 알리는 일 — 4-G 「다른 파일 고르기」면 부른 화면이 선택기를 다시 연다.
+/// `completed`는 **완료한 순간에** 온다(시트가 아직 열려 있다) — 시트가 어떻게 닫히든(버튼·끌어 내림) 부른 화면이 닫힌 뒤 목록으로 돌아가 그 행을 강조한다(U5)
 enum PackImportExit: Equatable {
     case closed
     case pickAnotherFile
+    case completed(packID: String)
 }
 
 struct PackImportFlowView: View {
@@ -46,9 +49,15 @@ struct PackImportFlowView: View {
     /// 지금 목록(4-I 겹침 계산 입력·겹친 팩 이름) — 시트를 열 때 한 번 읽는다. 시트가 열린 동안 목록은 바뀌지 않는다
     /// (가져오기 화면 밖으로 나가야 바꿀 수 있다). 못 읽으면 nil — 겹침 안내 없이 미리보기
     @State private var library: PackImpact.Library?
+    // 5단계 — 「팩 정보」 폼·확정 흐름. 미리보기의 초안(`formDraft`)이 바뀌면(글자 방식·칸 나누기를 다시 고름) 새로 만든다
+    @State private var form: PackImportForm?
+    @State private var confirmation: PackImportConfirmation?
+    @State private var formDraft: PackDraft?
+    /// 폼에서 정리 화면으로 갔다 — 돌아오면 목록을 다시 읽는다(같은 이름·revision·틀 소유가 새 목록을 따른다)
+    @State private var reloadsLibraryOnReturn = false
 
     enum Destination: Hashable {
-        case guide, allRows, allSkipped
+        case guide, allRows, allSkipped, form, cleanup
     }
 
     var body: some View {
@@ -65,6 +74,8 @@ struct PackImportFlowView: View {
                 case .guide: PackImportGuideView()
                 case .allRows: allRowsView
                 case .allSkipped: allSkippedView
+                case .form: formView
+                case .cleanup: SnippetCleanupView()
                 }
             }
             .overlay {
@@ -79,6 +90,16 @@ struct PackImportFlowView: View {
         .task { await start() }
         // 끌어 내려 닫아도 원본을 비운다
         .onDisappear { session.cancel() }
+        // 저장하는 동안은 끌어 내려 닫지 않는다(결과를 받을 화면이 사라지지 않게)
+        .interactiveDismissDisabled(confirmation?.phase == .working)
+        .onChange(of: completion) { _, done in
+            guard let done else { return }
+            // 4-M — 폼을 걷고 완료 화면으로. 가져오기 원본(세션)·초안을 비우고, 부른 화면에 새 팩 id를 알린다(목록 강조)
+            path.removeAll()
+            session.cancel()
+            formDraft = nil
+            onExit(.completed(packID: done.packID))
+        }
         .alert(PackImportCopy.partialConfirmTitle(currentPreview?.importCount ?? 0), isPresented: $showsPartialConfirmation) {
             Button(PackImportCopy.cancel, role: .cancel) {}
             Button(PackImportCopy.partialConfirmAction(currentPreview?.importCount ?? 0)) { session.confirmPartialImport() }
@@ -91,6 +112,15 @@ struct PackImportFlowView: View {
 
     @ViewBuilder
     private var phaseContent: some View {
+        if let completion {
+            PackImportCompletionSections(completion: completion) { dismiss() }
+        } else {
+            sessionContent
+        }
+    }
+
+    @ViewBuilder
+    private var sessionContent: some View {
         switch session.phase {
         case .idle, .reading:
             readingContent
@@ -182,7 +212,7 @@ struct PackImportFlowView: View {
             if let multiline = review.multilineBodyCount {
                 LabeledContent(PackImportCopy.multilineLabel, value: PackImportCopy.count(multiline))
             }
-            LabeledContent(PackImportCopy.failedLabel, value: "\(selected.failedLines)")
+            LabeledContent(PackImportCopy.failedLabel, value: PackNoticeCopy.number(selected.failedLines))
         } footer: {
             Text(PackImportCopy.encodingFooter)
         }
@@ -322,7 +352,8 @@ struct PackImportFlowView: View {
     // MARK: - 도구 막대
 
     private var title: String {
-        switch session.phase {
+        if completion != nil { return PackFormCopy.doneHeader }
+        return switch session.phase {
         case .encoding: PackImportCopy.encodingTitle
         case .delimiter: PackImportCopy.delimiterTitle
         case .preview: PackImportCopy.previewTitle
@@ -333,7 +364,9 @@ struct PackImportFlowView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .cancellationAction) {
-            if case .failed = session.phase {
+            if completion != nil {
+                EmptyView()
+            } else if case .failed = session.phase {
                 Button(PackImportCopy.close) { close(.closed) }
             } else {
                 Button(PackImportCopy.cancel) { close(.closed) }
@@ -345,15 +378,57 @@ struct PackImportFlowView: View {
                 Button(PackImportCopy.next) { session.confirmEncoding() }
                     .disabled(session.isWorking || !review.reading(review.selected).isReadable)
             case .preview(let preview):
-                // 4-H는 「다음」이 없다(자동 진행 금지, R10). 확정은 5단계 — 지금은 자리만(눌리지 않는다)
-                if !preview.draft.requiresConfirmation || session.partialImportConfirmed {
-                    Button(PackImportCopy.next) {}
-                        .disabled(true)
+                // 4-H는 확인 전에 「다음」이 없다(자동 진행 금지, R10). 「다음」 = 「팩 정보」 폼(5-A·5-B)
+                if completion == nil, !preview.draft.requiresConfirmation || session.partialImportConfirmed {
+                    Button(PackImportCopy.next) { openForm(preview) }
+                        .disabled(!session.canProceed)
                 }
             default:
                 EmptyView()
             }
         }
+    }
+
+    // MARK: - 5단계 — 폼·확정·완료
+
+    private var completion: PackImportCompletion? {
+        if case .completed(let completion) = confirmation?.phase { return completion }
+        return nil
+    }
+
+    /// 「팩 정보」 — 같은 초안이면 고치던 폼 값을 그대로 쓴다(미리보기로 돌아갔다 와도 지워지지 않는다)
+    private func openForm(_ preview: PackImportPreview) {
+        guard session.canProceed else { return }
+        if formDraft != preview.draft || form == nil || confirmation == nil {
+            form = PackImportForm(draft: preview.draft)
+            confirmation = PackImportConfirmation(draft: preview.draft, library: library)
+            formDraft = preview.draft
+        }
+        path.append(.form)
+    }
+
+    @ViewBuilder
+    private var formView: some View {
+        if let form = Binding($form), let confirmation = Binding($confirmation) {
+            PackImportFormView(
+                form: form, confirmation: confirmation, library: library,
+                onOrganize: {
+                    reloadsLibraryOnReturn = true
+                    path.append(.cleanup)
+                },
+                onLibraryChanged: { Task { await reloadLibrary() } },
+                onReturn: {
+                    guard reloadsLibraryOnReturn else { return }
+                    reloadsLibraryOnReturn = false
+                    Task { await reloadLibrary() }
+                })
+        }
+    }
+
+    /// 목록을 다시 읽는다(정리·복구 뒤) — 확정 흐름의 같은 이름·revision도 새 목록으로
+    private func reloadLibrary() async {
+        library = await PackStoreClient.live.impactLibrary()
+        confirmation?.refresh(library: library)
     }
 
     // MARK: - 메인 밖 일
@@ -546,7 +621,7 @@ private struct PackImportPreviewSections: View {
 
     private func stat(_ value: Int, _ label: String, tint: Color) -> some View {
         VStack(spacing: 2) {
-            Text(verbatim: "\(value)")
+            Text(verbatim: PackNoticeCopy.number(value))
                 .font(.title.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
             Text(label)

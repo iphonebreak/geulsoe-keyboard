@@ -412,12 +412,18 @@ public struct PackDetail: Equatable, Sendable {
 
     public func name(of id: String) -> String { names[id] ?? PackNoticeCopy.unnamedPack }
 
-    static func examples(of pack: ExternalPack) -> [Example] {
+    /// - Parameter hidden: 위 줄에 밀려 지금 안 뜨는 단축어(정규화) — 문구형은 **지금 뜨는 단축어부터** 고른다(화면 확인 O-1: 안 뜨는 단축어를
+    ///   사용법으로 보이면 그대로 쳐도 이 팩 문구가 안 나온다). 항목 안에서도 안 밀린 단축어를 보이고, 다 밀린 항목은 뒤로 보낸다
+    static func examples(of pack: ExternalPack, hidden: Set<String> = []) -> [Example] {
         if let template = pack.template {
             guard let first = template.items.first else { return [] }
             return [Example(trigger: template.titleFormat.replacingOccurrences(of: TemplatePatternSpec.placeholder, with: String(first.n)),
                             title: template.title(for: first))]
         }
-        return pack.entries.prefix(3).map { Example(trigger: $0.primaryTrigger, title: $0.title) }
+        let ranked = pack.entries.map { entry -> (example: Example, isShown: Bool) in
+            let shown = entry.triggers.first { !hidden.contains(SnippetEntry.normalizedTrigger($0)) }
+            return (Example(trigger: shown ?? entry.primaryTrigger, title: entry.title), shown != nil)
+        }
+        return (ranked.filter(\.isShown) + ranked.filter { !$0.isShown }).prefix(3).map(\.example)
     }
 }

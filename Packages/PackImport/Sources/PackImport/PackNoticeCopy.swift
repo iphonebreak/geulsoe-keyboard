@@ -78,7 +78,7 @@ public enum PackNoticeCopy {
         case .packRested:               // G1 (AC-4)
             "대신 \(subject(firstName, count: 1)) 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요."
         case .packsRested:              // G2
-            "대신 「\(firstName)」 외 \(count - 1)개 팩이 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 팩 목록에서 확인해 주세요."
+            "대신 「\(firstName)」 외 \(number(count - 1))개 팩이 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 팩 목록에서 확인해 주세요."
         }
     }
 
@@ -99,7 +99,7 @@ public enum PackNoticeCopy {
 
     /// 배너 ㉠ — 한도 넘은 옛 내 채움글. `loadableCount`는 키보드에 뜨는 **화면 행** 수(`UserSnippetBudget.loadableRowCount`)
     public static func overLimitBanner(loadableCount: Int) -> String {
-        "내 채움글이 한도를 넘어서 앞의 \(loadableCount)개만 키보드에 떠요. 나머지와 외부 팩은 지금 안 떠요. 지운 것은 없어요."
+        "내 채움글이 한도를 넘어서 앞의 \(number(loadableCount))개만 키보드에 떠요. 나머지와 외부 팩은 지금 안 떠요. 지운 것은 없어요."
     }
 
     /// 배너 ㉡ — 목록 손상. 낯선 버전이면 「앱을 올리면 다시 읽힐 수 있어요」를 한 줄 더한다. 읽히면 nil
@@ -116,7 +116,7 @@ public enum PackNoticeCopy {
     /// 배너 ㉢ — 읽을 수 없는 팩(계획서 4-3절에 배너 문구가 없어 팩 상세 문구로 지었다). 이름 뒤는 「의」라 받침과 무관하다
     public static func unavailablePacksBanner(names: [String]) -> String {
         let first = names.first ?? unnamedPack
-        let subject = names.count > 1 ? "「\(first)」 외 \(names.count - 1)개 팩의 파일을 읽을 수 없어서 지금 안 떠요."
+        let subject = names.count > 1 ? "「\(first)」 외 \(number(names.count - 1))개 팩의 파일을 읽을 수 없어서 지금 안 떠요."
             : "「\(first)」의 파일을 읽을 수 없어서 이 팩은 지금 안 떠요."
         return subject + " 같은 이름으로 파일을 다시 가져오면 바꿀 수 있어요. 지울 수도 있어요."
     }
@@ -141,7 +141,7 @@ public enum PackNoticeCopy {
         guard packCount > 0 else {
             return "가져온 팩 파일을 찾지 못했어요. 복구하면 빈 목록으로 다시 시작해요. 원래 목록 파일은 따로 보관해요."
         }
-        return "가져온 팩 \(packCount)개를 찾았어요. 순서와 켬/끔은 알 수 없어서 모두 꺼진 채로 불러와요. 쓸 팩은 직접 켜 주세요. "
+        return "가져온 팩 \(number(packCount))개를 찾았어요. 순서와 켬/끔은 알 수 없어서 모두 꺼진 채로 불러와요. 쓸 팩은 직접 켜 주세요. "
             + "원래 목록 파일은 따로 보관해요.\n팩 순서가 예전과 달라질 수 있어서, 같은 틀이나 단축어를 다른 팩이 쓰게 될 수 있어요."
     }
 
@@ -149,7 +149,7 @@ public enum PackNoticeCopy {
     public static let recoveredTitle = "목록을 복구했어요"
 
     public static func recoveredMessage(packCount: Int) -> String {
-        packCount > 0 ? "팩 \(packCount)개를 불러왔어요. 모두 꺼져 있어요." : "빈 목록으로 다시 만들었어요."
+        packCount > 0 ? "팩 \(number(packCount))개를 불러왔어요. 모두 꺼져 있어요." : "빈 목록으로 다시 만들었어요."
     }
 
     public static let recoveryFailedTitle = "복구하지 못했어요"
@@ -165,6 +165,14 @@ public enum PackNoticeCopy {
     /// 2-C 팩이 있을 때
     public static let listFooter = "위에 있는 줄이 먼저 떠요 — 같은 문구 단축어는 위 줄이, 같은 단축어 틀은 위 팩이 가져요. 「내 채움글」도 이 순서에 들어가요.\n"
         + "한도는 외부 팩만 위에서부터 채워요(내 채움글은 늘 써요). 가져온 팩은 이 기기에만 저장돼요."
+    /// 목록이 손상된 동안 — 빈 상태(2-B) 문구는 「팩이 없다」로 읽혀 헷갈린다(화면 확인 O-2). 위 배너(㉡)가 복구 길을 준다
+    public static let unreadableListFooter = "외부 채움글 목록을 읽을 수 없어요. 위에서 목록을 복구해 주세요."
+
+    /// 「외부 채움글」 절 풋터 — 목록을 못 읽으면 손상 한 줄, 팩이 없으면 2-B 빈 상태, 있으면 2-C
+    public static func externalSectionFooter(isEmpty: Bool, libraryStatus: PackLibraryStatus) -> String {
+        if libraryStatus.needsRecovery { return unreadableListFooter }
+        return isEmpty ? emptyListFooter : listFooter
+    }
     /// 순서 목록의 「내 채움글」 줄(U1) — 아래 「내 채움글」 절과 헷갈리지 않게 「(순서)」
     public static let userSlotTitle = "내 채움글 (순서)"
     public static let userSlotDetail = "순서 표시 전용 · 눌리지 않아요 · 문구는 아래 「내 채움글」 절에서"
@@ -175,7 +183,7 @@ public enum PackNoticeCopy {
     /// 종류 · 항목 수 — 종류를 모르면 nil(읽을 수 없는 옛 팩)
     public static func packKind(_ summary: PackSummary) -> String? {
         guard let mode = summary.mode else { return nil }
-        return "\(mode == .numbered ? "번호형" : "문구형") · \(summary.itemCount)개"
+        return "\(mode == .numbered ? "번호형" : "문구형") · \(number(summary.itemCount))개"
     }
 
     /// 2-C 행 보조줄 — 종류 · 항목 수 · 대표 틀(번호형만)
@@ -194,7 +202,7 @@ public enum PackNoticeCopy {
     public static let orderUserTitle = "내 채움글"
 
     public static func orderUserDetail(count: Int) -> String {
-        "내가 만든 문구 \(count)개 · 지울 수 없어요"
+        "내가 만든 문구 \(number(count))개 · 지울 수 없어요"
     }
 
     /// 순서 행 보조줄 — 2-C 행과 같고, 순서와 무관하게 변하지 않는 상태(꺼짐·읽을 수 없음)만 덧붙인다(쉬는 중은 순서에 따라 바뀌어 아래 안내가 맡는다)
@@ -238,8 +246,8 @@ public enum PackNoticeCopy {
             let from = sourceName(group.from, name: library.name(of:))
             let to = sourceName(group.to, name: library.name(of:))
             let listed = group.triggers.prefix(shownTriggerCount).joined(separator: ", ")
-                + (group.triggers.count > shownTriggerCount ? " 외 \(group.triggers.count - shownTriggerCount)개" : "")
-            lines.append(ImpactLine(message: "이렇게 바꾸면 단축어 \(group.triggers.count)개가 \(from) 대신 \(to)의 문구로 떠요.",
+                + (group.triggers.count > shownTriggerCount ? " 외 \(number(group.triggers.count - shownTriggerCount))개" : "")
+            lines.append(ImpactLine(message: "이렇게 바꾸면 단축어 \(number(group.triggers.count))개가 \(from) 대신 \(to)의 문구로 떠요.",
                                     detail: "\(listed) — \(from)의 같은 단축어는 안 떠요."))
         }
         return lines
@@ -281,20 +289,22 @@ public enum PackNoticeCopy {
         switch status {
         case .owned(let shared):
             guard let first = shared.first else { return "이 팩이 써요" }
-            let others = shared.count > 1 ? "「\(name(first))」 외 \(shared.count - 1)개 팩도" : "「\(name(first))」도"
+            let others = shared.count > 1 ? "「\(name(first))」 외 \(number(shared.count - 1))개 팩도" : "「\(name(first))」도"
             return "아래 \(others) 같은 틀 — 위에 있는 이 팩이 써요"
         case .outranked(let owner):
             let ownerName = name(owner)
             return "위에 있는 「\(ownerName)」\(subjectParticle(after: ownerName)) 같은 틀을 써요"
         case .shadowed(let triggers):
+            // 가림은 **그 끝말로 끝나는 입력에서만**이다 — 「이 틀은 안 떠요」는 범위를 과장했다(화면 확인 S-3, 시안 4-I·5-C 꼴)
             let first = triggers.first ?? ""
-            let subject = triggers.count > 1 ? "「\(first)」 외 \(triggers.count - 1)개가" : "「\(first)」\(subjectParticle(after: first))"
-            return "단축어 \(subject) 먼저 떠서 이 틀은 안 떠요"
+            let many = triggers.count > 1
+            let subject = many ? "「\(first)」 외 \(number(triggers.count - 1))개가" : "「\(first)」\(subjectParticle(after: first))"
+            return "「…\(first)」\(many ? " 등" : "")\(directionParticle(after: many ? "등" : first)) 끝나는 입력에서는 단축어 \(subject) 먼저 떠요"
         }
     }
 
     /// U1 — 문구형 팩에서 위 줄에 밀린 단축어 절
-    public static func hiddenTriggersHeader(count: Int) -> String { "지금 안 뜨는 단축어 \(count)개" }
+    public static func hiddenTriggersHeader(count: Int) -> String { "지금 안 뜨는 단축어 \(number(count))개" }
     public static let hiddenTriggerBadge = "뒤 순서"
 
     public static func hiddenTriggerLine(owner: PackImpact.Source, name: (String) -> String) -> String {
@@ -332,7 +342,7 @@ public enum PackNoticeCopy {
 
     /// 항목 수를 모르면(읽을 수 없는 팩을 복구해 stats가 0) 숫자 없이
     public static func deleteMessage(itemCount: Int) -> String {
-        let subject = itemCount > 0 ? "이 팩의 채움글 \(itemCount)개가" : "이 팩이"
+        let subject = itemCount > 0 ? "이 팩의 채움글 \(number(itemCount))개가" : "이 팩이"
         return subject + " 이 기기에서 지워져요. 다시 쓰려면 파일을 다시 가져와야 해요."
     }
 
@@ -350,7 +360,7 @@ public enum PackNoticeCopy {
 
     /// 주어 — 하나면 「이름」 + 받침에 맞는 이/가, 여럿이면 「「A」 외 n개가」(계획서 4-2절 「이름이 여럿이면」)
     static func subject(_ firstName: String, count: Int) -> String {
-        count > 1 ? "「\(firstName)」 외 \(count - 1)개가" : "「\(firstName)」\(subjectParticle(after: firstName))"
+        count > 1 ? "「\(firstName)」 외 \(number(count - 1))개가" : "「\(firstName)」\(subjectParticle(after: firstName))"
     }
 
     /// 이름 뒤 주격 조사 — 마지막 글자(문장부호·이모지는 건너뛴다)가 한글이면 받침으로, 아라비아 숫자면 읽는 소리로
@@ -363,6 +373,32 @@ public enum PackNoticeCopy {
     /// 이름 뒤 목적격 조사 — 규칙은 주격과 같다(받침 → 「을」, 없으면 「를」, 모르면 「을(를)」). 삭제 확인(2-F)·틀 주인 안내(2-D)
     public static func objectParticle(after name: String) -> String {
         particle(after: name, consonant: "을", vowel: "를")
+    }
+
+    /// 끝말 뒤 「으로/로」 — 받침이 없거나 ㄹ 받침이면 「로」, 그 밖 받침이면 「으로」, 아라비아 숫자는 읽는 소리로(1·2·4·5·7·8·9 → 「로」),
+    /// 모르면 「(으)로」. 가림 안내(「「…장」으로 끝나는 입력」, 5-C·2-E)
+    public static func directionParticle(after text: String) -> String {
+        guard let last = text.last(where: { $0.isLetter || $0.isNumber }),
+              let scalar = last.unicodeScalars.first, last.unicodeScalars.count == 1 else { return "(으)로" }
+        if (0xAC00...0xD7A3).contains(scalar.value) {
+            let final = (scalar.value - 0xAC00) % 28
+            return final == 0 || final == 8 ? "로" : "으로"
+        }
+        if last.isASCII, let digit = last.wholeNumberValue {
+            return [1, 2, 4, 5, 7, 8, 9].contains(digit) ? "로" : "으로"
+        }
+        return "(으)로"
+    }
+
+    /// 표시 숫자 — 천 단위 쉼표(「1,300」). 화면 문구의 개수·건수는 **전부 이 함수 하나**를 지난다(화면 확인 S-4). 지역 설정과 무관하게 쉼표다
+    public static func number(_ value: Int) -> String {
+        let digits = String(value.magnitude)
+        var grouped = ""
+        for (index, digit) in digits.enumerated() {
+            if index > 0, (digits.count - index) % 3 == 0 { grouped.append(",") }
+            grouped.append(digit)
+        }
+        return value < 0 ? "-" + grouped : grouped
     }
 
     private static func particle(after name: String, consonant: String, vowel: String) -> String {

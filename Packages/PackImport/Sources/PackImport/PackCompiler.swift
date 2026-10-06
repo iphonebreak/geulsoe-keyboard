@@ -41,16 +41,14 @@ public enum PackCompiler {
 
     public static func compile(_ draft: PackDraft, form: PackForm) throws(PackCompileFailure) -> ExternalPack {
         guard draft.isImportable else { throw .noValidRecords }
+        if let failure = nameFailure(form.name) { throw failure }
+        if let failure = licenseFailure(form.license) { throw failure }
         let name = PackTextSanitizer.sanitize(form.name).text
         let license = PackTextSanitizer.sanitize(form.license).text
-        guard !name.allSatisfy(\.isWhitespace) else { throw .nameMissing }
-        guard PackLimits.name.admits(name) else { throw .nameTooLong }
-        guard !license.allSatisfy(\.isWhitespace) else { throw .licenseMissing }
-        guard PackLimits.license.admits(license) else { throw .licenseTooLong }
 
         // 빈 칸은 건너뛰되 순번은 폼 칸 그대로 둔다 — 오류가 가리키는 칸이 화면 칸과 같아야 한다(F7)
         let specs = form.templateSpecs.enumerated()
-            .map { (index: $0.offset, raw: PackTextSanitizer.sanitize($0.element).text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .map { (index: $0.offset, raw: cleanedTemplate($0.element)) }
             .filter { !$0.raw.isEmpty }
         switch draft.mode {
         case .phrases:
@@ -79,5 +77,26 @@ public enum PackCompiler {
             let template = PackTemplate(patterns: patterns, titleFormat: specs[0].raw, items: draft.items)
             return ExternalPack(name: name, license: license, mode: .numbered, template: template)
         }
+    }
+
+    // MARK: - 칸 검사 — 폼(5-A·5-B·5-C)이 「가져오기」를 켜는 판정과 위 컴파일이 **같은 함수**를 쓴다(켜졌는데 컴파일이 거부하는 칸이 없게)
+
+    /// 이름 칸 — 정리(11절) 뒤 공백뿐이면 `nameMissing`, 상한(`PackLimits.name`)을 넘으면 `nameTooLong`
+    public static func nameFailure(_ raw: String) -> PackCompileFailure? {
+        let name = PackTextSanitizer.sanitize(raw).text
+        if name.allSatisfy(\.isWhitespace) { return .nameMissing }
+        return PackLimits.name.admits(name) ? nil : .nameTooLong
+    }
+
+    /// 권리 표기 — 이름과 같은 규칙, 상한은 `PackLimits.license`
+    public static func licenseFailure(_ raw: String) -> PackCompileFailure? {
+        let license = PackTextSanitizer.sanitize(raw).text
+        if license.allSatisfy(\.isWhitespace) { return .licenseMissing }
+        return PackLimits.license.admits(license) ? nil : .licenseTooLong
+    }
+
+    /// 틀 칸 하나를 검사 전에 다듬는다 — 정리 뒤 앞뒤 공백·개행 제거. 빈 문자열이면 빈 칸(건너뛴다)
+    public static func cleanedTemplate(_ raw: String) -> String {
+        PackTextSanitizer.sanitize(raw).text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

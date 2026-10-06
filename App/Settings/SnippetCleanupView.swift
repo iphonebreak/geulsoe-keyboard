@@ -14,7 +14,6 @@ struct SnippetCleanupView: View {
     @State private var editingEntry: EditingSnippet?
     @State private var notice: PackChangeNotice?
     @State private var pendingNotice: PackChangeNotice?
-    @State private var pendingAction: PackChangeNotice.Action?
     @State private var showsDone = false
     @State private var showsRecovery = false
 
@@ -54,7 +53,7 @@ struct SnippetCleanupView: View {
         .packChangeNoticeAlert($notice, onAction: perform)
         .packLibraryRecovery(isPresented: $showsRecovery) { Task { await reload(announcingDone: false) } }
         .sheet(item: $editingEntry, onDismiss: showPending) { editing in
-            SnippetEditorView(editing: editing.entry, onSave: save, onAction: { pendingAction = $0 })
+            SnippetEditorView(editing: editing.entry, onSave: save)
         }
         .alert(PackNoticeCopy.cleanupDoneTitle, isPresented: $showsDone) {
             Button(PackChangeNotice.Action.confirm.label, role: .cancel) {}
@@ -125,13 +124,9 @@ struct SnippetCleanupView: View {
     }
 
     private func showPending() {
-        if let action = pendingAction {
-            pendingAction = nil
-            perform(action)
-        } else if let pending = pendingNotice {
-            pendingNotice = nil
-            notice = pending
-        }
+        guard let pending = pendingNotice else { return }
+        pendingNotice = nil
+        notice = pending
     }
 
     /// 알림 버튼 — 이미 정리 화면이라 「정리하기」는 할 일이 없다

@@ -20,8 +20,6 @@ struct SnippetSettingsView: View {
     @State private var notice: PackChangeNotice?
     /// 편집 시트가 닫힌 뒤 띄울 알림 — 시트가 닫히는 중에 부모가 알림을 띄우지 않게 미뤄 둔다
     @State private var pendingNotice: PackChangeNotice?
-    /// 편집 시트 안 알림에서 고른 동작(정리하기·목록 복구) — 시트가 닫힌 뒤 한다
-    @State private var pendingAction: PackChangeNotice.Action?
 
     // 1-c 2단계 안전망 — 배너 셋(㉠ 한도 초과 · ㉡ 목록 손상 · ㉢ 읽을 수 없는 팩)의 상태. 화면에 올 때마다 메인 밖에서 다시 읽는다
     @State private var libraryStatus: PackLibraryStatus = .readable
@@ -34,6 +32,10 @@ struct SnippetSettingsView: View {
     @State private var packSummaries: [PackSummary] = []
     @State private var packOrder: [SnippetSourceSlot] = SnippetSourceSlot.defaultOrder
     @State private var showsOrder = false
+
+    // 1-c 5단계 — 가져오기 첫 화면(3-A)과 완료 뒤 새 팩 행 강조(U5)
+    @State private var showsImport = false
+    @State private var highlightedPackID: String?
 
     var body: some View {
         Form {
@@ -74,7 +76,9 @@ struct SnippetSettingsView: View {
             .disabled(!settings.snippetsEnabled)
 
             // 외부 채움글 — 내장 팩 바로 아래(U5). 순서 목록·팩 상세·순서 바꾸기는 `ExternalPackViews.swift`
-            ExternalSnippetSection(summaries: packSummaries, order: packOrder, onReorder: { showsOrder = true },
+            ExternalSnippetSection(summaries: packSummaries, order: packOrder, libraryStatus: libraryStatus,
+                                   highlightedPackID: highlightedPackID,
+                                   onReorder: { showsOrder = true }, onAdd: { showsImport = true },
                                    onChange: { Task { await reloadSafetyNet() } })
                 .disabled(!settings.snippetsEnabled)
 
@@ -128,6 +132,8 @@ struct SnippetSettingsView: View {
         }
         .packChangeNoticeAlert($notice, onAction: perform)
         .navigationDestination(isPresented: $showsCleanup) { SnippetCleanupView() }
+        // 가져오기 — 3-A 위로 붙여넣기(3-E)를 밀어 넣었어도 이 값을 끄면 이 화면까지 함께 걷힌다
+        .navigationDestination(isPresented: $showsImport) { PackImportStartView(onFinished: finishImport) }
         .packLibraryRecovery(isPresented: $showsRecovery) {
             Task { await reloadSafetyNet() }
         }
@@ -139,13 +145,13 @@ struct SnippetSettingsView: View {
             PackOrderView { pendingNotice = $0 }
         }
         .sheet(isPresented: $showsEditor, onDismiss: showPendingNotice) {
-            SnippetEditorView(editing: nil, onSave: save, onAction: { pendingAction = $0 })
+            SnippetEditorView(editing: nil, onSave: save)
         }
         // ★ **같은 시트를 고치기에도 쓴다** — 새로 만들지 않는다.
         //   `item:` 형태라 고를 때마다 시트가 그 항목으로 새로 만들어진다
         //   (`isPresented:`를 쓰면 `@State` 초기값이 첫 항목에 굳는다).
         .sheet(item: $editingEntry, onDismiss: showPendingNotice) { editing in
-            SnippetEditorView(editing: editing.entry, onSave: save, onAction: { pendingAction = $0 })
+            SnippetEditorView(editing: editing.entry, onSave: save)
         }
     }
 
@@ -182,6 +188,19 @@ struct SnippetSettingsView: View {
         packSummaries = summaries
         packOrder = await client.order()
         unavailablePackNames = summaries.filter { $0.status == .unavailable }.map { $0.name ?? PackNoticeCopy.unnamedPack }
+    }
+
+    /// 4-M 「채움글로 돌아가기」 뒤 — 가져오기 화면을 걷고 목록을 다시 읽어 새 팩 행을 잠깐 강조한다(U5 — 새 팩은 맨 아래, U2)
+    private func finishImport(_ packID: String) {
+        showsImport = false
+        highlightedPackID = packID
+        Task {
+            await reloadSafetyNet()
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(.easeOut(duration: 0.6)) {
+                if highlightedPackID == packID { highlightedPackID = nil }
+            }
+        }
     }
 
     /// 알림 버튼 — 정리하기는 정리 화면, 목록 복구는 확인 시트(2단계), 팩 순서 바꾸기는 순서 화면(3단계)
@@ -221,13 +240,9 @@ struct SnippetSettingsView: View {
     }
 
     private func showPendingNotice() {
-        if let action = pendingAction {
-            pendingAction = nil
-            perform(action)
-        } else if let pending = pendingNotice {
-            pendingNotice = nil
-            notice = pending
-        }
+        guard let pending = pendingNotice else { return }
+        pendingNotice = nil
+        notice = pending
     }
 
     /// 지울 때도 한 항목씩 — 여러 개를 고르면 하나씩 커밋한다(1-b 「저장 1회 = 항목 1개」)
@@ -314,8 +329,6 @@ struct SnippetEditorView: View {
     private var loadedCommaTrigger: Bool { editing?.hasCommaInTrigger ?? false }
     /// 거부 알림을 돌려준다 — nil이면 저장됨(시트를 닫는다), 아니면 **시트·입력을 그대로 두고** 알린다(검증 C6)
     let onSave: @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?
-    /// 거부 알림에서 고른 동작(정리하기·목록 복구) — 부르는 쪽에 넘기고 시트를 닫는다(부르는 쪽이 닫힌 뒤 화면을 옮긴다)
-    let onAction: @MainActor (PackChangeNotice.Action) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var notice: PackChangeNotice?
@@ -327,11 +340,9 @@ struct SnippetEditorView: View {
 
     /// ★ 불러올 때 **쉼표로 합치고**, 저장할 때 `SnippetEntry.parseTriggers`가 **쉼표로 나눈다** —
     /// 왕복이 같은 규약을 탄다. 구분자를 여기서 새로 정하지 않는다.
-    init(editing: SnippetEntry?, onSave: @escaping @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?,
-         onAction: @escaping @MainActor (PackChangeNotice.Action) -> Void) {
+    init(editing: SnippetEntry?, onSave: @escaping @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?) {
         self.editing = editing
         self.onSave = onSave
-        self.onAction = onAction
         _triggerText = State(initialValue: editing?.triggers.joined(separator: ", ") ?? "")
         _title = State(initialValue: editing?.title ?? "")
         _body_ = State(initialValue: editing?.body ?? "")
@@ -444,10 +455,9 @@ struct SnippetEditorView: View {
                     .disabled(parsedTriggers.isEmpty || trimmedBody.isEmpty || tooLong || isSaving)
                 }
             }
-            .packChangeNoticeAlert($notice) { action in
-                onAction(action)
-                dismiss()
-            }
+            // ★ 편집 시트 안에서는 「확인」만(A3 정리하기·E1 목록 복구 없음) — 그 버튼은 시트를 닫아 **친 내용을 지웠다**(화면 확인 O-4).
+            //   정리·복구 길은 채움글 화면 맨 위 배너(㉠·㉡)가 같은 것을 준다. 자리별 버튼은 `PackChangeNotice.Presenter`가 정하고 시험이 고정한다
+            .packChangeNoticeAlert($notice, in: .editorSheet) { _ in }
         }
     }
 }

@@ -203,8 +203,12 @@ public final class PackStore: @unchecked Sendable {
     public func packDetail(_ id: String) -> PackDetail? {
         queue.sync {
             guard let made = makeImpactLibrary(keeping: id), let pack = made.library.pack(id) else { return nil }
-            return PackDetail(summary: pack.summary, license: made.kept?.license, examples: made.kept.map(PackDetail.examples(of:)) ?? [],
-                              standing: PackImpact.standing(of: id, in: made.library),
+            let standing = PackImpact.standing(of: id, in: made.library)
+            // 사용법 예시는 지금 뜨는 단축어부터(O-1) — 「지금 안 뜨는 단축어」 절과 같은 계산
+            let hidden = Set(standing?.hiddenTriggers.map { SnippetEntry.normalizedTrigger($0.trigger) } ?? [])
+            return PackDetail(summary: pack.summary, license: made.kept?.license,
+                              examples: made.kept.map { PackDetail.examples(of: $0, hidden: hidden) } ?? [],
+                              standing: standing,
                               names: Dictionary(made.library.packs.map { ($0.id, made.library.name(of: $0.id)) },
                                                 uniquingKeysWith: { first, _ in first }))
         }

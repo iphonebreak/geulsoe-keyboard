@@ -61,7 +61,7 @@ public enum PackImportCopy {
 
     /// 「42줄 · 칸 나누기: 탭」 — 구분자를 하나로 정할 수 없으면 줄 수만
     public static func pasteSummary(lines: Int, delimiter: CSVDelimiter?) -> String {
-        "\(lines)줄" + (delimiter.map { " · \(delimiterLabel): \(delimiterName($0))" } ?? "")
+        "\(PackNoticeCopy.number(lines))줄" + (delimiter.map { " · \(delimiterLabel): \(delimiterName($0))" } ?? "")
     }
 
     // MARK: - 4-A 읽는 중 · 공통 버튼
@@ -99,14 +99,14 @@ public enum PackImportCopy {
         encoding == .utf8 ? "UTF-8" : "한국어(CP949)"
     }
 
-    public static func count(_ value: Int) -> String { "\(value)개" }
+    public static func count(_ value: Int) -> String { "\(PackNoticeCopy.number(value))개" }
 
     /// 구분 줄 — 둘 다 읽힘(4-C) · 다른 쪽이 깨짐(4-B) · **고른 쪽이 깨짐**(「다음」이 먹지 않는다)
     public static func encodingStatus(_ review: PackEncodingReview) -> String {
         if review.bothReadable { return "두 가지로 다 읽혀요. 표본을 보고 맞는 쪽을 골라 주세요." }
         let selected = review.reading(review.selected)
         guard selected.isReadable else {
-            return "\(encodingName(review.selected))로는 읽을 수 없어요(깨진 글자 \(selected.failedLines)행). 다른 쪽을 골라 주세요."
+            return "\(encodingName(review.selected))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(selected.failedLines))행). 다른 쪽을 골라 주세요."
         }
         return "\(encodingName(review.other))로는 읽을 수 없어요(깨진 글자 \(review.reading(review.other).failedLines)행)."
     }
@@ -149,53 +149,53 @@ public enum PackImportCopy {
     public static let howToFix = "고치는 법 보기"
 
     /// 4-H 「건너뜀 (57%)」
-    public static func skippedLabel(percent: Int) -> String { "\(skippedLabel) (\(percent)%)" }
+    public static func skippedLabel(percent: Int) -> String { "\(skippedLabel) (\(PackNoticeCopy.number(percent))%)" }
 
     public static func modeName(_ mode: ExternalPack.Mode) -> String { mode == .numbered ? "번호형" : "문구형" }
 
     /// 파일의 `#틀` — 대표 틀(첫 칸) + 「외 n개」. 틀은 다음 화면(폼)에서 고친다 — 여기서는 보여 주기만
     public static func fileTemplate(_ specs: [String]) -> String? {
         guard let first = specs.first else { return nil }
-        return specs.count > 1 ? "\(first) 외 \(specs.count - 1)개" : first
+        return specs.count > 1 ? "\(first) 외 \(PackNoticeCopy.number(specs.count - 1))개" : first
     }
 
     /// U5 「처음 5개」(문구형 4-I는 「처음 3개」)
-    public static func firstRowsHeader(count: Int) -> String { "처음 \(count)개" }
+    public static func firstRowsHeader(count: Int) -> String { "처음 \(PackNoticeCopy.number(count))개" }
 
     /// 모르는 열은 가져오지 않는다(열 이름은 보이지 않는다 — 건수만, PDR 5-3)
-    public static func ignoredColumns(_ count: Int) -> String { "모르는 열 \(count)개는 가져오지 않아요." }
+    public static func ignoredColumns(_ count: Int) -> String { "모르는 열 \(PackNoticeCopy.number(count))개는 가져오지 않아요." }
 
     public static func triggersLine(_ triggers: [String]) -> String { "단축어: " + triggers.joined(separator: ", ") }
 
-    public static func skippedHeader(count: Int) -> String { "건너뛴 행 \(count)개" }
+    public static func skippedHeader(count: Int) -> String { "건너뛴 행 \(PackNoticeCopy.number(count))개" }
 
     /// 같은 번호·단축어는 뒤가 이긴다(PDR 5-4 ⑦)
     public static func duplicates(_ count: Int, mode: ExternalPack.Mode) -> String {
-        "같은 \(mode == .numbered ? "번호" : "단축어") \(count)개 — 뒤에 있는 것을 써요"
+        "같은 \(mode == .numbered ? "번호" : "단축어") \(PackNoticeCopy.number(count))개 — 뒤에 있는 것을 써요"
     }
 
     /// 문자 정리(11절)로 뺀 글자 — 조용히 바꾸지 않는다
-    public static func sanitized(_ count: Int) -> String { "눈에 보이지 않는 글자 \(count)개는 빼고 가져와요" }
+    public static func sanitized(_ count: Int) -> String { "눈에 보이지 않는 글자 \(PackNoticeCopy.number(count))개는 빼고 가져와요" }
 
     /// 따옴표 없는 칸 가운데의 `"` — 글자로 받고 건수만(5-4)
-    public static func strayQuotes(_ count: Int) -> String { "칸 가운데의 따옴표 \(count)개는 글자 그대로 가져와요" }
+    public static func strayQuotes(_ count: Int) -> String { "칸 가운데의 따옴표 \(PackNoticeCopy.number(count))개는 글자 그대로 가져와요" }
 
     /// 4-H 배너
     public static func manySkippedBanner(_ kind: PackImportSource.Kind) -> String {
         kind == .file ? "절반 넘게 건너뛰어요. 파일을 고친 뒤 다시 가져오길 권해요." : "절반 넘게 건너뛰어요. 표를 고친 뒤 다시 붙여 넣길 권해요."
     }
 
-    public static func skipReasonCount(_ count: Int) -> String { "\(count)행" }
-    public static func importOnly(_ count: Int) -> String { "그래도 \(count)개만 가져오기" }
-    public static func partialConfirmTitle(_ count: Int) -> String { "\(count)개만 가져올까요?" }
-    public static func partialConfirmMessage(skipped: Int) -> String { "건너뛴 \(skipped)개는 가져오지 않아요." }
+    public static func skipReasonCount(_ count: Int) -> String { "\(PackNoticeCopy.number(count))행" }
+    public static func importOnly(_ count: Int) -> String { "그래도 \(PackNoticeCopy.number(count))개만 가져오기" }
+    public static func partialConfirmTitle(_ count: Int) -> String { "\(PackNoticeCopy.number(count))개만 가져올까요?" }
+    public static func partialConfirmMessage(skipped: Int) -> String { "건너뛴 \(PackNoticeCopy.number(skipped))개는 가져오지 않아요." }
     /// 확인창의 확인 버튼
-    public static func partialConfirmAction(_ count: Int) -> String { "\(count)개만 가져오기" }
+    public static func partialConfirmAction(_ count: Int) -> String { "\(PackNoticeCopy.number(count))개만 가져오기" }
 
     // MARK: 건너뛴 행 (4-F — 행 번호와 사유만, 5-5)
 
     /// CSV는 「n번째 항목(m번째 줄)」 — 여러 줄 본문 때문에 둘이 다르다(5-4)
-    public static func position(record: Int, line: Int) -> String { "\(record)번째 항목(\(line)번째 줄)" }
+    public static func position(record: Int, line: Int) -> String { "\(PackNoticeCopy.number(record))번째 항목(\(PackNoticeCopy.number(line))번째 줄)" }
 
     public static func skipTitle(_ skipped: SkippedRecord) -> String {
         "\(position(record: skipped.record, line: skipped.line)) — \(skipReason(skipped.reason))"
@@ -223,11 +223,11 @@ public enum PackImportCopy {
         case .missingNumber: "번호 칸을 채워 주세요"
         case .invalidNumber, .numberOutOfRange: "번호 칸을 확인해 주세요"
         case .missingTrigger: "단축어 칸을 채워 주세요"
-        case .tooManyTriggers: "한 항목에 단축어는 \(PackLimits.triggersPerEntry)개까지예요"
-        case .triggerTooLong: "단축어 하나는 \(PackLimits.trigger.characters)자까지예요"
+        case .tooManyTriggers: "한 항목에 단축어는 \(PackNoticeCopy.number(PackLimits.triggersPerEntry))개까지예요"
+        case .triggerTooLong: "단축어 하나는 \(PackNoticeCopy.number(PackLimits.trigger.characters))자까지예요"
         case .emptyBody: "본문을 채워 주세요"
-        case .titleTooLong: "제목은 \(PackLimits.title.characters)자까지예요"
-        case .bodyTooLong: "본문은 한 칸에 \(grouped(PackLimits.body.characters))자까지예요"
+        case .titleTooLong: "제목은 \(PackNoticeCopy.number(PackLimits.title.characters))자까지예요"
+        case .bodyTooLong: "본문은 한 칸에 \(PackNoticeCopy.number(PackLimits.body.characters))자까지예요"
         }
     }
 
@@ -273,7 +273,7 @@ public enum PackImportCopy {
         var lines: [OverlapLine] = []
         if let user = overlap.userSnippets {
             lines.append(OverlapLine(
-                message: "내 채움글과 같은 단축어 \(user.triggers.count)개 — 목록에서 위에 있는 쪽이 먼저 떠요",
+                message: "내 채움글과 같은 단축어 \(PackNoticeCopy.number(user.triggers.count))개 — 목록에서 위에 있는 쪽이 먼저 떠요",
                 details: ["\(listed(user.triggers)) — 새 팩은 맨 아래에 붙어서 지금은 「내 채움글」이 떠요. "
                           + "이 팩 문구를 먼저 띄우려면 「\(PackNoticeCopy.label(.reorderPacks))」에서 위로 올려요."],
                 isWarning: true))
@@ -286,10 +286,10 @@ public enum PackImportCopy {
                 let shown = summary(id)
                 return "\(listed(group.triggers)) — 「\(shown?.name ?? PackNoticeCopy.unnamedPack)」 팩\(stateNote(shown?.status))"
             }
-            lines.append(OverlapLine(message: "다른 팩과 같은 단축어 \(distinct)개 — 위에 있는 팩이 먼저 떠요", details: details, isWarning: true))
+            lines.append(OverlapLine(message: "다른 팩과 같은 단축어 \(PackNoticeCopy.number(distinct))개 — 위에 있는 팩이 먼저 떠요", details: details, isWarning: true))
         }
         if let builtIn = overlap.builtIn {
-            lines.append(OverlapLine(message: "내장 팩과 같은 단축어 \(builtIn.triggers.count)개 — 이 팩이 먼저 떠요",
+            lines.append(OverlapLine(message: "내장 팩과 같은 단축어 \(PackNoticeCopy.number(builtIn.triggers.count))개 — 이 팩이 먼저 떠요",
                                      details: ["\(listed(builtIn.triggers)) — 내장 팩보다 앞서요"], isWarning: false))
         }
         return lines
@@ -306,7 +306,7 @@ public enum PackImportCopy {
 
     private static func listed(_ triggers: [String]) -> String {
         let shown = PackNoticeCopy.shownTriggerCount
-        return triggers.prefix(shown).joined(separator: ", ") + (triggers.count > shown ? " 외 \(triggers.count - shown)개" : "")
+        return triggers.prefix(shown).joined(separator: ", ") + (triggers.count > shown ? " 외 \(PackNoticeCopy.number(triggers.count - shown))개" : "")
     }
 
     // MARK: - 4-G 거부
@@ -380,7 +380,7 @@ public enum PackImportCopy {
         case .unsupportedEscapeMeta:
             "「#escape」 줄은 아직 쓸 수 없어요. 그 줄을 지우고 다시 가져와 주세요."
         case .metaValueCount, .metaTooManyCells:
-            "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#권리」는 값 하나, 「#틀」은 1~\(PackLimits.templatePatterns)개예요."
+            "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#권리」는 값 하나, 「#틀」은 1~\(PackNoticeCopy.number(PackLimits.templatePatterns))개예요."
         case .templateInPhrasesMode:
             "단축어 열이 있는 \(kind == .file ? "파일" : "표")에는 「#틀」 줄을 쓸 수 없어요."
         }
@@ -421,16 +421,6 @@ public enum PackImportCopy {
 
     // MARK: - 안
 
+    /// 번호 범위는 쉼표 없이 — 번호는 개수가 아니라 단축어에 그대로 치는 식별자다(「사자성어 9999번」, 시안 4-F 「1~9999」). 개수·위치만 `number`
     private static let numberRangeText = "\(PackLimits.numberRange.lowerBound)~\(PackLimits.numberRange.upperBound)"
-
-    /// 세 자리마다 쉼표(3000 → 3,000) — 지역 설정과 무관하게 같은 모양
-    static func grouped(_ value: Int) -> String {
-        let digits = String(value)
-        var result = ""
-        for (offset, digit) in digits.enumerated() {
-            if offset > 0, (digits.count - offset) % 3 == 0 { result.append(",") }
-            result.append(digit)
-        }
-        return result
-    }
 }

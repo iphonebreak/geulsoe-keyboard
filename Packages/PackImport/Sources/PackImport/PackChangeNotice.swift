@@ -188,3 +188,30 @@ public struct PackChangeNotice: Equatable, Sendable {
         }
     }
 }
+
+// MARK: - 알림을 띄우는 자리
+
+extension PackChangeNotice {
+
+    /// 알림을 띄우는 자리 — 자리마다 **누를 곳이 있는** 동작만 버튼으로 그린다(갈 곳 없는 버튼을 보이지 않는다)
+    public enum Presenter: Sendable, CaseIterable {
+        /// 채움글 화면·팩 상세·내장 팩 상세·정리 화면 — 정리 화면·복구 시트·순서 화면·삭제 확인으로 보낼 수 있다
+        case settings
+        /// 내 채움글 편집 시트 — 동작 버튼을 누르면 시트가 닫혀 **친 내용이 사라진다**(화면 확인 O-4). 「확인」만 두고 입력을 지킨다 —
+        /// 정리·복구는 채움글 화면의 배너(㉠·㉡)가 같은 길을 준다
+        case editorSheet
+        /// 가져오기 시트(5단계) — 정리 화면(시트 안에서 밀어 넣어 폼 값을 지킨다)·복구 시트·꺼 둔 채로 가져오기(D1·D2)
+        case importFlow
+
+        var wired: Set<Action> {
+            switch self {
+            case .settings: [.organize, .recoverLibrary, .reorderPacks, .deletePack]
+            case .editorSheet: []
+            case .importFlow: [.organize, .recoverLibrary, .importDisabled]
+            }
+        }
+    }
+
+    /// 이 자리에서 그릴 동작 버튼(화면 순서대로) — 닫는 버튼(`dismiss`)은 따로
+    public func actions(in presenter: Presenter) -> [Action] { actions.filter(presenter.wired.contains) }
+}

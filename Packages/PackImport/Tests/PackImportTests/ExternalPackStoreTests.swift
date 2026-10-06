@@ -1686,7 +1686,8 @@ struct PackImpactStoreTests {
             SnippetEntry(trigger: "회의", title: "회의 제목", body: "본문"), SnippetEntry(trigger: "넷째", title: "넷째 제목", body: "본문")
         ]), source: .csv))
         let phrasesDetail = try #require(h.store.packDetail(phrasesID))
-        #expect(phrasesDetail.examples == [.init(trigger: "장", title: "장 제목"), .init(trigger: "인사", title: "인사 제목"),
+        // 화면 확인 O-1 — 내 채움글에 밀린 「장」 대신 같은 항목의 안 밀린 단축어 「회사장」을 보인다
+        #expect(phrasesDetail.examples == [.init(trigger: "회사장", title: "장 제목"), .init(trigger: "인사", title: "인사 제목"),
                                            .init(trigger: "회의", title: "회의 제목")])
         #expect(phrasesDetail.standing?.hiddenTriggers == [.init(trigger: "장", owner: .userSnippets)], "내 채움글이 위라 「장」은 뒤 순서")
     }

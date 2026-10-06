@@ -17,7 +17,13 @@ import TadakDomain
 struct ExternalSnippetSection: View {
     let summaries: [PackSummary]
     let order: [SnippetSourceSlot]
+    /// 목록 상태 — 읽히지 않으면 빈 상태 대신 손상 한 줄(O-2)
+    var libraryStatus: PackLibraryStatus = .readable
+    /// 방금 가져온·바꾼 팩 — 잠깐 주황 바탕(U5·U2, 시안 U2 컷 「방금 가져옴」 강조). 채움글 화면이 잠시 뒤 nil로 돌린다
+    var highlightedPackID: String?
     let onReorder: () -> Void
+    /// 「외부 채움글 추가」 — 채움글 화면이 가져오기 첫 화면(3-A)을 밀어 넣는다(완료하면 같은 화면이 걷어 목록으로 돌아온다)
+    let onAdd: () -> Void
     /// 팩 상세에서 켬/끔·삭제를 했다 — 채움글 화면이 저장본을 다시 읽는다
     let onChange: @MainActor () -> Void
 
@@ -35,21 +41,20 @@ struct ExternalSnippetSection: View {
                             } label: {
                                 packRow(summary)
                             }
+                            .listRowBackground(summary.id == highlightedPackID ? Color.orange.opacity(0.18) : nil)
                         }
                     }
                 }
                 Button(PackChangeNotice.Action.reorderPacks.label, action: onReorder)
             }
-            // 가져오기(4단계) — 3-A 첫 화면. 확정(저장)은 5단계라 아직 목록이 바뀌지 않는다
-            NavigationLink {
-                PackImportStartView()
-            } label: {
+            // 가져오기(4·5단계) — 3-A 첫 화면. 끝나면 새 팩이 목록 맨 아래에 강조된다
+            Button(action: onAdd) {
                 Label(PackNoticeCopy.addPack, systemImage: "plus")
             }
         } header: {
             Text(PackNoticeCopy.externalSectionTitle)
         } footer: {
-            Text(summaries.isEmpty ? PackNoticeCopy.emptyListFooter : PackNoticeCopy.listFooter)
+            Text(PackNoticeCopy.externalSectionFooter(isEmpty: summaries.isEmpty, libraryStatus: libraryStatus))
         }
     }
 
