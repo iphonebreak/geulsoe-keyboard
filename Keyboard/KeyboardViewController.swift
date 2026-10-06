@@ -152,9 +152,10 @@ final class KeyboardViewController: UIInputViewController {
     /// ✕로 지운 항목이 **키보드를 다시 열 때마다 되살아났다** — PDR clipboard-history가
     /// "✕로 지운 현재 클립보드가 재오픈마다 되살아나지 않게"라고 못박은 가드가 사실상 죽어 있었다.
     private static var recordedPasteboardChangeCount: Int?
-    /// 복사한 사진 도우미(v1.3.0 ④ B) — 미리보기(썸네일)·원본 사본(탭 뒤, ≤ 8MB)·거절한 클립보드.
-    /// **프로세스 수명**이다(PDR `clipboard-image-history.md` 5-2 — VC는 등장마다 새로 만들어진다). 메모리에만 있다 —
-    /// 파일·로그 0. 이중 만료(120초·새 복사)와 끄기(설정 재로드·등장)에서 비우는 규칙은 `CopiedPhotoHelper`가 쥔다.
+    /// 복사한 사진 도우미(v1.3.0 ④ B) — 미리보기(썸네일)·「복사됨」 표식(우리가 쓴 changeCount·만료 시각)·거절한 클립보드.
+    /// **사진 바이트는 들고 있지 않다**(B6 — 원본 사본 없음, 재탭은 클립보드의 우리가 쓴 항목을 다시 읽는다).
+    /// **프로세스 수명**이다(VC는 등장마다 새로 만들어진다). 메모리에만 있다 — 파일·로그 0.
+    /// 만료(120초)·새 복사·끄기(설정 재로드·등장)에서 비우는 규칙은 `CopiedPhotoHelper`가 쥔다.
     private static var copiedPhoto = CopiedPhotoHelper()
     /// 사진 도우미의 클립보드 경계 — 이 키보드의 **유일한 클립보드 쓰기 지점**(`setItems` + `localOnly` + 만료).
     private let copiedPhotoPasteboard = SystemCopiedPhotoPasteboard()
@@ -724,7 +725,7 @@ final class KeyboardViewController: UIInputViewController {
         //   `[붙여넣기 칩][✕]`만이고, ✕로 칩을 물리면(클립보드 소비) 채움글 칩(+✕)이 나온다. 그 ✕는 기존 채움글 ✕
         //   그대로(`dismissedSnippetTail`). 예전 주석은 「채움글 > 붙여넣기」라 적었지만 실제로는 둘이 한 줄에 함께 떴다.
         // 사진 칩(v1.3.0 ④ B)도 **같은 붙여넣기 칩 자리**다 — 텍스트·인증번호 칩이 이기고, 나머지 조건(키를 누르면 그 등장
-        // 동안 내려감·secure·전체 접근)은 같다. 「복사됨」이 만료(120초)됐으면 원본 사본을 버리고 칩도 없다.
+        // 동안 내려감·secure·전체 접근)은 같다. 「복사됨」이 만료(120초)됐으면 칩이 없다.
         let photoChip = PasteChipGate.visiblePhotoChip(
             Self.copiedPhoto.visibleChip(now: Date()), hasFullAccess: hasFullAccess, isSecureTextEntry: secure,
             isSuppressedByTyping: pasteChipSuppressedByTyping, hasTextChip: chip != nil)
@@ -998,7 +999,7 @@ final class KeyboardViewController: UIInputViewController {
             Self.consumedPasteboardChangeCount = probedPasteboardChangeCount
             pasteSuggestion = nil
         }
-        // 사진 칩 — 그 클립보드를 소비하고 원본 사본도 비운다(텍스트 칩과 같은 소비 장치, D18·D19)
+        // 사진 칩 — 그 클립보드를 소비하고 칩을 물린다(텍스트 칩과 같은 소비 장치, D18·D19)
         if viewState.copiedPhoto != nil, let consumed = Self.copiedPhoto.dismiss() {
             Self.consumedPasteboardChangeCount = consumed
         }
@@ -1055,7 +1056,7 @@ final class KeyboardViewController: UIInputViewController {
         // 재시도는 **등장이 아니다** — 그 사이 사용자가 키를 눌렀으면 억제를 유지한다
         if !isRetry { pasteChipSuppressedByTyping = false }   // 등장마다 다시 띄운다
         guard hasFullAccess, textDocumentProxy.isSecureTextEntry != true else {
-            // 사진 도우미도 클립보드를 건드리지 않는다 — 전체 접근이 없으면 들고 있던 사본까지 비운다(같은 커밋의 권한 없는 경로)
+            // 사진 도우미도 클립보드를 건드리지 않는다 — 전체 접근이 없으면 미리보기·표식까지 비운다(같은 커밋의 권한 없는 경로)
             probeCopiedPhoto(yieldsToText: false)
             return
         }
@@ -1128,12 +1129,20 @@ final class KeyboardViewController: UIInputViewController {
 
     /// 사진 칩 탭 — **이 키보드의 유일한 클립보드 쓰기 경로**다(보안 규칙 클립보드 절 예외 조건 3: 사용자 탭의 직접 결과).
     ///
-    /// 「사진 복사」면 바이트를 다시 읽어 상한을 다시 보고 `setItems`(`localOnly`·만료 120초)로 되쓴 뒤 원본 사본을 든다.
-    /// 「복사됨」이면 들고 있던 원본으로 다시 쓴다(만료 갱신). 클립보드가 그 사이 바뀌었거나 만료됐으면 쓰지 않는다.
+    /// 클립보드가 그 칩이 가리키는 항목 그대로일 때만(「사진 복사」 = 프로브가 본 changeCount, 「복사됨」 = 우리가 쓴
+    /// changeCount) 바이트를 읽어 상한을 다시 보고 `setItems`(`localOnly`·만료 120초)로 되쓴다 — 「복사됨」 재탭은 만료 갱신.
+    /// 바이트는 쓰고 나면 버린다(B6). 그 사이 바뀌었거나 만료됐으면 쓰지 않는다.
     /// **지금 떠 있는 칩만 받는다** — 탭 콜백은 한 박자 늦게 오므로 빠른 두 번째 탭은 이미 바뀐 칩과 달라 버려진다.
     private func handleCopiedPhotoTap(_ tapped: CopiedPhotoChip) {
-        guard let viewState, viewState.copiedPhoto == tapped, Self.copiedPhoto.visibleChip(now: Date()) == tapped,
-              hasFullAccess, settings.copiedPhotoHelperEnabled, textDocumentProxy.isSecureTextEntry != true else { return }
+        // 빠른 두 번째 탭 — 첫 탭이 이미 칩을 바꿨고 화면도 갱신됐다. 그냥 버린다
+        guard let viewState, viewState.copiedPhoto == tapped else { return }
+        // F3 — 만료(120초)·설정 변화 등으로 더는 유효하지 않은 칩이면 **쓰지 않고 칩을 거둔다**
+        //      (가드에서 그냥 끝내면 반응 없는 칩이 다음 갱신까지 남았다 — 검증 F3)
+        guard Self.copiedPhoto.visibleChip(now: Date()) == tapped, hasFullAccess, settings.copiedPhotoHelperEnabled,
+              textDocumentProxy.isSecureTextEntry != true else {
+            updateSuggestionBar()
+            return
+        }
         playToolbarHaptic()
         autoreleasepool {
             _ = Self.copiedPhoto.tap(pasteboard: copiedPhotoPasteboard, decoder: ImageIOCopiedPhotoDecoder(), now: Date())
@@ -1804,8 +1813,8 @@ final class KeyboardViewController: UIInputViewController {
 
     private func reloadSettingsIfChanged() {
         let latest = settingsRepository.load()
-        // 사진 도우미를 끄면(또는 전체 접근이 없으면) 이 프로세스가 들고 있던 사진 사본을 **이 재로드에서** 비운다
-        // (PDR `clipboard-image-history.md` 5-2 ③ — 「즉시」 = 다음 설정 재로드, 클립보드 기록 끄기와 같은 지연)
+        // 사진 도우미를 끄면(또는 전체 접근이 없으면) 미리보기·「복사됨」 표식을 **이 재로드에서** 비운다 — 사진 바이트는
+        // 원래 들고 있지 않다(B6). 키보드가 닫혀 있어 이 알림을 못 받았으면 다음 등장의 프로브가 비운다
         Self.copiedPhoto.apply(enabled: latest.copiedPhotoHelperEnabled, hasFullAccess: hasFullAccess)
         guard latest != settings, let viewState else {
             settings = latest

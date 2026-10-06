@@ -38,9 +38,9 @@ private final class FakePhotoPasteboard: CopiedPhotoPasteboard {
         changeCount += 1
     }
 
-    /// 다른 앱에서 새로 복사했다
-    func copy(image type: String = "public.jpeg", bytes: Int = 1_000, strings: Bool = false) {
-        images = [type: Data(repeating: 7, count: bytes)]
+    /// 다른 앱에서 새로 복사했다 — `fill`이 다르면 같은 형식의 **다른 사진**이다
+    func copy(image type: String = "public.jpeg", bytes: Int = 1_000, fill: UInt8 = 7, strings: Bool = false) {
+        images = [type: Data(repeating: fill, count: bytes)]
         self.strings = strings
         changeCount += 1
     }
@@ -91,6 +91,12 @@ private enum PhotoFixture {
     }
 }
 
+/// B6 — 상태 어디에도 사진 바이트(`Data`)가 없는가. 구조를 끝까지 훑는다 — 나중에 필드가 생겨도 잡힌다.
+private func containsBytes(_ value: Any) -> Bool {
+    if value is Data { return true }
+    return Mirror(reflecting: value).children.contains { containsBytes($0.value) }
+}
+
 /// 조립 지점(`KeyboardViewController`)과 같은 순서 — 등장 프로브 → 칩 → 탭 / ✕ / 설정 재로드
 @MainActor
 private final class PhotoHarness {
@@ -137,7 +143,7 @@ struct CopiedPhotoProbeTests {
         #expect(chip.title == "사진 복사")
         #expect(harness.pasteboard.dataReads == 1)
         #expect(harness.decoder.calls == ["size", "thumbnail"], "★ 화소 수를 본 뒤에만 디코드한다(B2)")
-        #expect(!harness.helper.holdsOriginal, "프로브는 원본 바이트를 버리고 썸네일만 든다(B5)")
+        #expect(!containsBytes(harness.helper), "프로브는 원본 바이트를 버리고 썸네일만 든다(B5·B6)")
         #expect(harness.pasteboard.writes.isEmpty, "★ 프로브는 쓰지 않는다 — 쓰기는 탭의 직접 결과로만")
     }
 
@@ -157,9 +163,9 @@ struct CopiedPhotoProbeTests {
         #expect(harness.appear() == .none)
         #expect(harness.chip() == nil)
         #expect(harness.decoder.calls == ["size"], "썸네일(디코드)을 부르지 않았다")
-        let reads = harness.pasteboard.dataReads
+        let touches = harness.pasteboard.touches
         harness.appear()
-        #expect(harness.pasteboard.dataReads == reads, "거절한 클립보드는 등장마다 다시 읽지 않는다")
+        #expect(harness.pasteboard.touches == touches, "거절한 클립보드는 등장마다 다시 보지 않는다 — hasImages·types도 0회(M13)")
         #expect(harness.chip() == nil)
     }
 
@@ -190,9 +196,9 @@ struct CopiedPhotoProbeTests {
         harness.decoder.failsThumbnail = true
         harness.pasteboard.copy()
         #expect(harness.appear() == .none)
-        let reads = harness.pasteboard.dataReads
+        let touches = harness.pasteboard.touches
         harness.appear()
-        #expect(harness.pasteboard.dataReads == reads)
+        #expect(harness.pasteboard.touches == touches, "hasImages·types·바이트 모두 다시 보지 않는다(M13)")
     }
 
     @Test("같은 클립보드로 다시 등장하면 다시 읽지 않고 같은 칩")
@@ -201,7 +207,9 @@ struct CopiedPhotoProbeTests {
         harness.pasteboard.copy()
         harness.appear()
         let first = try #require(harness.chip())
+        let touches = harness.pasteboard.touches
         #expect(harness.appear() == .chip)
+        #expect(harness.pasteboard.touches == touches, "이미 읽은 클립보드 — hasImages·types도 다시 보지 않는다(M13)")
         #expect(harness.chip() == first)
         #expect(harness.pasteboard.dataReads == 1, "바이트는 다시 읽지 않는다")
         #expect(harness.decoder.calls == ["size", "thumbnail"])
@@ -213,7 +221,7 @@ struct CopiedPhotoProbeTests {
         harness.pasteboard.copy(strings: true)
         #expect(harness.appear(textChip: true) == .none)
         #expect(harness.chip() == nil)
-        #expect(harness.pasteboard.dataReads == 0)
+        #expect(harness.pasteboard.touches == 0, "hasImages·types·바이트 모두 0회(M13)")
     }
 
     @Test("클립보드가 비어 보이면(내용 도착 전) 재시도, 텍스트만 있으면 재시도하지 않는다")
@@ -235,9 +243,9 @@ struct CopiedPhotoProbeTests {
         harness.appear()
         harness.dismiss()
         #expect(harness.chip() == nil)
-        let reads = harness.pasteboard.dataReads
+        let touches = harness.pasteboard.touches
         #expect(harness.appear() == .none)
-        #expect(harness.pasteboard.dataReads == reads)
+        #expect(harness.pasteboard.touches == touches, "소비한 클립보드 — hasImages·types도 0회(M13)")
         harness.pasteboard.copy()
         #expect(harness.appear() == .chip)
     }
@@ -293,27 +301,35 @@ struct CopiedPhotoGateTests {
         #expect(harness.appear() == .chip)
     }
 
-    @Test("★ 탭해서 원본을 들고 있다가 스위치를 끄면(다음 설정 재로드) 원본 사본이 비워진다 (수용 기준 6)")
-    func disablingClearsCache() {
+    @Test("★ 스위치를 끄면(다음 설정 재로드) 미리보기·「복사됨」 상태를 비운다 — 다시 켜면 처음부터 읽는다 (수용 기준 6·B6)")
+    func disablingClearsState() throws {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
         harness.appear()
         harness.tap()
-        #expect(harness.helper.holdsOriginal)
         harness.helper.apply(enabled: false, hasFullAccess: true)   // 설정 재로드
-        #expect(!harness.helper.holdsOriginal)
         #expect(harness.chip() == nil)
+        let reads = harness.pasteboard.dataReads
+        #expect(harness.appear() == .chip)
+        #expect(harness.pasteboard.dataReads == reads + 1, "기억이 비었다 — 자체 쓰기 표식도 없어 처음부터 읽는다")
+        #expect(try #require(harness.chip()).stage == .copyable)
     }
 
-    @Test("전체 접근이 사라진 등장에서도 원본 사본을 비운다")
-    func losingFullAccessClearsCache() {
+    @Test("전체 접근이 사라진 등장에서도 상태를 비운다 — 그 등장은 클립보드를 건드리지 않는다")
+    func losingFullAccessClearsState() {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
         harness.appear()
         harness.tap()
         harness.hasFullAccess = false
+        let touches = harness.pasteboard.touches
         harness.appear()
-        #expect(!harness.helper.holdsOriginal)
+        #expect(harness.pasteboard.touches == touches)
+        #expect(harness.chip() == nil)
+        harness.hasFullAccess = true
+        let reads = harness.pasteboard.dataReads
+        harness.appear()
+        #expect(harness.pasteboard.dataReads == reads + 1, "기억이 비었다")
     }
 }
 
@@ -365,15 +381,15 @@ struct CopiedPhotoWriteTests {
         harness.pasteboard.copy()
         harness.appear()
         harness.tap()
-        let reads = harness.pasteboard.dataReads
+        let touches = harness.pasteboard.touches
         let calls = harness.decoder.calls
         #expect(harness.appear() == .chip)
         #expect(try #require(harness.chip()).stage == .copied)
-        #expect(harness.pasteboard.dataReads == reads)
+        #expect(harness.pasteboard.touches == touches, "우리가 쓴 클립보드 — hasImages·types·바이트 0회(M13)")
         #expect(harness.decoder.calls == calls)
     }
 
-    @Test("★ 120초가 지나면 칩이 사라지고 원본 사본도 버린다 — 오래된 원본을 되쓰지 않는다 (수용 기준 4)")
+    @Test("★ 120초가 지나면 칩이 사라진다 — 지난 사진을 되쓰지 않는다 (수용 기준 4)")
     func expiresAfter120s() {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
@@ -383,12 +399,11 @@ struct CopiedPhotoWriteTests {
         #expect(harness.chip()?.stage == .copied)
         harness.now = PhotoFixture.t0.addingTimeInterval(120)
         #expect(harness.chip() == nil)
-        #expect(!harness.helper.holdsOriginal)
         #expect(!harness.tap())
         #expect(harness.pasteboard.writes.count == 1)
     }
 
-    @Test("★ 다른 것을 복사하면 이전 원본을 버리고(대체 만료) 새 사진은 「사진 복사」부터 (수용 기준 4)")
+    @Test("★ 다른 것을 복사하면 「복사됨」을 버리고 새 사진은 「사진 복사」부터 (수용 기준 4)")
     func newCopyReplaces() throws {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
@@ -396,19 +411,19 @@ struct CopiedPhotoWriteTests {
         harness.tap()
         harness.pasteboard.copy(image: "public.png")
         #expect(harness.appear() == .chip)
-        #expect(!harness.helper.holdsOriginal, "버림이 먼저다(2-2 ① 교체 겹침 제거)")
         #expect(try #require(harness.chip()).stage == .copyable)
         harness.pasteboard.copyText()
         #expect(harness.appear() == .none)
         #expect(harness.chip() == nil)
     }
 
-    @Test("「복사됨」 칩을 다시 탭 — 들고 있던 원본으로 다시 쓰고 만료를 갱신한다(역시 localOnly)")
+    @Test("「복사됨」 칩을 다시 탭 — 클립보드의 **우리가 쓴 그 항목**을 다시 읽어 쓰고 만료를 갱신한다(역시 localOnly, B6)")
     func retapRefreshesExpiry() throws {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
         harness.appear()
         harness.tap()
+        let first = try #require(harness.pasteboard.writes.first)
         let reads = harness.pasteboard.dataReads
         harness.now = PhotoFixture.t0.addingTimeInterval(60)
         #expect(harness.tap())
@@ -416,7 +431,8 @@ struct CopiedPhotoWriteTests {
         #expect(harness.pasteboard.writes.count == 2)
         #expect(second.localOnly == true)
         #expect(second.expirationDate == PhotoFixture.t0.addingTimeInterval(180))
-        #expect(harness.pasteboard.dataReads == reads, "클립보드를 다시 읽지 않고 들고 있던 원본을 쓴다")
+        #expect(harness.pasteboard.dataReads == reads + 1, "들고 있던 사본이 없다 — 클립보드에서 다시 읽는다(B6)")
+        #expect(second.data == first.data && second.type == first.type, "우리가 쓴 그 사진 그대로")
         harness.now = PhotoFixture.t0.addingTimeInterval(170)
         #expect(harness.chip()?.stage == .copied, "만료가 갱신됐다")
     }
@@ -441,18 +457,61 @@ struct CopiedPhotoWriteTests {
         harness.pasteboard.copyText()
         #expect(!harness.tap())
         #expect(harness.pasteboard.writes.count == 1)
-        #expect(!harness.helper.holdsOriginal)
+        #expect(harness.chip() == nil)
     }
 
-    @Test("✕ — 「복사됨」 칩을 물리면 원본 사본도 비우고 그 클립보드를 소비한다")
-    func dismissCopiedClearsCache() {
+    @Test("★ 같은 형식의 **다른 사진**으로 바뀐 뒤 「사진 복사」 탭 — 쓰지 않는다(새 사진에 120초 만료를 붙이지 않는다, M18)")
+    func sameTypeDifferentPhotoTapDoesNotWrite() {
+        let harness = PhotoHarness()
+        harness.pasteboard.copy(image: "public.jpeg", fill: 1)
+        harness.appear()
+        harness.pasteboard.copy(image: "public.jpeg", fill: 2)   // 키보드가 떠 있는 동안 다른 사진을 복사
+        let reads = harness.pasteboard.dataReads
+        #expect(!harness.tap())
+        #expect(harness.pasteboard.writes.isEmpty)
+        #expect(harness.pasteboard.dataReads == reads, "바뀐 것을 보면 읽지도 않는다")
+        #expect(harness.chip() == nil)
+    }
+
+    @Test("★ 「복사됨」 뒤 같은 형식의 다른 사진으로 바뀌면 다시 탭해도 쓰지 않는다 (M18·B6)")
+    func sameTypeDifferentPhotoRetapDoesNotWrite() {
+        let harness = PhotoHarness()
+        harness.pasteboard.copy(image: "public.jpeg", fill: 1)
+        harness.appear()
+        harness.tap()
+        harness.pasteboard.copy(image: "public.jpeg", fill: 2)
+        let reads = harness.pasteboard.dataReads
+        #expect(!harness.tap())
+        #expect(harness.pasteboard.writes.count == 1)
+        #expect(harness.pasteboard.dataReads == reads)
+        #expect(harness.chip() == nil)
+    }
+
+    @Test("★ 어느 단계에서도 사진 바이트를 들고 있지 않다 — 프로브·탭·재탭·재등장 (B6)")
+    func neverHoldsBytes() {
+        struct Probe { let inner: Data? }
+        #expect(containsBytes(Probe(inner: Data([1]))), "찾는 함수 자체가 Data를 찾는다")
+        let harness = PhotoHarness()
+        harness.pasteboard.copy()
+        harness.appear()
+        #expect(!containsBytes(harness.helper))
+        harness.tap()
+        #expect(!containsBytes(harness.helper))
+        harness.now = PhotoFixture.t0.addingTimeInterval(30)
+        harness.tap()
+        #expect(!containsBytes(harness.helper))
+        harness.appear()
+        #expect(!containsBytes(harness.helper))
+    }
+
+    @Test("✕ — 「복사됨」 칩을 물리면 그 클립보드를 소비한다")
+    func dismissCopiedConsumes() {
         let harness = PhotoHarness()
         harness.pasteboard.copy()
         harness.appear()
         harness.tap()
         harness.dismiss()
         #expect(harness.chip() == nil)
-        #expect(!harness.helper.holdsOriginal)
         #expect(harness.consumed == harness.pasteboard.changeCount)
         #expect(harness.appear() == .none)
     }

@@ -15,7 +15,7 @@ import UniformTypeIdentifiers
 //
 // 1. 쓰기는 `CopiedPhotoWrite`로만 나간다 — 이 값은 **이 모듈만** 만들고 `localOnly == true`와 만료 시각이 항상 든다.
 //    조립 지점은 `setItems(_:options:)`의 `.localOnly`·`.expirationDate`에 그대로 넣는다(`setData`를 쓰지 않는다)
-// 2. 만료는 상수 하나(`expirationInterval`, 120초) — 클립보드 쪽과 원본 사본 쪽이 **같은 값**을 쓴다(5-2 ①)
+// 2. 만료는 상수 하나(`expirationInterval`, 120초) — 「복사됨」 칩도 같은 시각에 사라진다
 // 3. `write`를 부르는 곳은 `tap` **하나뿐**이다 — 프로브·재등장·만료·✕·끄기는 쓰지 않는다
 // 4. 화소 수(64MP)·바이트(8MB)를 **디코드 전에** 본다 — 넘으면 디코드하지 않고 칩도 없다(B2·B3)
 //
@@ -153,22 +153,26 @@ public enum CopiedPhotoGate {
     }
 }
 
-/// 사진 도우미의 상태 — 조립 지점이 **프로세스 수명**(`static`)으로 둔다(PDR 5-2, 키보드 VC는 등장마다 새로 만들어진다).
+/// 사진 도우미의 상태 — 조립 지점이 **프로세스 수명**(`static`)으로 둔다(키보드 VC는 등장마다 새로 만들어진다).
 ///
-/// | 상태 | 든 것 | 칩 |
+/// ★ **사진 바이트를 들고 있지 않다**(B6, 2026-10-06 — 검증 F2). 원본 사본·이중 만료·8MB 캐시 상한은 없다.
+/// 「복사됨」 칩을 다시 누르면 클립보드에 아직 남은 **우리가 쓴 그 항목**(자체 쓰기 `changeCount`가 같을 때만)을
+/// 다시 읽어 되쓴다 — 그래서 「끄면 사본 삭제」·「120초 뒤 사본 삭제」를 지킬 사본 자체가 없다.
+///
+/// | 단계 | 든 것(메모리) | 칩 |
 /// |---|---|---|
-/// | 미리보기 | changeCount·UTI·썸네일 (**원본 바이트 없음**, B5) | 「사진 복사」 |
-/// | 원본 사본 | 압축 바이트(≤ 8MB)·썸네일·만료 시각·우리가 쓴 changeCount | 「복사됨 · …」 |
+/// | 미리보기 | changeCount·UTI·썸네일(긴 변 96px) — 원본 바이트 없음(B5) | 「사진 복사」 |
+/// | 되씀 | UTI·썸네일·만료 시각·우리가 쓴 changeCount — 원본 바이트 없음(B6) | 「복사됨 · …」 |
 ///
-/// 원본 사본의 이중 만료(5-2): ① 시간 — 되쓰기 만료와 **같은 시각** ② 대체 — 다른 changeCount(진짜 새 복사)를 보면
-/// 읽기 **전에** 먼저 버린다 ③ 끄기 — 스위치·전체 접근이 꺼진 것을 본 그 재로드·등장에서 비운다.
+/// 비우기: 다른 changeCount(진짜 새 복사)를 보면 「되씀」을 버린다 · 만료가 지나면 칩이 없다 ·
+/// 스위치나 전체 접근이 꺼진 것을 본 그 재로드·등장에서 전부 비운다.
 public struct CopiedPhotoHelper {
 
     /// 화소 수 상한 — 실측 최대 8000×8000(B2). 넘으면 디코드하지 않고 칩도 없다(B3)
     public static let maxPixelCount = 64_000_000
-    /// 바이트 상한 — 원본 사본 상한과 같다(5절). 넘으면 칩 없음(2-5 「둘 다 집행」)
+    /// 읽기 바이트 상한 — 넘으면 디코드하지 않고 칩도 없다(2-5 「화소 수와 둘 다 집행」)
     public static let maxByteCount = 8 * 1024 * 1024
-    /// 되쓰기 만료이자 원본 사본 만료 — 상수 하나(3-4·5-2 ①, 보안 규칙 예외 조건 2)
+    /// 되쓰기 만료 — 상수 하나(3-4, 보안 규칙 예외 조건 2). 「복사됨」 칩도 이 시각에 사라진다
     public static let expirationInterval: TimeInterval = 120
     /// 칩 썸네일 긴 변(px) — 칩 그림 24pt × 3배 + 여유
     public static let thumbnailMaxPixelSize = 96
@@ -188,25 +192,23 @@ public struct CopiedPhotoHelper {
         let thumbnail: CopiedPhotoThumbnail
     }
 
-    private struct Original {
-        let data: Data
+    /// 되쓴 뒤의 표식 — **바이트가 없다**(B6)
+    private struct Written {
         let type: String
         let thumbnail: CopiedPhotoThumbnail
         var expiresAt: Date
-        /// 우리가 되쓴 직후의 changeCount — 다음 프로브가 이 값을 보면 「새 복사」가 아니다(6-2)
-        var writtenChangeCount: Int
+        /// 우리가 되쓴 직후의 changeCount — 다음 프로브가 이 값을 보면 「새 복사」가 아니다(6-2).
+        /// 재탭은 클립보드가 **이 값 그대로일 때만** 그 항목을 다시 읽어 쓴다
+        var changeCount: Int
     }
 
     private var preview: Preview?
-    private var original: Original?
+    private var written: Written?
     /// 상한 초과·디코드 실패로 거절한 클립보드 — 같은 클립보드는 다시 읽지 않는다
     private var rejectedChangeCount: Int?
     private var stage: CopiedPhotoChip.Stage?
 
     public init() {}
-
-    /// 원본 압축 바이트를 들고 있는가(시험·진단용 — 내용은 내보내지 않는다)
-    public var holdsOriginal: Bool { original != nil }
 
     /// 첫 「이미지」 UTI — 실기 세션 2가 잰 규칙 그대로(사진 앱 복사는 HEIC도 JPEG가 첫 표현이었다)
     public static func firstImageType(in types: [String]) -> String? {
@@ -227,13 +229,13 @@ public struct CopiedPhotoHelper {
         apply(enabled: enabled, hasFullAccess: hasFullAccess)
         guard CopiedPhotoGate.allowsReading(
             enabled: enabled, hasFullAccess: hasFullAccess, isSecureTextEntry: isSecureTextEntry) else { return .none }
-        expireOriginal(now: now)
+        expireWritten(now: now)
         let changeCount = pasteboard.changeCount
-        if let original, original.writtenChangeCount == changeCount {
+        if let written, written.changeCount == changeCount {
             stage = .copied                      // 우리가 쓴 것 — 새 복사로 오인하지 않는다(6-2)
             return .chip
         }
-        original = nil                           // 대체 만료 — 읽기보다 먼저 버린다(2-2 ①)
+        written = nil                            // 다른 클립보드 — 「복사됨」은 끝났다
         if changeCount == consumedChangeCount {
             preview = nil
             return .none
@@ -260,86 +262,85 @@ public struct CopiedPhotoHelper {
         return .chip
     }
 
-    /// 지금 칩 — 「복사됨」이 만료됐으면 원본 사본을 버리고 칩도 없다(오래된 원본을 되쓰지 않는다).
+    /// 지금 칩 — 「복사됨」이 만료됐으면 칩이 없다(지난 사진을 되쓰지 않는다).
     public mutating func visibleChip(now: Date) -> CopiedPhotoChip? {
-        expireOriginal(now: now)
+        expireWritten(now: now)
         switch stage {
         case .copyable: return preview.map { CopiedPhotoChip(stage: .copyable, thumbnail: $0.thumbnail) }
-        case .copied: return original.map { CopiedPhotoChip(stage: .copied, thumbnail: $0.thumbnail) }
+        case .copied: return written.map { CopiedPhotoChip(stage: .copied, thumbnail: $0.thumbnail) }
         case nil: return nil
         }
     }
 
     /// 칩 탭 — **유일한 쓰기 지점**(보안 규칙 예외 조건 3). 썼으면 참.
     ///
-    /// 「사진 복사」: 프로브 뒤 클립보드가 그대로일 때만 바이트를 다시 읽고 상한을 다시 본 뒤 되쓴다.
-    /// 「복사됨」: 클립보드가 우리가 쓴 그대로이고 만료 전일 때만 들고 있던 원본으로 다시 쓴다(만료 갱신).
+    /// 클립보드가 **그 칩이 가리키는 항목 그대로**일 때만 바이트를 읽고 상한을 다시 본 뒤 되쓴다 —
+    /// 「사진 복사」는 프로브가 본 changeCount, 「복사됨」은 우리가 쓴 changeCount(B6 — 들고 있는 사본이 없다).
+    /// 그 사이 다른 것(같은 형식의 다른 사진 포함)을 복사했으면 **읽지도 쓰지도 않고** 칩을 거둔다 —
+    /// 사용자가 방금 복사한 것에 120초 만료를 붙이지 않는다.
     @MainActor
     public mutating func tap(pasteboard: any CopiedPhotoPasteboard, decoder: any CopiedPhotoDecoder, now: Date) -> Bool {
-        expireOriginal(now: now)
+        expireWritten(now: now)
+        let target: (changeCount: Int, type: String, thumbnail: CopiedPhotoThumbnail)
         switch stage {
         case .copyable:
-            guard let preview, pasteboard.changeCount == preview.changeCount else { return abandon() }
-            original = nil                       // 버림이 먼저다(2-2 ①)
-            guard let data = pasteboard.data(forType: preview.type),
-                  Self.withinLimits(data, decoder: decoder) else {
-                rejectedChangeCount = preview.changeCount
-                return abandon()
-            }
-            let write = CopiedPhotoWrite(type: preview.type, data: data, now: now)
-            pasteboard.write(write)
-            original = Original(
-                data: data, type: preview.type, thumbnail: preview.thumbnail,
-                expiresAt: write.expirationDate, writtenChangeCount: pasteboard.changeCount)
-            self.preview = nil
-            stage = .copied
-            return true
+            guard let preview else { return abandon() }
+            target = (preview.changeCount, preview.type, preview.thumbnail)
         case .copied:
-            guard var original, pasteboard.changeCount == original.writtenChangeCount else { return abandon() }
-            let write = CopiedPhotoWrite(type: original.type, data: original.data, now: now)
-            pasteboard.write(write)
-            original.expiresAt = write.expirationDate
-            original.writtenChangeCount = pasteboard.changeCount
-            self.original = original
-            return true
+            guard let written else { return abandon() }
+            target = (written.changeCount, written.type, written.thumbnail)
         case nil:
             return false
         }
+        guard pasteboard.changeCount == target.changeCount else { return abandon() }
+        guard let data = pasteboard.data(forType: target.type), Self.withinLimits(data, decoder: decoder) else {
+            rejectedChangeCount = target.changeCount
+            return abandon()
+        }
+        let write = CopiedPhotoWrite(type: target.type, data: data, now: now)
+        pasteboard.write(write)
+        // 바이트(`data`)는 여기서 버려진다 — 남기는 것은 표식뿐이다(B6)
+        written = Written(
+            type: target.type, thumbnail: target.thumbnail,
+            expiresAt: write.expirationDate, changeCount: pasteboard.changeCount)
+        preview = nil
+        stage = .copied
+        return true
     }
 
-    /// ✕ — 칩을 물리고 원본 사본도 비운다. 소비할 changeCount를 돌려준다(조립 지점의 `consumedPasteboardChangeCount`).
+    /// ✕ — 칩을 물린다. 소비할 changeCount를 돌려준다(조립 지점의 `consumedPasteboardChangeCount`).
     public mutating func dismiss() -> Int? {
         let consumed: Int? = switch stage {
         case .copyable: preview?.changeCount
-        case .copied: original?.writtenChangeCount
+        case .copied: written?.changeCount
         case nil: nil
         }
         preview = nil
-        original = nil
+        written = nil
         stage = nil
         return consumed
     }
 
-    /// 설정 재로드·등장 — 스위치나 전체 접근이 꺼져 있으면 전부 비운다(5-2 ③ OFF 만료).
+    /// 설정 재로드·등장 — 스위치나 전체 접근이 꺼져 있으면 미리보기·표식을 전부 비운다(사진 바이트는 원래 없다, B6).
     public mutating func apply(enabled: Bool, hasFullAccess: Bool) {
         guard !enabled || !hasFullAccess else { return }
         preview = nil
-        original = nil
+        written = nil
         rejectedChangeCount = nil
         stage = nil
     }
 
     // MARK: - 내부
 
-    private mutating func expireOriginal(now: Date) {
-        guard let original, now >= original.expiresAt else { return }
-        self.original = nil
+    private mutating func expireWritten(now: Date) {
+        guard let written, now >= written.expiresAt else { return }
+        self.written = nil
         if stage == .copied { stage = nil }
     }
 
     private mutating func abandon() -> Bool {
         preview = nil
-        original = nil
+        written = nil
         stage = nil
         return false
     }
