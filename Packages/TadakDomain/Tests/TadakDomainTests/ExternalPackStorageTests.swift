@@ -71,6 +71,32 @@ struct ExternalPackStorageTests {
         #expect(!pack.isWithinStoredLimits)
     }
 
+    // MARK: 9-4 ④⑤ — 키보드가 받는 변환본(로더와 앱 검사가 함께 부르는 판정 하나, 1-c 검증 F-4)
+
+    @Test("★ 받는 변환본 — 디코드 → schema → 팩 id → 필드 상한 순서로 본다(schema가 먼저라 낯선 버전은 다른 사유보다 앞선다)",
+          arguments: 0..<6)
+    func loadableStoredPack(_ index: Int) throws {
+        let good = StoredExternalPack(packID: "p1", source: .csv, pack: Self.phrases)
+        var stored = good
+        var data: Data?
+        let expected: StoredExternalPack.LoadFailure?
+        switch index {
+        case 0: expected = nil
+        case 1: data = Data("{ 깨짐".utf8); expected = .undecodable
+        case 2: stored.schema = 2; expected = .unknownSchema
+        case 3: stored.packID = "p2"; expected = .packIDMismatch
+        case 4: stored.pack.name = String(repeating: "가", count: 41); expected = .outOfLimits
+        default: stored.schema = 2; stored.packID = "p2"; expected = .unknownSchema
+        }
+        switch StoredExternalPack.loadable(from: try data ?? JSONEncoder().encode(stored), packID: "p1") {
+        case .success(let loaded):
+            #expect(expected == nil)
+            #expect(loaded == good)
+        case .failure(let failure):
+            #expect(failure == expected)
+        }
+    }
+
     // MARK: AC-9 — 재구성 키
 
     @Test("★ 테마·진동·슬라이더 같은 무관한 설정은 재구성 키를 바꾸지 않는다 (AC-9)")

@@ -65,6 +65,30 @@ public struct StoredExternalPack: Codable, Equatable, Sendable {
         self.pack = pack
         self.stats = PackStats.of(pack: pack)
     }
+
+    /// 키보드가 받지 않는 변환본의 사유(9-4 ④⑤). 키보드 로더는 `unknownSchema`만 따로 알리고 나머지는 「잘못된 팩」으로 묶는다
+    public enum LoadFailure: Error, Equatable, Sendable {
+        /// JSON이 아니거나 모양이 다르다
+        case undecodable
+        /// 이 앱이 모르는 변환본 schema
+        case unknownSchema
+        /// 다른 팩의 변환본이 이 자리에 있다
+        case packIDMismatch
+        /// 필드 상한·모드 모양 위반(`ExternalPack.isWithinStoredLimits`)
+        case outOfLimits
+    }
+
+    /// 키보드가 받는 변환본인가 — **키보드 로더(`PackSnapshotLoader` ④⑤)와 앱의 내용 검사·복구(`PackStore`, 1-c G6·R24)가 함께 부르는
+    /// 하나**(1-c 검증 F-4). 앱이 「받음」으로 본 팩을 키보드가 버리면 외부 팩 전부가 빠지므로(AC-8) 조건을 두 벌로 두지 않는다.
+    /// 디코드 → schema → 팩 id → 필드 상한 순서로 본다 — schema가 먼저라 낯선 버전은 다른 사유보다 앞선다(로더의 사유 구분 그대로).
+    /// `stats`는 보지 않는다(믿지 않는 값 — 쓰는 쪽이 다시 센다, 9-4)
+    public static func loadable(from data: Data, packID: String) -> Result<StoredExternalPack, LoadFailure> {
+        guard let stored = try? JSONDecoder().decode(StoredExternalPack.self, from: data) else { return .failure(.undecodable) }
+        guard stored.schema == schemaVersion else { return .failure(.unknownSchema) }
+        guard stored.packID == packID else { return .failure(.packIDMismatch) }
+        guard stored.pack.isWithinStoredLimits else { return .failure(.outOfLimits) }
+        return .success(stored)
+    }
 }
 
 /// 공유 snapshot `g<N>`의 목차(8절). 앱이 팩 파일을 다 쓴 **뒤** 마지막에 쓰고, 그다음 `packsGeneration = N`을 올린다.

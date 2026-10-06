@@ -188,7 +188,8 @@ private struct Harness {
     /// 앱을 거치지 않고 snapshot을 직접 만든다(옛 저장본·손상 흉내). bytes를 덮어쓰면 manifest가 거짓말을 한다
     func craft(generation: Int, order: [SnippetSourceSlot]? = nil, packs: [(String, ExternalPack)],
                lieBytes: [String: Int] = [:], packSchema: Int = StoredExternalPack.schemaVersion,
-               manifestSchema: Int = PackSnapshotManifest.schemaVersion, lieStoredStats: Set<String> = []) throws {
+               manifestSchema: Int = PackSnapshotManifest.schemaVersion, lieStoredStats: Set<String> = [],
+               foreignPackIDs: Set<String> = []) throws {
         let directory = sandbox.snapshot.appendingPathComponent("g\(generation)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var items: [PackSnapshotManifest.Item] = []
@@ -196,6 +197,7 @@ private struct Harness {
             var stored = StoredExternalPack(packID: id, source: .csv, pack: pack)
             stored.schema = packSchema
             if lieStoredStats.contains(id) { stored.stats = .zero }   // 변환본이 stats를 속인다(F5 ②)
+            if foreignPackIDs.contains(id) { stored.packID = "다른팩" }   // 다른 팩의 변환본이 이 자리에(검증 V10)
             let data = try JSONEncoder().encode(stored)
             try data.write(to: directory.appendingPathComponent("\(id).json"))
             items.append(.init(id: id, file: "\(id).json", bytes: lieBytes[id] ?? data.count, stats: .zero))
@@ -713,7 +715,8 @@ struct PackSnapshotLoaderTests {
         #expect(loaded.excluded.map(\.id) == expected.excluded.map(\.id))
     }
 
-    @Test("★ AC-8 — 손상·낯선 schema·크기 불일치·필드 상한 위반 → 외부 팩 전부 제외, 내 채움글·내장은 싣는다", arguments: 0..<6)
+    @Test("★ AC-8 — 손상·낯선 schema·크기 불일치·필드 상한 위반·다른 팩 id → 외부 팩 전부 제외, 내 채움글·내장은 싣는다",
+          arguments: 0..<7)
     func corruptionDropsAllExternal(_ index: Int) throws {
         let h = Harness(user: [entry("내문구")], builtIn: [entry("내장")])
         defer { h.sandbox.cleanup() }
@@ -737,6 +740,9 @@ struct PackSnapshotLoaderTests {
             var bad = pack("다", chars: 10)
             bad.name = String(repeating: "이", count: 41)
             try h.craft(generation: 1, packs: [("a", pack("가", chars: 10)), ("bad", bad)])
+            expected = .invalidPack
+        case 5:
+            try h.craft(generation: 1, packs: good, foreignPackIDs: ["b"])
             expected = .invalidPack
         default:
             try h.craft(generation: 1, order: [.userSnippets, .pack("b"), .pack("a")], packs: good)   // 순서·목록 어긋남
@@ -1076,6 +1082,18 @@ struct PackStoreClientTests {
         #expect(await client.saveUserSnippet(entry("문구"), editing: nil).isAccepted, "쓰기도 같은 길")
     }
 
+    @MainActor
+    @Test("★ F-5 — 채움글 화면의 내 채움글 목록도 래퍼로 메인 밖에서 읽는다 — 정리 모델의 화면 목록(정규화 단축어 중복 제거) 그대로")
+    func userSnippetListOffMain() async {
+        let stored = [entry("우리집주소"), entry("우리집 주소", body: "옛 중복"), entry("회사")]
+        let h = Harness(user: stored)
+        defer { h.sandbox.cleanup() }
+        let list = await PackStoreClient(store: h.store).userSnippetBudget().entries
+        #expect(list == UserSnippetBudget.displayEntries(stored))
+        #expect(list.map(\.title) == ["우리집주소", "회사"])
+        #expect(!h.workedOnMain.isRaised, "저장분 디코드와 판정이 같은 메인 밖 작업 안에서 돈다")
+    }
+
     @Test("★ AC-4·G2 — 받았지만 팩이 쉬게 되면 이름 있는 알림(G1)")
     func restedPackIsNamed() async throws {
         let h = Harness(user: [entry(String(repeating: "가", count: 100))])
@@ -1333,6 +1351,49 @@ struct LibraryRecoveryTests {
         #expect(backupName == "library.damaged-20261006T074222Z-2.json")
         #expect(h.store.summaries().map(\.name) == ["새 이름"])
     }
+
+    @Test("★ F-2 — 복구는 변환본 파일의 stats를 믿지 않고 다시 센다 — 앱 판정 == 키보드(AC-8, 검증 탐침 P2)")
+    func recoveryRecountsStats() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 150), source: .csv))
+        let b = try h.importedID(h.store.importPack(pack("상용 영어", chars: 150), source: .csv, enabled: false))
+        // B 변환본의 stats만 작게 — 내용(키보드가 다시 세는 값)은 그대로(옛 버전의 계산·JSON 모양을 지킨 손상과 같다)
+        let url = h.sandbox.library.appendingPathComponent("packs").appendingPathComponent(try packFileName(h, of: b))
+        var stored = try JSONDecoder().decode(StoredExternalPack.self, from: Data(contentsOf: url))
+        stored.stats.needleChars = 1
+        try JSONEncoder().encode(stored).write(to: url)
+        _ = try damage(h, .corrupt)
+        guard case .recovered(2, 0, _) = h.store.recoverLibrary(now: recoveryTime) else {
+            Issue.record("복구돼야 한다"); return
+        }
+        #expect(h.store.setPackEnabled(a, enabled: true).isAccepted)
+        #expect(!h.store.setPackEnabled(b, enabled: true).isAccepted, "다시 세면 150 + 150 > 200 — 켤 수 없다")
+        #expect(h.load().includedPackIDs == [a])
+        #expect(h.load().includedPackIDs == h.store.evaluation().included, "AC-8 — 앱 판정 == 키보드")
+    }
+
+    @Test("★ F-6 — 복구 뒤 revision은 남은 변환본의 가장 큰 r 위로 잇는다 — 정리 전에 남은 옛 변환본이 다음 복구에서 「최신」으로 뽑히지 않게")
+    func recoveryContinuesRevision() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let packs = h.sandbox.library.appendingPathComponent("packs")
+        let a = try h.importedID(h.store.importPack(pack("옛 이름", chars: 10), source: .csv))                 // r1
+        for index in 0..<4 { #expect(h.store.saveUserSnippet(entry("문구\(index)"), editing: nil).isAccepted) }  // r2~r5
+        #expect(h.store.replacePack(a, with: pack("중간 이름", chars: 10), source: .csv).isAccepted)             // r6
+        let middle = try packFileName(h, of: a)
+        let middleData = try Data(contentsOf: packs.appendingPathComponent(middle))
+        _ = try damage(h, .corrupt)
+        guard case .recovered = h.store.recoverLibrary(now: recoveryTime) else { Issue.record("복구돼야 한다"); return }
+        #expect(h.store.revision > PackStore.packFileIdentity(middle).revision, "남은 변환본 번호 위로 — 1부터 다시 시작하지 않는다")
+
+        // 복구 뒤 교체 — 정리(옛 파일 지우기) 전에 앱이 죽어 옛 변환본이 남은 것처럼 되살리고, 목록이 또 망가진다
+        #expect(h.store.replacePack(a, with: pack("새 이름", chars: 10), source: .csv).isAccepted)
+        try middleData.write(to: packs.appendingPathComponent(middle))
+        _ = try damage(h, .corrupt)
+        guard case .recovered(1, 0, _) = h.store.recoverLibrary(now: recoveryTime) else { Issue.record("복구돼야 한다"); return }
+        #expect(h.store.summaries().map(\.name) == ["새 이름"], "복구 뒤 쓴 변환본이 옛 것보다 번호가 커야 한다")
+    }
 }
 
 // MARK: - 1-c 2단계 — 앱 실행 검사 (G6 · G9)
@@ -1406,6 +1467,50 @@ struct PackContentCheckTests {
         #expect(reopened.summaries().first?.status == .on)
     }
 
+    @Test("★ F-1 — snapshot 다시 쓰기가 한 번 실패해도 다음 실행이 다시 쓴다(판정 ≠ 지금 snapshot이면 쓴다 — 검증 탐침 P1)")
+    func republishRetriesAfterFailedWrite() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        let b = try h.importedID(h.store.importPack(pack("상용 영어", chars: 10), source: .csv))
+        try overwritePackFile(h, of: a, with: BrokenContent.garbage.data(id: a))
+        #expect(h.store.saveUserSnippet(entry("문구"), editing: nil).isAccepted)
+        #expect(h.load().dropped != nil, "준비 — 깨진 변환본이 snapshot에 실려 키보드가 외부 팩 전부를 버린다")
+
+        // 검사는 했는데 snapshot을 못 쓴다(저장 공간 부족·쓰는 사이 앱 종료와 같다) — 검사 결과는 이미 파일에 남았다
+        let packsGeneration = h.generations.packsGeneration
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: h.sandbox.snapshot.path)
+        h.store.maintain()
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: h.sandbox.snapshot.path)
+        #expect(h.generations.packsGeneration == packsGeneration, "쓰지 못했다")
+        #expect(h.load().dropped != nil)
+
+        // 다음 실행 — 「검사 전 == 검사 후」(이미 A를 뺀 판정)여도 지금 snapshot이 판정과 다르므로 다시 쓴다
+        h.reopenedStore().maintain()
+        #expect(h.generations.packsGeneration == packsGeneration + 1)
+        let loaded = h.load()
+        #expect(loaded.dropped == nil)
+        #expect(loaded.includedPackIDs == [b])
+        #expect(loaded.includedPackIDs == h.store.evaluation().included, "AC-8 — 앱 판정 == 키보드")
+    }
+
+    @Test("★ (e) — 검사 결과는 파일 이름 + 크기로 맞춘다: 검사 뒤 같은 이름의 파일이 바뀌면(크기 다름) 다음 실행이 다시 검사한다")
+    func recheckWhenFileChangesInPlace() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        let b = try h.importedID(h.store.importPack(pack("상용 영어", chars: 10), source: .csv))
+        h.store.maintain()   // 둘 다 멀쩡 — 「받음」 결과가 남는다
+        #expect(h.store.summaries().map(\.status) == [.on, .on])
+        // 같은 이름 그대로 내용이 바뀐다(디스크 손상·잘림과 같다) — 이름만 보면 옛 「받음」을 그대로 믿는다
+        try overwritePackFile(h, of: a, with: BrokenContent.garbage.data(id: a))
+        let reopened = h.reopenedStore()
+        reopened.maintain()
+        #expect(reopened.summaries().map(\.status) == [.unavailable, .on])
+        #expect(h.load().includedPackIDs == [b])
+        #expect(h.load().includedPackIDs == reopened.evaluation().included, "AC-8")
+    }
+
     @Test("멀쩡한 팩만 있으면 검사가 snapshot을 다시 쓰지 않는다 · 꺼진 팩이 깨져도 포함 목록이 같으면 다시 쓰지 않는다")
     func noRepublishWhenNothingChanges() throws {
         let h = Harness()
@@ -1470,6 +1575,7 @@ struct UserSnippetBudgetTests {
         let user = (0..<6).map { entry(String(repeating: "라", count: 9) + String(UnicodeScalar(0xAC00 + $0)!)) }   // 60자
         let h = Harness(user: user, builtIn: [entry(String(repeating: "애", count: 150))])
         defer { h.sandbox.cleanup() }
+        #expect(h.store.userSnippetBudget().isOverLimit, "내 채움글만으로는 60자지만 켜진 내장 몫까지 넘는다 — 배너 ㉠ 대상(V12)")
         #expect(h.store.userSnippetBudget().loadableCount == 5)
         #expect(h.store.userSnippetBudget().loadableCount == h.load().userEntries.count)
         h.disabled.current = ["anthem"]

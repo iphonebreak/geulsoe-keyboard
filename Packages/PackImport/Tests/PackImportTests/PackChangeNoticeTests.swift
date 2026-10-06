@@ -120,7 +120,7 @@ private let table: [NoticeTableRow] = [
         result: rejected(.libraryUnreadable), reason: .libraryUnreadable,
         title: "채움글을 바꿀 수 없어요",
         message: "외부 채움글 목록을 읽을 수 없어서 지금은 채움글을 저장하거나 지울 수 없어요. 가져온 팩 파일은 지우지 않았어요. "
-            + "키보드에서는 지금 쓰던 채움글이 그대로 떠요.",
+            + "키보드에서는 지금 쓰던 채움글이 그대로 떠요. 목록을 복구하면 다시 바꿀 수 있어요.",
         buttons: ["목록 복구", "확인"]),
     NoticeTableRow(id: "E2 읽을 수 없는 팩 켜기", operation: .enablePack,
         result: rejected(.packUnavailable("p1")), reason: .packUnavailable,
@@ -468,7 +468,7 @@ struct PackNoticeCopyStage2Tests {
         #expect(PackNoticeCopy.recoveryTitle == "목록을 복구할까요?")
         #expect(PackNoticeCopy.recoveryMessage(packCount: 3)
                 == "가져온 팩 3개를 찾았어요. 순서와 켬/끔은 알 수 없어서 모두 꺼진 채로 불러와요. 쓸 팩은 직접 켜 주세요. 원래 목록 파일은 따로 보관해요.\n"
-                + "순서가 바뀌어서 같은 틀이나 단축어를 어느 팩이 쓸지 달라질 수 있어요.")
+                + "팩 순서가 예전과 달라질 수 있어서, 같은 틀이나 단축어를 다른 팩이 쓰게 될 수 있어요.")
         #expect(PackNoticeCopy.recoveryConfirm == "복구" && PackNoticeCopy.recoveryCancel == "취소")
         #expect(PackNoticeCopy.recoveredMessage(packCount: 3) == "팩 3개를 불러왔어요. 모두 꺼져 있어요.")
         // 팩 파일이 하나도 없을 때 — 「0개를 찾았어요」로 쓰지 않는다

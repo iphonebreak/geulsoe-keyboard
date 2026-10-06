@@ -182,14 +182,16 @@ public struct PackSnapshotLoader: Sendable {
                 excluded += rest
                 break packLoop
             }
-            // ④⑤ 한 팩씩 읽고 디코드 — 임시 바이트는 이 블록을 나가면 놓는다(다음 팩 전에 해제)
+            // ④⑤ 한 팩씩 읽고 디코드 — 임시 바이트는 이 블록을 나가면 놓는다(다음 팩 전에 해제).
+            //   받는 조건은 앱의 내용 검사와 **같은 함수**(`StoredExternalPack.loadable`, 1-c 검증 F-4) — 여기에 조건을 따로 더하지 않는다
             let decoded: DecodedPack = autoreleasepool {
                 guard let data = reader.read(url) else { return .missing }
                 guard data.count == size else { return .failed(.sizeMismatch) }
-                guard let stored = try? JSONDecoder().decode(StoredExternalPack.self, from: data) else { return .failed(.invalidPack) }
-                guard stored.schema == StoredExternalPack.schemaVersion else { return .failed(.unknownSchema) }
-                guard stored.packID == item.id, stored.pack.isWithinStoredLimits else { return .failed(.invalidPack) }
-                return .pack(stored.pack)
+                switch StoredExternalPack.loadable(from: data, packID: item.id) {
+                case .success(let stored): return .pack(stored.pack)
+                case .failure(.unknownSchema): return .failed(.unknownSchema)
+                case .failure: return .failed(.invalidPack)
+                }
             }
             filesRead += 1
             let pack: ExternalPack

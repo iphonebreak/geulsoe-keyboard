@@ -1,7 +1,6 @@
 import SwiftUI
 import PackImport
 import TadakDomain
-import TadakData
 
 /// 채움글 설정 — 전체 on/off, 내장 팩 on/off, 내 채움글 관리(추가·고치기·삭제).
 ///
@@ -30,9 +29,6 @@ struct SnippetSettingsView: View {
     @State private var unavailablePackNames: [String] = []
     @State private var showsCleanup = false
     @State private var showsRecovery = false
-
-    /// 읽기 전용 — 쓰기는 `PackStoreClient.live`(메인 밖에서 `PackStore.live`)
-    private let repository = AppGroupSnippetRepository()
 
     var body: some View {
         Form {
@@ -118,13 +114,11 @@ struct SnippetSettingsView: View {
         .navigationTitle("채움글")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
-            reloadUserSnippets()
             Task { await reloadSafetyNet() }
         }
         .packChangeNoticeAlert($notice, onAction: perform)
         .navigationDestination(isPresented: $showsCleanup) { SnippetCleanupView() }
         .packLibraryRecovery(isPresented: $showsRecovery) {
-            reloadUserSnippets()
             Task { await reloadSafetyNet() }
         }
         .sheet(isPresented: $showsEditor, onDismiss: showPendingNotice) {
@@ -158,10 +152,15 @@ struct SnippetSettingsView: View {
         }
     }
 
+    /// 화면 상태를 저장본에서 다시 읽는다 — 내 채움글 목록도 여기서(검증 F-5). 목록은 정리 모델의 화면 목록을 그대로 쓴다: 저장분
+    /// UserDefaults 디코드가 **메인 밖** 한 번이고(한도를 넘은 큰 옛 저장분에서 가장 무겁다), 중복 제거 규칙도 정리 화면과 한 곳이다
+    /// (`UserSnippetBudget.displayEntries` — 정규화 단축어가 같은 저장분은 첫 것만. 그래야 ForEach id가 겹치지 않는다)
     private func reloadSafetyNet() async {
         let client = PackStoreClient.live
         libraryStatus = await client.libraryStatus()
-        budget = await client.userSnippetBudget()
+        let fresh = await client.userSnippetBudget()
+        budget = fresh
+        userSnippets = fresh.entries
         unavailablePackNames = await client.summaries().filter { $0.status == .unavailable }.map { $0.name ?? PackNoticeCopy.unnamedPack }
     }
 
@@ -193,8 +192,7 @@ struct SnippetSettingsView: View {
         //   추가는 맨 뒤, 편집은 **제자리**다. 겹쳐 지워진 항목만큼의 인덱스 보정도 거기 있다.
         // ★ 저장은 `PackStore` 한 길 — 한 번에 **한 항목**(1-b 계약). 판정·snapshot·키보드 알림이 그 안에 있다.
         let outcome = await PackStoreClient.live.saveUserSnippet(entry, editing: original)
-        reloadUserSnippets()
-        // 거부면 언제나 알림이 있다(`PackChangeNoticeTableTests`) — 시트가 그것을 띄우고 닫히지 않는다
+        // 거부면 언제나 알림이 있다(`PackChangeNoticeTableTests`) — 시트가 그것을 띄우고 닫히지 않는다. 거부는 저장본을 바꾸지 않아 다시 읽지 않는다
         guard outcome.isAccepted else { return outcome.notice }
         pendingNotice = outcome.notice
         await reloadSafetyNet()
@@ -221,15 +219,8 @@ struct SnippetSettingsView: View {
             for entry in targets {
                 if let shown = await PackStoreClient.live.deleteUserSnippet(entry).notice { notice = shown }
             }
-            reloadUserSnippets()
             await reloadSafetyNet()
         }
-    }
-
-    private func reloadUserSnippets() {
-        // 저장분에 중복 단축어가 있으면(외부 쓰기·스키마 진화) ForEach id가 겹친다 — 방어 dedup.
-        // 기준은 **정규화 단축어**다 — "우리집주소"와 "우리집 주소"는 같은 것으로 본다. 정리 화면(경계 줄)과 같은 규칙 한 곳
-        userSnippets = UserSnippetBudget.displayEntries(repository.entries())
     }
 }
 
