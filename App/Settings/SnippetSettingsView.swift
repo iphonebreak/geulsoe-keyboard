@@ -21,12 +21,23 @@ struct SnippetSettingsView: View {
     @State private var notice: PackChangeNotice?
     /// 편집 시트가 닫힌 뒤 띄울 알림 — 시트가 닫히는 중에 부모가 알림을 띄우지 않게 미뤄 둔다
     @State private var pendingNotice: PackChangeNotice?
+    /// 편집 시트 안 알림에서 고른 동작(정리하기·목록 복구) — 시트가 닫힌 뒤 한다
+    @State private var pendingAction: PackChangeNotice.Action?
+
+    // 1-c 2단계 안전망 — 배너 셋(㉠ 한도 초과 · ㉡ 목록 손상 · ㉢ 읽을 수 없는 팩)의 상태. 화면에 올 때마다 메인 밖에서 다시 읽는다
+    @State private var libraryStatus: PackLibraryStatus = .readable
+    @State private var budget: UserSnippetBudget?
+    @State private var unavailablePackNames: [String] = []
+    @State private var showsCleanup = false
+    @State private var showsRecovery = false
 
     /// 읽기 전용 — 쓰기는 `PackStoreClient.live`(메인 밖에서 `PackStore.live`)
     private let repository = AppGroupSnippetRepository()
 
     var body: some View {
         Form {
+            safetyNetBanners
+
             // 안내 애니메이션 — 타이핑 → 칩 → 치환을 반복 재생 (PDR snippet-intro-animation).
             // 인셋 0·행 배경 투명: 확대된 캔버스가 행 가장자리까지 닿으므로 카드가 스스로 모서리를 그리고 클립한다
             Section {
@@ -106,16 +117,60 @@ struct SnippetSettingsView: View {
         .settingsFormWidth()
         .navigationTitle("채움글")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear(perform: reloadUserSnippets)
-        .packChangeNoticeAlert($notice)
+        .onAppear {
+            reloadUserSnippets()
+            Task { await reloadSafetyNet() }
+        }
+        .packChangeNoticeAlert($notice, onAction: perform)
+        .navigationDestination(isPresented: $showsCleanup) { SnippetCleanupView() }
+        .packLibraryRecovery(isPresented: $showsRecovery) {
+            reloadUserSnippets()
+            Task { await reloadSafetyNet() }
+        }
         .sheet(isPresented: $showsEditor, onDismiss: showPendingNotice) {
-            SnippetEditorView(editing: nil, onSave: save)
+            SnippetEditorView(editing: nil, onSave: save, onAction: { pendingAction = $0 })
         }
         // ★ **같은 시트를 고치기에도 쓴다** — 새로 만들지 않는다.
         //   `item:` 형태라 고를 때마다 시트가 그 항목으로 새로 만들어진다
         //   (`isPresented:`를 쓰면 `@State` 초기값이 첫 항목에 굳는다).
         .sheet(item: $editingEntry, onDismiss: showPendingNotice) { editing in
-            SnippetEditorView(editing: editing.entry, onSave: save)
+            SnippetEditorView(editing: editing.entry, onSave: save, onAction: { pendingAction = $0 })
+        }
+    }
+
+    /// 채움글 화면 맨 위 배너(1-c 4-1 ㉠㉡㉢, 문구 4-3절) — 문제가 없으면 아무것도 그리지 않는다
+    @ViewBuilder private var safetyNetBanners: some View {
+        if let banner = PackNoticeCopy.libraryBanner(libraryStatus) {
+            Section {
+                SnippetNoticeBanner(message: banner, actionTitle: PackChangeNotice.Action.recoverLibrary.label) { showsRecovery = true }
+            }
+        }
+        if let budget, budget.isOverLimit {
+            Section {
+                SnippetNoticeBanner(message: PackNoticeCopy.overLimitBanner(loadableCount: budget.loadableRowCount),
+                                    actionTitle: PackChangeNotice.Action.organize.label) { showsCleanup = true }
+            }
+        }
+        if !unavailablePackNames.isEmpty {
+            Section {
+                SnippetNoticeBanner(message: PackNoticeCopy.unavailablePacksBanner(names: unavailablePackNames))
+            }
+        }
+    }
+
+    private func reloadSafetyNet() async {
+        let client = PackStoreClient.live
+        libraryStatus = await client.libraryStatus()
+        budget = await client.userSnippetBudget()
+        unavailablePackNames = await client.summaries().filter { $0.status == .unavailable }.map { $0.name ?? PackNoticeCopy.unnamedPack }
+    }
+
+    /// 알림 버튼(2단계) — 정리하기는 정리 화면, 목록 복구는 확인 시트
+    private func perform(_ action: PackChangeNotice.Action) {
+        switch action {
+        case .organize: showsCleanup = true
+        case .recoverLibrary: showsRecovery = true
+        default: break
         }
     }
 
@@ -142,13 +197,18 @@ struct SnippetSettingsView: View {
         // 거부면 언제나 알림이 있다(`PackChangeNoticeTableTests`) — 시트가 그것을 띄우고 닫히지 않는다
         guard outcome.isAccepted else { return outcome.notice }
         pendingNotice = outcome.notice
+        await reloadSafetyNet()
         return nil
     }
 
     private func showPendingNotice() {
-        guard let pending = pendingNotice else { return }
-        pendingNotice = nil
-        notice = pending
+        if let action = pendingAction {
+            pendingAction = nil
+            perform(action)
+        } else if let pending = pendingNotice {
+            pendingNotice = nil
+            notice = pending
+        }
     }
 
     /// 지울 때도 한 항목씩 — 여러 개를 고르면 하나씩 커밋한다(1-b 「저장 1회 = 항목 1개」)
@@ -162,14 +222,14 @@ struct SnippetSettingsView: View {
                 if let shown = await PackStoreClient.live.deleteUserSnippet(entry).notice { notice = shown }
             }
             reloadUserSnippets()
+            await reloadSafetyNet()
         }
     }
 
     private func reloadUserSnippets() {
         // 저장분에 중복 단축어가 있으면(외부 쓰기·스키마 진화) ForEach id가 겹친다 — 방어 dedup.
-        // 기준은 **정규화 단축어**다 — "우리집주소"와 "우리집 주소"는 같은 것으로 본다.
-        var seen = Set<String>()
-        userSnippets = repository.entries().filter { seen.insert($0.snippetListID).inserted }
+        // 기준은 **정규화 단축어**다 — "우리집주소"와 "우리집 주소"는 같은 것으로 본다. 정리 화면(경계 줄)과 같은 규칙 한 곳
+        userSnippets = UserSnippetBudget.displayEntries(repository.entries())
     }
 }
 
@@ -205,22 +265,6 @@ private func builtInPackBinding(
     )
 }
 
-private extension View {
-    /// 채움글 변경 알림 — 사유별 제목·문구(`PackChangeNotice`, 1-c 계획서 4-2절). 팩 이름은 **표시만** 한다(로그·분석 이벤트 0).
-    /// 1-c 1단계는 **닫는 버튼만** 단다 — 알림 모델의 다른 동작(정리하기·목록 복구·팩 순서 바꾸기·지우기·꺼 둔 채로 가져오기)은
-    /// 그 화면이 생기는 단계(2~5)에서 붙인다
-    func packChangeNoticeAlert(_ notice: Binding<PackChangeNotice?>) -> some View {
-        alert(notice.wrappedValue?.title ?? "", isPresented: Binding(
-            get: { notice.wrappedValue != nil },
-            set: { if !$0 { notice.wrappedValue = nil } }
-        ), presenting: notice.wrappedValue) { shown in
-            Button(shown.dismiss.label, role: .cancel) {}
-        } message: { shown in
-            Text(shown.message)
-        }
-    }
-}
-
 /// 새 문구 입력 시트. **단축어 하나 이상 + 본문**이 있어야 저장된다.
 ///
 /// ## 순서는 제목 → 단축어 → 본문이다 (사장님 결정 2026-09-15)
@@ -236,12 +280,12 @@ private extension View {
 /// ★ `SnippetEntry`에 `Identifiable`을 붙이지 않는다 — id의 기준(`snippetListID`,
 /// 정규화 단축어를 이어 붙인 값)은 **이 화면의 목록 사정**이지 도메인 개념이 아니다.
 /// 도메인에 붙이면 다른 곳에서 그 id를 의미 있는 것으로 오해한다.
-private struct EditingSnippet: Identifiable {
+struct EditingSnippet: Identifiable {
     let entry: SnippetEntry
     var id: String { entry.snippetListID }
 }
 
-private struct SnippetEditorView: View {
+struct SnippetEditorView: View {
 
     /// 고치는 중인 항목. nil이면 **추가**다.
     let editing: SnippetEntry?
@@ -258,6 +302,8 @@ private struct SnippetEditorView: View {
     private var loadedCommaTrigger: Bool { editing?.hasCommaInTrigger ?? false }
     /// 거부 알림을 돌려준다 — nil이면 저장됨(시트를 닫는다), 아니면 **시트·입력을 그대로 두고** 알린다(검증 C6)
     let onSave: @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?
+    /// 거부 알림에서 고른 동작(정리하기·목록 복구) — 부르는 쪽에 넘기고 시트를 닫는다(부르는 쪽이 닫힌 뒤 화면을 옮긴다)
+    let onAction: @MainActor (PackChangeNotice.Action) -> Void
 
     @Environment(\.dismiss) private var dismiss
     @State private var notice: PackChangeNotice?
@@ -269,9 +315,11 @@ private struct SnippetEditorView: View {
 
     /// ★ 불러올 때 **쉼표로 합치고**, 저장할 때 `SnippetEntry.parseTriggers`가 **쉼표로 나눈다** —
     /// 왕복이 같은 규약을 탄다. 구분자를 여기서 새로 정하지 않는다.
-    init(editing: SnippetEntry?, onSave: @escaping @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?) {
+    init(editing: SnippetEntry?, onSave: @escaping @MainActor (SnippetEntry, SnippetEntry?) async -> PackChangeNotice?,
+         onAction: @escaping @MainActor (PackChangeNotice.Action) -> Void) {
         self.editing = editing
         self.onSave = onSave
+        self.onAction = onAction
         _triggerText = State(initialValue: editing?.triggers.joined(separator: ", ") ?? "")
         _title = State(initialValue: editing?.title ?? "")
         _body_ = State(initialValue: editing?.body ?? "")
@@ -384,7 +432,10 @@ private struct SnippetEditorView: View {
                     .disabled(parsedTriggers.isEmpty || trimmedBody.isEmpty || tooLong || isSaving)
                 }
             }
-            .packChangeNoticeAlert($notice)
+            .packChangeNoticeAlert($notice) { action in
+                onAction(action)
+                dismiss()
+            }
         }
     }
 }
@@ -456,6 +507,9 @@ struct SnippetPackDetailView: View {
     @State private var notice: PackChangeNotice?
     /// 켜기·끄기를 저장하는 동안 스위치가 보일 값(`builtInPackBinding`)
     @State private var pendingEnabled: Bool?
+    /// 켜기 거부 알림의 동작(B1b 정리하기 · E1 목록 복구)
+    @State private var showsCleanup = false
+    @State private var showsRecovery = false
 
     var body: some View {
         Form {
@@ -564,7 +618,15 @@ struct SnippetPackDetailView: View {
         .settingsFormWidth()
         .navigationTitle(pack.name)
         .navigationBarTitleDisplayMode(.inline)
-        .packChangeNoticeAlert($notice)
+        .packChangeNoticeAlert($notice) { action in
+            switch action {
+            case .organize: showsCleanup = true
+            case .recoverLibrary: showsRecovery = true
+            default: break
+            }
+        }
+        .navigationDestination(isPresented: $showsCleanup) { SnippetCleanupView() }
+        .packLibraryRecovery(isPresented: $showsRecovery) {}
     }
 
     /// 스위치 한 행의 **제목 + 설명** — 설명이 어느 스위치 것인지 붙어 있어야 한다.

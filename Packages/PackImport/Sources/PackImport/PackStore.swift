@@ -78,6 +78,8 @@ public final class PackStore: @unchecked Sendable {
     private let makeID: @Sendable () -> String
     private let limits: PackBudgetLimits
     private let queue = DispatchQueue(label: "com.charging.tadak.PackStore")
+    /// 변환본 내용 검사 결과(파일 이름 → 키보드가 받는 내용인가, 1-c G6) — `queue` 안에서만 읽고 쓴다. 처음 쓸 때 파일에서 읽는다
+    private var contentChecks: [String: Bool]?
     /// 시험 전용 갈고리 — 큐 안에서 판정과 쓰기 사이에 부른다(직렬성 결정적 시험, 검증 F5 ④). 제품에서는 nil
     var beforeWriteForTesting: (@Sendable () -> Void)?
 
@@ -173,6 +175,71 @@ public final class PackStore: @unchecked Sendable {
             let library = readLibrary() ?? PackLibrary()
             let unavailable = unavailablePackIDs(in: library)
             return library.order.compactMap(\.packID).filter(unavailable.contains)
+        }
+    }
+
+    /// 목록 상태 — 읽히지 않으면 사유(1-c ㉡·G4). 화면의 손상 배너·복구 입구가 쓴다
+    public func libraryStatus() -> PackLibraryStatus { queue.sync { loadLibrary().status } }
+
+    /// 내 채움글 정리 모델(1-c ㉠·R25) — 경계는 키보드 로더와 **같은 함수·같은 입력**(내 채움글 + 켜진 내장, 9-3)
+    public func userSnippetBudget() -> UserSnippetBudget {
+        queue.sync {
+            let user = userSnippets.entries()
+            let builtIn = PackStats.of(entries: builtInEntries(Set(disabledBuiltIns())))
+            let usage = ActivePackBudget.userSnippetUsage(user, builtIn: builtIn, limits: limits)
+            let overflow = ActivePackBudget.evaluate(baseline: usage.stats + builtIn, packs: [], limits: limits).baselineOverflow
+            return UserSnippetBudget(stored: user, loadableCount: usage.loadableCount, isOverLimit: !overflow.isEmpty)
+        }
+    }
+
+    // MARK: - 목록 복구 (R24)
+
+    /// 복구하면 불러올 팩 수(읽을 수 없는 변환본 포함) — 확인 시트의 「가져온 팩 N개를 찾았어요」. 목록이 읽히면 nil(복구할 것이 없다)
+    public func recoveryPreview() -> Int? {
+        queue.sync { loadLibrary().status == .readable ? nil : recoveryFiles().count }
+    }
+
+    /// 목록 복구(R24) — **사용자가 확인한 뒤에만** 부른다. 변환본 폴더를 훑어 목록을 다시 만들고 **모두 꺼진 채** 불러온다(순서·켬/끔은
+    /// 알 수 없다). 원래 목록은 지우지 않고 옆에 `library.damaged-<UTC 시각>.json`으로 옮겨 둔다(같은 이름이 있으면 `-2`, `-3`…).
+    /// 옮기지 못하면 아무것도 쓰지 않고, 옮긴 뒤 새 목록·snapshot을 못 쓰면 원래 자리로 되돌린다 — **원래 목록을 덮어쓰지 않는다**(9-3).
+    ///
+    /// 변환본을 읽어 키보드가 받는 내용이면 표시 칸(이름·종류·틀)과 stats를 채우고, 아니면 그 팩은 「읽을 수 없는 팩」(`.unavailable`)으로
+    /// 목록에 남긴다(지우지 않는다 — 다시 가져오기·지우기는 사용자가 한다). 같은 팩의 변환본이 여럿이면(정리 전에 앱이 죽은 경우) revision이
+    /// 가장 큰 것을 쓰고 나머지는 평소처럼 정리된다. 순서는 파일을 쓴 시각(가져온 순서에 가깝다), 「내 채움글」은 맨 위(U1 기본).
+    public func recoverLibrary(now: Date = Date()) -> PackLibraryRecovery {
+        queue.sync {
+            guard loadLibrary().status != .readable else { return .notNeeded }
+            // 변환본을 하나씩 읽어 키보드가 받는 내용인지 본다(로더 ④⑤와 같은 조건) — 받지 않으면 stored nil
+            let found = recoveryFiles().map { file in
+                (id: file.id, file: file.file, stored: autoreleasepool {
+                    (try? Data(contentsOf: packsDirectory.appendingPathComponent(file.file))).flatMap { Self.loadablePack($0, id: file.id) }
+                })
+            }
+            var library = PackLibrary()
+            for candidate in found {
+                library.order.append(.pack(candidate.id))
+                library.packs[candidate.id] = candidate.stored.map { PackLibrary.Entry(file: candidate.file, isEnabled: false, stored: $0) }
+                    ?? PackLibrary.Entry(file: candidate.file, isEnabled: false, stats: .zero)
+            }
+            // ① 원래 목록을 옆으로 — 못 옮기면 여기서 끝(아무것도 쓰지 않았다)
+            guard let backupName = moveLibraryAside(now: now) else { return .failed }
+            // 방금 디코드한 결과를 검사 결과로 남긴다 — 깨진 변환본은 바로 「읽을 수 없는 팩」
+            var checks = loadedChecks()
+            for candidate in found { checks[candidate.file] = candidate.stored != nil }
+            saveChecks(checks, keeping: library)
+            // ② 새 목록·snapshot(켜진 팩 없음)·세대·알림 — 커밋과 같은 쓰기 순서(8-1)
+            let state = State(library: PackLibrary(), user: userSnippets.entries(), disabled: disabledBuiltIns())
+            var proposal = Proposal(change: .reorderPacks, state: state)
+            proposal.library = library
+            let unavailable = unavailablePackIDs(in: library)
+            let input = budgetInput(library: library, user: state.user, disabled: state.disabled, unavailable: unavailable)
+            let evaluation = withUnavailable(ActivePackBudget.evaluate(baseline: input.baseline, packs: input.packs, limits: limits),
+                                             library: library, unavailable: unavailable)
+            guard write(proposal, state: state, evaluation: evaluation) else {
+                try? FileManager.default.moveItem(at: libraryRoot.appendingPathComponent(backupName), to: libraryURL)
+                return .failed
+            }
+            return .recovered(packs: found.count, unreadable: found.filter { $0.stored == nil }.count, backupFileName: backupName)
         }
     }
 
@@ -301,12 +368,24 @@ public final class PackStore: @unchecked Sendable {
 
     /// 앱 실행 때 한 번 — 옛 세대(현재 − 2 이하)와 목록이 가리키지 않는 변환본을 지운다. **사용자 데이터(목록에 있는 팩·내 채움글)는
     /// 한도를 넘어도 지우지 않는다**(9-3).
+    ///
+    /// 1-c 2단계: ① `userSnippetsGeneration`을 한 번 올리고 알린다(G9 — 내 채움글 저장 ③과 세대 올림 ⑤ 사이에 앱이 죽었으면 키보드가
+    /// 옛 문구를 같은 세대 키로 계속 쓴다) ② 아직 검사하지 않은 변환본을 **한 번씩** 디코드해(G6, 결과는 파일 이름 기준으로 남긴다) 키보드가
+    /// 버릴 내용이면 그 팩만 `.unavailable`로 돌린다 ③ 그래서 포함 목록이 바뀌면 snapshot을 다시 쓴다 — 깨진 팩 하나 때문에 키보드가 외부
+    /// 팩 전부를 버리지 않게(판정 == snapshot, AC-8). 메인에서 부르지 않는다(`PackStoreClient.maintain`, 최대 16 × 3MB 디코드).
     public func maintain() {
         queue.sync {
+            generations.setUserSnippetsGeneration(generations.userSnippetsGeneration + 1)
+            defer { notify() }
             // ★ 목록을 못 읽으면 **아무것도 지우지 않는다**(검증 C1) — 빈 목록으로 보면 변환본이 전부 「안 쓰는 파일」이 된다
             guard let library = readLibrary() else { return }
             removeUnreferencedPackFiles(library: library)
             collectSnapshotGarbage(current: generations.packsGeneration)
+            let before = currentEvaluation(library: library, unavailable: unavailablePackIDs(in: library))
+            checkPackContents(library: library)
+            let after = currentEvaluation(library: library, unavailable: unavailablePackIDs(in: library))
+            guard after.included != before.included, let state = loadState() else { return }
+            _ = write(Proposal(change: .reorderPacks, state: state), state: state, evaluation: after)
         }
     }
 
@@ -487,12 +566,115 @@ public final class PackStore: @unchecked Sendable {
 
     /// 앱 전용 목록 — **파일이 없으면(처음) 빈 목록, 있는데 못 읽음·손상·낯선 schema면 nil**(검증 C1). 둘을 섞으면 손상된 목록을
     /// 빈 목록으로 보고 정리가 변환본을 전부 지우고 다음 커밋이 빈 목록으로 덮어쓴다
-    private func readLibrary() -> PackLibrary? {
-        guard FileManager.default.fileExists(atPath: libraryURL.path) else { return PackLibrary() }
-        guard let data = try? Data(contentsOf: libraryURL),
-              let library = try? JSONDecoder().decode(PackLibrary.self, from: data),
-              library.schema == PackLibrary.schemaVersion else { return nil }
-        return library
+    private func readLibrary() -> PackLibrary? { loadLibrary().library }
+
+    /// 목록과 그 상태(1-c G4 — 읽히지 않는 사유를 가른다). **schema를 먼저 본다** — 새 버전 목록은 모양이 달라 전체 디코드가 실패할 수
+    /// 있는데, 그것을 「손상」으로 보면 「앱을 올리면 다시 읽힌다」는 안내를 못 한다
+    private func loadLibrary() -> (library: PackLibrary?, status: PackLibraryStatus) {
+        guard FileManager.default.fileExists(atPath: libraryURL.path) else { return (PackLibrary(), .readable) }
+        guard let data = try? Data(contentsOf: libraryURL) else { return (nil, .unreadable) }
+        if let probe = try? JSONDecoder().decode(SchemaProbe.self, from: data), probe.schema != PackLibrary.schemaVersion {
+            return (nil, .unknownSchema)
+        }
+        guard let library = try? JSONDecoder().decode(PackLibrary.self, from: data) else { return (nil, .corrupt) }
+        return (library, .readable)
+    }
+
+    private struct SchemaProbe: Decodable {
+        var schema: Int
+    }
+
+    /// 원래 목록을 옆으로 옮긴다 — `library.damaged-<UTC yyyyMMdd'T'HHmmss'Z'>.json`, 있으면 `-2`·`-3`…. 옮긴 이름, 못 옮기면 nil
+    private func moveLibraryAside(now: Date) -> String? {
+        let fileManager = FileManager.default
+        let stem = "library.damaged-\(Self.backupStamp(now))"
+        var name = "\(stem).json"
+        var suffix = 2
+        while fileManager.fileExists(atPath: libraryRoot.appendingPathComponent(name).path) {
+            name = "\(stem)-\(suffix).json"
+            suffix += 1
+        }
+        guard (try? fileManager.moveItem(at: libraryURL, to: libraryRoot.appendingPathComponent(name))) != nil else { return nil }
+        return name
+    }
+
+    static func backupStamp(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? calendar.timeZone
+        let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        return String(format: "%04d%02d%02dT%02d%02d%02dZ", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0,
+                      parts.hour ?? 0, parts.minute ?? 0, parts.second ?? 0)
+    }
+
+    /// 복구가 불러올 변환본 — 팩 id마다 하나(revision이 가장 큰 것), 파일을 쓴 시각 순(가져온 순서에 가깝다). 내용은 읽지 않는다
+    private func recoveryFiles() -> [(id: String, file: String)] {
+        let fileManager = FileManager.default
+        guard let names = try? fileManager.contentsOfDirectory(atPath: packsDirectory.path) else { return [] }
+        var newest: [String: (revision: Int, file: String)] = [:]
+        for name in names where name.hasSuffix(".json") {
+            let identity = Self.packFileIdentity(name)
+            guard PackSnapshotLoader.isPlainFileName(identity.id) else { continue }
+            if let current = newest[identity.id], current.revision >= identity.revision { continue }
+            newest[identity.id] = (identity.revision, name)
+        }
+        func written(_ file: String) -> Date {
+            (try? fileManager.attributesOfItem(atPath: packsDirectory.appendingPathComponent(file).path)[.modificationDate] as? Date)
+                ?? .distantPast
+        }
+        return newest.map { (id: $0.key, file: $0.value.file, date: written($0.value.file)) }
+            .sorted { ($0.date, $0.file) < ($1.date, $1.file) }
+            .map { (id: $0.id, file: $0.file) }
+    }
+
+    /// 변환본 파일 이름 `<팩 id>-r<revision>.json`(커밋이 쓰는 모양) → id·revision. 모양이 다르면 이름 전체가 id, revision −1
+    static func packFileIdentity(_ name: String) -> (id: String, revision: Int) {
+        let stem = String(name.dropLast(".json".count))
+        if let marker = stem.range(of: "-r", options: .backwards) {
+            let digits = stem[marker.upperBound...]
+            if !digits.isEmpty, digits.allSatisfy(\.isASCII), let revision = Int(digits), marker.lowerBound > stem.startIndex {
+                return (String(stem[..<marker.lowerBound]), revision)
+            }
+        }
+        return (stem, -1)
+    }
+
+    /// 키보드 로더가 받는 변환본인가 — `PackSnapshotLoader`의 ④⑤와 **같은 조건**(디코드·schema·팩 id·필드 상한, 9-4 ⑤). 어긋나면 키보드는
+    /// 외부 팩 전부를 버리므로(AC-8) 앱이 미리 그 팩만 뺀다(G6). 조건을 바꾸면 로더도 함께 바꾼다(`PackContentCheckTests`가 둘을 맞춰 본다)
+    static func loadablePack(_ data: Data, id: String) -> StoredExternalPack? {
+        guard let stored = try? JSONDecoder().decode(StoredExternalPack.self, from: data),
+              stored.schema == StoredExternalPack.schemaVersion, stored.packID == id, stored.pack.isWithinStoredLimits else { return nil }
+        return stored
+    }
+
+    // MARK: 내용 검사 결과 (G6)
+
+    private var checksURL: URL { libraryRoot.appendingPathComponent("pack-checks.json") }
+
+    private func loadedChecks() -> [String: Bool] {
+        if let contentChecks { return contentChecks }
+        let stored = (try? Data(contentsOf: checksURL)).flatMap { try? JSONDecoder().decode([String: Bool].self, from: $0) } ?? [:]
+        contentChecks = stored
+        return stored
+    }
+
+    /// 목록이 가리키는 파일 것만 남긴다(교체·삭제로 사라진 파일의 결과는 버린다). 쓰지 못하면 메모리에만 — 다음 실행이 다시 검사한다
+    private func saveChecks(_ checks: [String: Bool], keeping library: PackLibrary) {
+        let referenced = Set(library.packs.values.map(\.file))
+        let kept = checks.filter { referenced.contains($0.key) }
+        contentChecks = kept
+        guard (try? ensureDirectory(libraryRoot)) != nil, let data = try? JSONEncoder().encode(kept) else { return }
+        try? data.write(to: checksURL, options: .atomic)
+    }
+
+    /// 아직 검사하지 않은 변환본을 한 번씩 디코드한다 — 파일 이름에 revision이 붙어 교체하면 새 이름이 되므로 결과가 낡지 않는다.
+    /// 열 수 없는 파일은 이미 `.unavailable`(읽기 권한 검사)이라 결과를 남기지 않는다(나중에 열리면 그때 본다)
+    private func checkPackContents(library: PackLibrary) {
+        var checks = loadedChecks()
+        for (id, entry) in library.packs where !entry.file.isEmpty && checks[entry.file] == nil {
+            guard let data = try? Data(contentsOf: packsDirectory.appendingPathComponent(entry.file)) else { continue }
+            checks[entry.file] = autoreleasepool { Self.loadablePack(data, id: id) != nil }
+        }
+        saveChecks(checks, keeping: library)
     }
 
     /// 목록의 표시 칸 — 비었으면(1-b 목록) 변환본에서 채운다. 못 읽는 팩은 열지 않는다
@@ -514,10 +696,13 @@ public final class PackStore: @unchecked Sendable {
         readLibrary().map { State(library: $0, user: userSnippets.entries(), disabled: disabledBuiltIns()) }
     }
 
-    /// 목록이 가리키는 변환본이 없거나 읽을 수 없는 팩(검증 F4·C5) — 내용(디코드)까지는 보지 않는다(커밋마다 최대 3MB 디코드를 피함)
+    /// 목록이 가리키는 변환본이 없거나 읽을 수 없거나(검증 F4·C5) **내용 검사에서 키보드가 버릴 것으로 나온**(1-c G6) 팩. 커밋마다
+    /// 디코드하지는 않는다(최대 3MB) — 내용은 앱 실행 검사·복구가 남긴 결과(파일 이름 기준)를 본다
     private func unavailablePackIDs(in library: PackLibrary) -> Set<String> {
-        Set(library.packs.compactMap { id, entry in
-            entry.file.isEmpty || !FileManager.default.isReadableFile(atPath: packsDirectory.appendingPathComponent(entry.file).path)
+        let checks = loadedChecks()
+        return Set(library.packs.compactMap { id, entry in
+            entry.file.isEmpty || checks[entry.file] == false
+                || !FileManager.default.isReadableFile(atPath: packsDirectory.appendingPathComponent(entry.file).path)
                 ? id : nil
         })
     }

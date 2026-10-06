@@ -64,6 +64,11 @@ private let table: [NoticeTableRow] = [
         title: "켤 수 없어요",
         message: "켜면 채움글이 한도를 넘어요. 안 쓰는 채움글을 지우거나 다른 내장 팩을 끈 뒤 켜 주세요.",
         buttons: ["확인"]),
+    NoticeTableRow(id: "B1b 내장 팩 켜기 — 내 채움글이 이미 한도 초과(2단계 추가)", operation: .enableBuiltIn,
+        result: rejected(.gate(.baselineOverLimit([.items]))), overLimit: true, reason: .builtInWhileUserOverLimit,
+        title: "켤 수 없어요",
+        message: "내 채움글이 한도를 넘어서 지금은 내장 팩을 켤 수 없어요. 먼저 내 채움글을 정리해 주세요.",
+        buttons: ["정리하기", "확인"]),
     NoticeTableRow(id: "B2 내장 팩 켜기 — 외부 팩이 밀림", operation: .enableBuiltIn,
         result: rejected(.gate(.displacesPacks(["p2"]))), reason: .builtInDisplacesPacks,
         title: "켤 수 없어요",
@@ -79,11 +84,22 @@ private let table: [NoticeTableRow] = [
         title: "켤 수 없어요",
         message: "켜면 한도를 넘어요. 다른 팩을 먼저 꺼 주세요.",
         buttons: ["확인"]),
+    NoticeTableRow(id: "C2b 외부 팩 켜기 — 내 채움글이 이미 한도 초과(2단계 추가)", operation: .enablePack,
+        result: rejected(.gate(.packExcluded(id: "p1", dimensions: [.needleChars]))), overLimit: true,
+        reason: .enableWhileUserOverLimit,
+        title: "켤 수 없어요",
+        message: "내 채움글이 한도를 넘어서 외부 팩을 켤 수 없어요. 먼저 내 채움글을 정리해 주세요.",
+        buttons: ["정리하기", "확인"]),
     NoticeTableRow(id: "C3 팩 교체(켜진 팩) — 한도", operation: .replacePack,
         result: rejected(.gate(.packExcluded(id: "p1", dimensions: [.bytes]))), reason: .replaceExceedsLimit,
         title: "바꿀 수 없어요",
         message: "새 파일로 바꾸면 한도를 넘어요. 다른 팩을 먼저 끄거나 지운 뒤 다시 가져와 주세요.",
         buttons: ["확인"]),
+    NoticeTableRow(id: "C3b 팩 교체 — 내 채움글이 이미 한도 초과(2단계 추가)", operation: .replacePack,
+        result: rejected(.gate(.displacesPacks(["p2"]))), overLimit: true, reason: .replaceWhileUserOverLimit,
+        title: "바꿀 수 없어요",
+        message: "내 채움글이 한도를 넘어서 지금은 팩을 바꿀 수 없어요. 먼저 내 채움글을 정리해 주세요.",
+        buttons: ["정리하기", "확인"]),
     NoticeTableRow(id: "D1 가져오기 — 한도", operation: .importPack,
         result: rejected(.gate(.packExcluded(id: "p1", dimensions: [.needleChars]))), reason: .importExceedsLimit,
         title: "가져올 수 없어요",
@@ -167,10 +183,10 @@ struct PackChangeNoticeTableTests {
         #expect(made.isRejection == !row.result.isAccepted)
     }
 
-    @Test("표가 사유 18종을 모두 덮는다(G3는 화면 줄이라 따로)")
+    @Test("표가 사유 21종을 모두 덮는다(1단계 18 + 2단계 B1b·C2b·C3b, G3는 화면 줄이라 따로)")
     func tableCoversEveryReason() {
         #expect(Set(table.map(\.reason)) == Set(PackChangeNotice.Reason.allCases))
-        #expect(PackChangeNotice.Reason.allCases.count == 18)
+        #expect(PackChangeNotice.Reason.allCases.count == 21)
     }
 
     @Test("★ G7 — 같은 게이트 거부도 무엇을 하다 막혔는지로 갈린다(「한도」 한 갈래로 묶지 않는다)")
@@ -184,8 +200,14 @@ struct PackChangeNoticeTableTests {
         #expect(notice(.replacePack, excluded)?.reason == .replaceExceedsLimit)
         #expect(notice(.importPack, excluded)?.reason == .importExceedsLimit)
         let baseline = rejected(.gate(.baselineOverLimit([.items])))
-        #expect(notice(.enableBuiltIn, baseline, overLimit: true)?.reason == .builtInOverLimit, "내장 켜기는 B1 하나")
+        #expect(notice(.enableBuiltIn, baseline)?.reason == .builtInOverLimit)
+        #expect(notice(.enableBuiltIn, baseline, overLimit: true)?.reason == .builtInWhileUserOverLimit, "B1b — 꺼도 안 풀린다")
         #expect(notice(.saveUserSnippet, baseline, overLimit: true)?.reason == .userSaveWhileOverLimit)
+        // 2단계 — 내 채움글이 이미 넘었으면 「다른 팩을 끄라」는 틀린 안내다(B1b·C2b·C3b, 1단계 보고 5번)
+        #expect(notice(.enablePack, excluded, overLimit: true)?.reason == .enableWhileUserOverLimit)
+        #expect(notice(.replacePack, excluded, overLimit: true)?.reason == .replaceWhileUserOverLimit)
+        #expect(notice(.replacePack, displaced, overLimit: true)?.reason == .replaceWhileUserOverLimit)
+        #expect(notice(.enablePack, displaced, overLimit: true)?.reason == .enableDisplacesPacks, "밀림(C1)은 한도 상태를 보지 않는다")
         // 꺼 둔 채로 가져오기도 팩 수에서는 막힌다 — D3, 「꺼 둔 채로」 버튼 없음(8절 #5)
         let tooMany = notice(.importDisabledPack, rejected(.gate(.tooManyPacks)))
         #expect(tooMany?.reason == .importTooManyPacks)
@@ -265,7 +287,7 @@ struct PackChangeNoticeTableTests {
         #expect(made?.message == "대신 「이름 없는 팩」이 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
     }
 
-    @Test("저장본 조회는 필요할 때만 — 한도 상태는 A·D에서만, 이름은 이름이 들어가는 알림에서만")
+    @Test("저장본 조회는 필요할 때만 — 한도 상태는 A·B1·C2·C3·D에서만, 이름은 이름이 들어가는 알림에서만")
     func lazyLookups() {
         var overLimitReads = 0
         var nameReads = 0
@@ -276,13 +298,19 @@ struct PackChangeNoticeTableTests {
         }
         make(.saveUserSnippet, rejected(.writeFailed))
         make(.saveUserSnippet, accepted([]))
-        make(.enablePack, rejected(.gate(.packExcluded(id: "p1", dimensions: []))))
+        make(.enablePack, rejected(.packUnavailable("p1")))
+        make(.importPack, rejected(.gate(.tooManyPacks)))
         #expect(overLimitReads == 0 && nameReads == 0)
         make(.saveUserSnippet, rejected(.gate(.baselineOverLimit([.items]))))
         make(.importPack, rejected(.gate(.packExcluded(id: "p1", dimensions: []))))
-        #expect(overLimitReads == 2 && nameReads == 0)
+        make(.enableBuiltIn, rejected(.gate(.baselineOverLimit([.items]))))
+        make(.enablePack, rejected(.gate(.packExcluded(id: "p1", dimensions: []))))
+        make(.replacePack, rejected(.gate(.packExcluded(id: "p1", dimensions: []))))
+        #expect(overLimitReads == 5 && nameReads == 0)
+        make(.enableBuiltIn, rejected(.gate(.displacesPacks(["p1"]))))
+        #expect(overLimitReads == 5 && nameReads == 1, "B2는 이름만, 한도 상태는 보지 않는다")
         make(.saveUserSnippet, accepted(["p1", "p2", "p3"]))
-        #expect(nameReads == 1, "G2는 첫 이름만 쓴다")
+        #expect(nameReads == 2, "G2는 첫 이름만 쓴다")
     }
 
     @Test("G3 — 순서 변경 전 사전 안내 줄(트리거는 3단계 PackImpact)")
@@ -338,8 +366,23 @@ private let everyCopy: [String] = {
     texts += PackChangeNotice.Action.allCases.map(\.label)
     texts += [PackNoticeCopy.reorderWarning(names: ["회사 상용구"]), PackNoticeCopy.reorderWarning(names: ["회사 상용구", "상용 영어"]),
               PackNoticeCopy.recheckedLine, PackNoticeCopy.unnamedPack]
+    // 2단계 — 상태 표시(4-3절)·배너 셋·정리 화면·복구 시트. 개수는 표시 값이라 `countSentinels`로 넣는다
+    texts += [PackSummary.Status.on, .off, .restingOverLimit, .restingForUserSnippets, .unavailable]
+        .compactMap(PackNoticeCopy.statusLine)
+    texts += [PackNoticeCopy.unavailablePackDetail, PackNoticeCopy.overLimitBanner(loadableCount: 37),
+              PackNoticeCopy.unavailablePacksBanner(names: ["회사 상용구"]),
+              PackNoticeCopy.unavailablePacksBanner(names: ["사자성어 예시 팩", "회사 상용구", "상용 영어"]),
+              PackNoticeCopy.cleanupTitle, PackNoticeCopy.cleanupBoundary, PackNoticeCopy.cleanupFooter, PackNoticeCopy.cleanupDoneTitle, PackNoticeCopy.cleanupDoneMessage,
+              PackNoticeCopy.recoveryTitle, PackNoticeCopy.recoveryMessage(packCount: 41), PackNoticeCopy.recoveryMessage(packCount: 0),
+              PackNoticeCopy.recoveryConfirm, PackNoticeCopy.recoveryCancel,
+              PackNoticeCopy.recoveredTitle, PackNoticeCopy.recoveredMessage(packCount: 41), PackNoticeCopy.recoveredMessage(packCount: 0),
+              PackNoticeCopy.recoveryFailedTitle, PackNoticeCopy.recoveryFailedMessage]
+    texts += [PackLibraryStatus.unreadable, .corrupt, .unknownSchema].compactMap(PackNoticeCopy.libraryBanner)
     return texts
 }()
+
+/// 문구에 들어가는 **표시 개수**(한도 숫자가 아니다) — 숫자 검사에서 이것만 지운다
+private let countSentinels = ["37개", "41개"]
 
 @Suite("외부 채움글 1-c 1단계 — 문구 표 검사 (U6·금칙어·한도 숫자 0)")
 struct PackNoticeCopyLintTests {
@@ -361,7 +404,8 @@ struct PackNoticeCopyLintTests {
     @Test("★ 8절 #3 — 한도 숫자를 쓰지 않는다: 숫자는 「외 n개」의 개수뿐")
     func noLimitNumbers() {
         for text in everyCopy {
-            let withoutCount = text.replacingOccurrences(of: #"외 \d+개"#, with: "", options: .regularExpression)
+            var withoutCount = text.replacingOccurrences(of: #"외 \d+개"#, with: "", options: .regularExpression)
+            for sentinel in countSentinels { withoutCount = withoutCount.replacingOccurrences(of: sentinel, with: "") }
             #expect(!withoutCount.contains { $0.isNumber }, "\(text)")
         }
     }
@@ -373,5 +417,62 @@ struct PackNoticeCopyLintTests {
             #expect(made.message.hasSuffix("요."), "\(row.id)")
             #expect(made.title.hasSuffix("요"), "\(row.id)")
         }
+    }
+}
+
+// MARK: - 2단계 문구 (4-3절 상태 표시 · 배너 · 정리 · 복구)
+
+@Suite("외부 채움글 1-c 2단계 — 상태 표시·배너·정리·복구 문구 (4-3절)")
+struct PackNoticeCopyStage2Tests {
+
+    @Test("★ 4-3절 — 목록 행 보조줄: 켬·끔은 배지 없음, 나머지 셋은 표 그대로")
+    func statusLines() {
+        #expect(PackNoticeCopy.statusLine(.on) == nil)
+        #expect(PackNoticeCopy.statusLine(.off) == nil)
+        #expect(PackNoticeCopy.statusLine(.restingOverLimit) == "쉬는 중 · 한도를 넘어 지금은 안 떠요")
+        #expect(PackNoticeCopy.statusLine(.restingForUserSnippets) == "쉬는 중 · 내 채움글을 정리하면 다시 떠요")
+        #expect(PackNoticeCopy.statusLine(.unavailable) == "읽을 수 없어요 · 다시 가져오거나 지워 주세요")
+        #expect(PackNoticeCopy.unavailablePackDetail
+                == "이 팩의 파일을 읽을 수 없어요. 같은 이름으로 파일을 다시 가져오면 바꿀 수 있어요. 지울 수도 있어요.")
+    }
+
+    @Test("★ 4-3절 — 배너 ㉠(한도 초과)·㉡(목록 손상 — 낯선 버전은 한 줄 더)")
+    func banners() {
+        #expect(PackNoticeCopy.overLimitBanner(loadableCount: 12)
+                == "내 채움글이 한도를 넘어서 앞의 12개만 키보드에 떠요. 나머지와 외부 팩은 지금 안 떠요. 지운 것은 없어요.")
+        let damaged = "외부 채움글 목록을 읽을 수 없어요. 가져온 팩 파일은 지우지 않았어요. 복구하기 전에는 채움글을 저장하거나 지울 수 없어요."
+        #expect(PackNoticeCopy.libraryBanner(.unreadable) == damaged)
+        #expect(PackNoticeCopy.libraryBanner(.corrupt) == damaged)
+        #expect(PackNoticeCopy.libraryBanner(.unknownSchema) == damaged + "\n"
+                + "새 버전의 글쇠에서 만든 목록 같아요. 앱을 최신 버전으로 올리면 다시 읽힐 수 있어요. 복구하면 이 기기의 팩 목록을 다시 만들어요.")
+        #expect(PackNoticeCopy.libraryBanner(.readable) == nil)
+    }
+
+    @Test("배너 ㉢(읽을 수 없는 팩) — 이름 뒤는 「의」라 받침과 무관, 여럿이면 「A」 외 n개 팩의")
+    func unavailableBanner() {
+        #expect(PackNoticeCopy.unavailablePacksBanner(names: ["사자성어 예시 팩"])
+                == "「사자성어 예시 팩」의 파일을 읽을 수 없어서 이 팩은 지금 안 떠요. 같은 이름으로 파일을 다시 가져오면 바꿀 수 있어요. 지울 수도 있어요.")
+        #expect(PackNoticeCopy.unavailablePacksBanner(names: ["회사 상용구", "상용 영어"])
+                == "「회사 상용구」 외 1개 팩의 파일을 읽을 수 없어서 지금 안 떠요. 같은 이름으로 파일을 다시 가져오면 바꿀 수 있어요. 지울 수도 있어요.")
+    }
+
+    @Test("★ 4-3절 — 정리 화면: 경계 줄·풋터·끝 알림")
+    func cleanup() {
+        #expect(PackNoticeCopy.cleanupBoundary == "여기부터는 지금 안 떠요")
+        #expect(PackNoticeCopy.cleanupFooter == "지우면 되돌릴 수 없어요. 한도 안으로 들어오면 쉬던 팩이 다시 떠요.")
+        #expect(PackNoticeCopy.cleanupDoneMessage == "이제 모두 쓸 수 있어요. 쉬던 팩이 한도 안이면 다시 떠요.")
+    }
+
+    @Test("★ R24 — 복구 확인 시트: 4-3절 문구 + 「틀·단축어 주인이 바뀔 수 있어요」 한 줄, 끝 알림")
+    func recoverySheet() {
+        #expect(PackNoticeCopy.recoveryTitle == "목록을 복구할까요?")
+        #expect(PackNoticeCopy.recoveryMessage(packCount: 3)
+                == "가져온 팩 3개를 찾았어요. 순서와 켬/끔은 알 수 없어서 모두 꺼진 채로 불러와요. 쓸 팩은 직접 켜 주세요. 원래 목록 파일은 따로 보관해요.\n"
+                + "순서가 바뀌어서 같은 틀이나 단축어를 어느 팩이 쓸지 달라질 수 있어요.")
+        #expect(PackNoticeCopy.recoveryConfirm == "복구" && PackNoticeCopy.recoveryCancel == "취소")
+        #expect(PackNoticeCopy.recoveredMessage(packCount: 3) == "팩 3개를 불러왔어요. 모두 꺼져 있어요.")
+        // 팩 파일이 하나도 없을 때 — 「0개를 찾았어요」로 쓰지 않는다
+        #expect(!PackNoticeCopy.recoveryMessage(packCount: 0).contains("0"))
+        #expect(!PackNoticeCopy.recoveredMessage(packCount: 0).contains("0"))
     }
 }

@@ -30,8 +30,14 @@ public struct PackStoreClient: Sendable {
     public func revision() async -> Int { await run { $0.revision } }
     public func order() async -> [SnippetSourceSlot] { await run { $0.order } }
     public func unreadablePackIDs() async -> [String] { await run { $0.unreadablePackIDs() } }
-    /// 앱 실행 때 한 번(옛 세대·안 쓰는 변환본 정리)
+    public func libraryStatus() async -> PackLibraryStatus { await run { $0.libraryStatus() } }
+    public func userSnippetBudget() async -> UserSnippetBudget { await run { $0.userSnippetBudget() } }
+    public func recoveryPreview() async -> Int? { await run { $0.recoveryPreview() } }
+    /// 앱 실행 때 한 번(옛 세대·안 쓰는 변환본 정리 · 내 채움글 세대 올림 · 변환본 내용 검사 — 1-c G6·G9)
     public func maintain() async { await run { $0.maintain() } }
+
+    /// 목록 복구(R24) — 사용자가 확인 시트에서 「복구」를 누른 뒤에만
+    public func recoverLibrary() async -> PackLibraryRecovery { await run { $0.recoverLibrary() } }
 
     // MARK: - 쓰기 — `PackStore`의 같은 이름 메서드 그대로, 결과에 알림을 붙인다
 

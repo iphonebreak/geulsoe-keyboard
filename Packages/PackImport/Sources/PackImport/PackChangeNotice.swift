@@ -26,14 +26,20 @@ public struct PackChangeNotice: Equatable, Sendable {
         case userSaveWhileOverLimit
         /// B1 내장 팩 켜기 — 한도
         case builtInOverLimit
+        /// B1b 내장 팩 켜기 — 내 채움글이 이미 한도 초과(다른 내장 팩을 꺼도 안 풀린다, 2단계 추가)
+        case builtInWhileUserOverLimit
         /// B2 내장 팩 켜기 — 외부 팩이 밀림(순서 바꾸기로는 안 풀린다 — 내장이 먼저다)
         case builtInDisplacesPacks
         /// C1 외부 팩 켜기 — 다른 팩이 밀림(R15)
         case enableDisplacesPacks
         /// C2 외부 팩 켜기 — 자기 자신이 한도 밖
         case enableExceedsLimit
+        /// C2b 외부 팩 켜기 — 내 채움글이 이미 한도 초과(다른 팩을 꺼도 안 풀린다, 2단계 추가)
+        case enableWhileUserOverLimit
         /// C3 켜진 팩 교체 — 한도
         case replaceExceedsLimit
+        /// C3b 팩 교체 — 내 채움글이 이미 한도 초과(2단계 추가)
+        case replaceWhileUserOverLimit
         /// D1 가져오기 — 한도(「꺼 둔 채로 가져오기」를 준다, U2)
         case importExceedsLimit
         /// D2 가져오기 — 내 채움글이 이미 한도 초과(「다른 외부 팩을 끄라」는 틀린 안내라 갈랐다)
@@ -70,13 +76,13 @@ public struct PackChangeNotice: Equatable, Sendable {
     /// 알림 버튼 — 닫는 버튼(`confirm`·`close`)과 그 밖의 동작. 동작이 가는 화면(정리·복구·순서·가져오기)은 다음 단계들이 붙인다
     public enum Action: CaseIterable, Sendable {
         case confirm, close
-        /// 내 채움글 정리 — 2단계(옛 초과본 정리 화면)
+        /// 내 채움글 정리 — 2단계 정리 화면(`SnippetCleanupView`)
         case organize
         /// 꺼 둔 채로 가져오기(U2) — 4·5단계
         case importDisabled
         /// 팩 순서 바꾸기(U4) — 3단계
         case reorderPacks
-        /// 목록 복구(R24) — 2단계
+        /// 목록 복구(R24) — 2단계 복구 확인 시트
         case recoverLibrary
         /// 팩 지우기 — 3단계
         case deletePack
@@ -100,7 +106,7 @@ public struct PackChangeNotice: Equatable, Sendable {
 
     /// - Parameters:
     ///   - userSnippetsOverLimit: **저장 전** 내 채움글 + 켜진 내장이 이미 한도를 넘었나(`evaluation().baselineOverflow`가 비어 있지 않음).
-    ///     거부는 저장본을 바꾸지 않으므로 거부 뒤에 읽어도 같은 값이다. A·D 거부에서만 부른다
+    ///     거부는 저장본을 바꾸지 않으므로 거부 뒤에 읽어도 같은 값이다. 한도 거부(A·B1·C2·C3·D)에서만 부른다
     ///   - packName: 팩 id → 이름(`PackStore.summaries()`). 이름이 들어가는 알림(B2·C1·G1·G2)에서 **첫 팩만** 부른다. 모르면 「이름 없는 팩」
     /// - Returns: 받았고 쉬게 된 팩이 없으면 nil — **거부는 언제나 알림이 있다**
     public init?(_ operation: Operation, result: PackStore.CommitResult,
@@ -130,7 +136,9 @@ public struct PackChangeNotice: Equatable, Sendable {
         case .gate(let gate):
             switch gate {
             case .baselineOverLimit(let dimensions):
-                if operation == .enableBuiltIn { return (.builtInOverLimit, []) }
+                if operation == .enableBuiltIn {
+                    return (userSnippetsOverLimit() ? .builtInWhileUserOverLimit : .builtInOverLimit, [])
+                }
                 if userSnippetsOverLimit() { return (.userSaveWhileOverLimit, []) }
                 // 개수 쪽이 넘었으면 문구를 줄여도 안 풀린다 — 지우기를 먼저 말하는 A1
                 let countSide = dimensions.contains(.items) || dimensions.contains(.needleCount)
@@ -138,15 +146,15 @@ public struct PackChangeNotice: Equatable, Sendable {
             case .displacesPacks(let ids):
                 switch operation {
                 case .enableBuiltIn: return (.builtInDisplacesPacks, ids)
-                case .replacePack: return (.replaceExceedsLimit, ids)
+                case .replacePack: return (replaceLimit(userSnippetsOverLimit), ids)
                 case .importPack, .importDisabledPack: return (importLimit(userSnippetsOverLimit), [])
                 default: return (.enableDisplacesPacks, ids)
                 }
             case .packExcluded(let id, _):
                 switch operation {
                 case .importPack, .importDisabledPack: return (importLimit(userSnippetsOverLimit), [])
-                case .replacePack: return (.replaceExceedsLimit, [id])
-                default: return (.enableExceedsLimit, [id])
+                case .replacePack: return (replaceLimit(userSnippetsOverLimit), [id])
+                default: return (userSnippetsOverLimit() ? .enableWhileUserOverLimit : .enableExceedsLimit, [id])
                 }
             case .tooManyPacks: return (.importTooManyPacks, [])
             case .invalidDisabledImport: return (.internalError, [])
@@ -163,9 +171,14 @@ public struct PackChangeNotice: Equatable, Sendable {
         userSnippetsOverLimit() ? .importWhileUserOverLimit : .importExceedsLimit
     }
 
+    private static func replaceLimit(_ userSnippetsOverLimit: () -> Bool) -> Reason {
+        userSnippetsOverLimit() ? .replaceWhileUserOverLimit : .replaceExceedsLimit
+    }
+
     private static func buttons(_ reason: Reason) -> ([Action], Action) {
         switch reason {
-        case .userSaveWhileOverLimit: ([.organize], .confirm)
+        case .userSaveWhileOverLimit, .builtInWhileUserOverLimit, .enableWhileUserOverLimit, .replaceWhileUserOverLimit:
+            ([.organize], .confirm)
         case .enableDisplacesPacks: ([.reorderPacks], .confirm)
         case .importExceedsLimit: ([.importDisabled], .close)
         case .importWhileUserOverLimit: ([.organize, .importDisabled], .close)
