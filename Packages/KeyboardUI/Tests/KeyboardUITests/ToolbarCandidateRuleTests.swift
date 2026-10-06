@@ -113,6 +113,38 @@ struct ToolbarCandidateRuleTests {
         #expect(KeyboardMetrics.wordChipSlots([Self.mixed, Self.only], hasBadge: true) == [[Self.mixed, Self.only]])
     }
 
+    // MARK: - D18 붙여넣기 칩이 있으면 [칩][✕]만 (PDR `emoji-word-suggestion.md` D18, 실기 세션 1 K7)
+
+    private static let carRow = [WordSuggestionCandidate.word("자동차를"), .word("자동차가"), mixed, only]
+
+    @Test("★ D18 — 붙여넣기 칩이 있으면 추천단어·이모지 칩을 그리지 않는다 · ✕는 남는다 ([복사됨][✕])")
+    func pasteChipStandsAlone() {
+        let visible = KeyboardMetrics.candidateRowWords(Self.carRow, hasPaste: true)
+        #expect(visible.isEmpty, "[복사됨][추천]×4[✕]가 아니다")
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: false, hasWords: !visible.isEmpty, hasPaste: true))
+    }
+
+    @Test("★ D18 — 붙여넣기 칩이 있으면 성경 배지도 후보 줄에 그리지 않는다")
+    func pasteChipHidesBadge() {
+        #expect(!KeyboardMetrics.candidateRowShowsBadge(hasPaste: true))
+        #expect(KeyboardMetrics.candidateRowShowsBadge(hasPaste: false))
+    }
+
+    @Test("D18 — ✕로 붙여넣기 칩이 물러나면 후보가 그대로 그려진다(✕ 유지)")
+    func afterPasteDismissWordsReturn() {
+        let visible = KeyboardMetrics.candidateRowWords(Self.carRow, hasPaste: false)
+        #expect(visible == Self.carRow)
+        #expect(KeyboardMetrics.wordChipSlots(visible, hasBadge: false).count == 4)
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: false, hasWords: true, hasPaste: false))
+    }
+
+    @Test("회귀 — 채움글 칩은 현행 그대로: 붙여넣기 칩과 함께여도 ✕ 하나, 도구 행 없음")
+    func snippetWithPasteUnchanged() {
+        #expect(KeyboardMetrics.candidateRowWords([], hasPaste: true).isEmpty)
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: true, hasWords: false, hasPaste: true))
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: true, hasWords: false, hasPaste: false))
+    }
+
     @Test("D6 여백C — 이모지 칩이 뜬 줄은 칩 안쪽 좌우 여백 0, 아니면 지금 그대로 6")
     func chipPadding() {
         #expect(KeyboardMetrics.wordChipHorizontalPadding(hasEmojiChips: true) == 0)

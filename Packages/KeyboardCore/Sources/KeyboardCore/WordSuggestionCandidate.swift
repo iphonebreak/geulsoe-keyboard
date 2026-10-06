@@ -52,11 +52,15 @@ public enum WordSuggestionGate {
     /// - Parameters:
     ///   - isSecureTextEntry: 비밀번호 칸 — 추천·학습·이모지 모두 하지 않는다(보안 규칙)
     ///   - hasSnippet: 채움글·날짜 칩이 떠 있다 — 칩만 보인다(2026-09-03 결정)
+    ///   - hasPasteChip: 붙여넣기 칩(일반 텍스트·인증번호)이 떠 있다 — `[칩][✕]`만 보인다(D18, 2026-10-06).
+    ///     ✕로 칩을 물리면 이 값이 거짓이 되어 지금 단어의 후보가 나온다. v1.2.0부터 둘이 한 줄에 함께 떠
+    ///     말줄임으로 안 보였다(실기 세션 1 K7). 칩이 가린 동안은 sync뿐이라 이모지 기억은 버려지지 않는다(D16)
     ///   - isDismissed: ✕로 내린 단어를 이어 치는 중
     ///   - isSuppressedAfterCursorMove: 커서 이동 뒤 다음 키 입력 전
     public static func allowsWords(
-        isSecureTextEntry: Bool, hasSnippet: Bool, isDismissed: Bool, isSuppressedAfterCursorMove: Bool
+        isSecureTextEntry: Bool, hasSnippet: Bool, hasPasteChip: Bool,
+        isDismissed: Bool, isSuppressedAfterCursorMove: Bool
     ) -> Bool {
-        !isSecureTextEntry && !hasSnippet && !isDismissed && !isSuppressedAfterCursorMove
+        !isSecureTextEntry && !hasSnippet && !hasPasteChip && !isDismissed && !isSuppressedAfterCursorMove
     }
 }

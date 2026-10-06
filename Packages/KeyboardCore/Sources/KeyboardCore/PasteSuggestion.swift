@@ -92,3 +92,20 @@ public struct PasteSuggestion: Equatable, Sendable {
         return String(folded.prefix(previewLimit)) + "…"
     }
 }
+
+/// 툴바에 붙여넣기 칩을 **지금** 띄울까 — 조립 지점(`updateSuggestionBar`)의 조건식을 옮겼다
+/// (익스텐션 타깃은 `swift test`가 닿지 않는다). 이 결과가 추천단어 게이트(`WordSuggestionGate`의
+/// `hasPasteChip`, D18)와 성경 배지 예약을 함께 정한다.
+public enum PasteChipGate {
+    /// - Parameters:
+    ///   - suggestion: 등장 1회 읽기가 만든 칩 값(없으면 nil)
+    ///   - hasFullAccess: 전체 접근 — 없으면 칩이 없다(읽기 자체를 하지 않지만 여기서도 막는다)
+    ///   - isSecureTextEntry: 붙여넣을 **입력란**이 비밀번호 칸 — 두 종류 모두 띄우지 않는다
+    ///   - isSuppressedByTyping: 이번 등장에서 사용자가 키를 눌렀다 — 그 등장 동안 내려간다(소비가 아니다)
+    public static func visibleChip(
+        _ suggestion: PasteSuggestion?, hasFullAccess: Bool, isSecureTextEntry: Bool, isSuppressedByTyping: Bool
+    ) -> PasteSuggestion? {
+        guard hasFullAccess, !isSecureTextEntry, !isSuppressedByTyping else { return nil }
+        return suggestion
+    }
+}

@@ -246,7 +246,9 @@ private struct SuggestionToolbar: View {
 
     var body: some View {
         let snippet = state.snippetSuggestion
-        let words = state.wordSuggestions
+        // D18 — 붙여넣기 칩이 있으면 `[칩][✕]`만: 추천단어·이모지 칩·배지를 같은 줄에 그리지 않는다
+        let pasteStandsAlone = state.pasteSuggestion != nil
+        let words = KeyboardMetrics.candidateRowWords(state.wordSuggestions, hasPaste: pasteStandsAlone)
         // ★ **배지는 여기 안 넣는다** — 배지만 떠 있을 때는 ✕가 없어야 한다 (사용자 결정 2026-09-21).
         //
         // 예전 주석은 *"배지만 떠 있을 때 내릴 방법이 없으면 안 된다"* 고 적었다. **전제가 틀렸다.**
@@ -337,7 +339,8 @@ private struct SuggestionToolbar: View {
             //
             // 후보가 없을 때(= 도구 행이 뜰 때)의 배지는 **도구 행 안**에 있다(`toolButtons`).
             // 이 조건을 빼면 같은 배지가 **두 번** 그려진다.
-            if hasCandidates, let count = state.bibleMatchCount, let onBibleBadgeTap {
+            if hasCandidates, KeyboardMetrics.candidateRowShowsBadge(hasPaste: pasteStandsAlone),
+               let count = state.bibleMatchCount, let onBibleBadgeTap {
                 bibleBadge(count: count, action: onBibleBadgeTap)
             }
             if hasCandidates, let onDismissSuggestions {

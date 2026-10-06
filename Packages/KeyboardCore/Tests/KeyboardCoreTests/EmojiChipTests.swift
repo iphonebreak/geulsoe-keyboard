@@ -387,14 +387,15 @@ struct WordSuggestionCandidateTests {
                 "뽑은 값이 달라도 라벨은 같다")
     }
 
-    @Test("후보 줄 게이트 — secure·채움글 칩·✕ 억제·커서 이동 억제 중 하나라도 있으면 추천단어(이모지 포함)를 계산하지 않는다 (4-4절)")
+    @Test("후보 줄 게이트 — secure·채움글 칩·붙여넣기 칩(D18)·✕ 억제·커서 이동 억제 중 하나라도 있으면 추천단어(이모지 포함)를 계산하지 않는다 (4-4절)")
     func gate() {
         #expect(WordSuggestionGate.allowsWords(
-            isSecureTextEntry: false, hasSnippet: false, isDismissed: false, isSuppressedAfterCursorMove: false))
-        for blocked in 0..<4 {
+            isSecureTextEntry: false, hasSnippet: false, hasPasteChip: false,
+            isDismissed: false, isSuppressedAfterCursorMove: false))
+        for blocked in 0..<5 {
             #expect(!WordSuggestionGate.allowsWords(
-                isSecureTextEntry: blocked == 0, hasSnippet: blocked == 1,
-                isDismissed: blocked == 2, isSuppressedAfterCursorMove: blocked == 3))
+                isSecureTextEntry: blocked == 0, hasSnippet: blocked == 1, hasPasteChip: blocked == 2,
+                isDismissed: blocked == 3, isSuppressedAfterCursorMove: blocked == 4))
         }
     }
 }
@@ -503,5 +504,203 @@ struct EmojiChipInsertionTests {
         controller.handle(.space)
         #expect(output.text == "🚕 자동차는 ")
         #expect(learned == ["자동차는"])
+    }
+}
+
+// MARK: - D18 붙여넣기 칩이 있으면 [칩][✕]만 (PDR `emoji-word-suggestion.md` D18, 실기 세션 1 K7)
+
+/// 조립 지점(`KeyboardViewController`)과 **같은 순서**로 붙여넣기 칩과 추천단어 줄을 함께 계산하는 하네스.
+///
+/// - 등장(`appear`) = `probePasteboard` — 타이핑 억제를 풀고, `PasteboardProbe` 게이트를 지나면 칩을 만든다.
+///   전체 접근이 없으면 읽지 않는다. 그 뒤 등장 sync(이모지 칩 상태는 프로세스 수명, D16)
+/// - 키(`type`) = `updateSuggestionBar(userEdited: true)` — 타이핑 억제를 먼저 켜고 칩 → 게이트 → 이모지 순
+/// - ✕(`dismiss`) = `handleDismissSuggestions` — 칩이 있으면 그 클립보드를 소비하고 칩만 내린 뒤 sync로 다시 계산
+@MainActor
+private struct PasteRowHarness {
+    var chips = ChipHarness()
+    let baseResolver: EmojiCandidateResolver?
+    var hasFullAccess = true
+    var hasSnippet = false
+    /// 사전 엔진이 돌려줄 단어 후보(가짜) — 게이트가 닫히면 계산하지 않는다
+    let engineWords = ["자동차를", "자동차가"]
+    private(set) var pasteSuggestion: PasteSuggestion?
+    private(set) var suppressedByTyping = false
+    private(set) var probedChangeCount: Int?
+    /// VC의 `static consumedPasteboardChangeCount` — 프로세스 수명
+    private(set) var consumedChangeCount: Int?
+    private(set) var chip: PasteSuggestion?
+    private(set) var row: [WordSuggestionCandidate] = []
+    private(set) var clipboardReads = 0
+    /// 지난 등장 때 받은 문서 — 등장마다 출력 기록이 새로 시작되므로 그 앞에 붙여 문서 전체를 낸다
+    private var documentBase = ""
+    var documentText: String { documentBase + chips.output.text }
+
+    init() { baseResolver = chips.resolver }
+
+    /// 키보드 등장 — 다른 앱에서 복사하고 돌아온 순간. 문서는 그대로다
+    mutating func appear(changeCount: Int, clipboard: String) {
+        let documentTail = documentText
+        pasteSuggestion = nil
+        probedChangeCount = nil
+        suppressedByTyping = false
+        if hasFullAccess {
+            let plan = PasteboardProbe.plan(
+                codeSuggestionsEnabled: true, pasteSuggestionsEnabled: true, historyEnabled: false,
+                changeCount: changeCount, consumedChangeCount: consumedChangeCount, recordedChangeCount: nil)
+            let text = PasteboardProbe.read(plan, hasStrings: { true }, readString: {
+                clipboardReads += 1
+                return clipboard
+            })
+            if let text, plan.needsSuggestion {
+                pasteSuggestion = PasteSuggestion.make(from: text)
+                probedChangeCount = changeCount
+            }
+        }
+        gateBeforeEmoji()
+        documentBase = documentTail
+        chips.reappear(documentTail: documentTail)
+        finishRow()
+    }
+
+    mutating func type(_ keys: String) {
+        suppressedByTyping = true
+        gateBeforeEmoji()
+        chips.type(keys)
+        finishRow()
+    }
+
+    /// ✕ — 칩이 있으면 그 클립보드를 소비하고 칩을 내린다(추천단어는 안 보였으니 억제하지 않는다)
+    mutating func dismiss() {
+        if chip != nil {
+            consumedChangeCount = probedChangeCount
+            pasteSuggestion = nil
+        }
+        gateBeforeEmoji()
+        chips.recompute(isUserEdit: false)
+        finishRow()
+    }
+
+    private var wordsAllowed: Bool {
+        WordSuggestionGate.allowsWords(
+            isSecureTextEntry: false, hasSnippet: hasSnippet, hasPasteChip: chip != nil,
+            isDismissed: false, isSuppressedAfterCursorMove: false)
+    }
+
+    /// 칩 판정 → 게이트 → 이모지 리졸버 — 조립 지점의 순서
+    private mutating func gateBeforeEmoji() {
+        chip = PasteChipGate.visibleChip(
+            pasteSuggestion, hasFullAccess: hasFullAccess, isSecureTextEntry: false,
+            isSuppressedByTyping: suppressedByTyping)
+        chips.resolver = wordsAllowed ? baseResolver : nil
+    }
+
+    private mutating func finishRow() {
+        row = WordSuggestionCandidate.row(
+            words: wordsAllowed ? engineWords : [], emoji: chips.shown, sourceWord: chips.controller.currentWord)
+    }
+}
+
+@MainActor
+@Suite("D18 — 붙여넣기 칩이 있으면 [칩][✕]만, ✕로 물리면 추천단어·이모지 칩 (실기 세션 1 K7)")
+struct PasteChipWordRowTests {
+
+    private static let copied = "다른 앱에서 복사한 글"
+
+    /// 「자동차」 이모지 칩 상태에서 다른 앱으로 가 복사하고 메모로 돌아온다 — 실기에서 본 바로 그 순서
+    private func carThenCopyAndReturn() throws -> (PasteRowHarness, emoji: String) {
+        var harness = PasteRowHarness()
+        harness.type("wkehdck")
+        let emoji = try #require(harness.chips.shown)
+        #expect(harness.row.count == 4, "복사 전 — [단어][단어][🚗 자동차][🚗]")
+        harness.appear(changeCount: 7, clipboard: Self.copied)
+        return (harness, emoji)
+    }
+
+    @Test("★ 붙여넣기 칩 + 단어·이모지 후보 → 칩만 남고 후보 줄은 비어 있다 (K7 재현)")
+    func pasteChipHidesWordsAndEmoji() throws {
+        let (harness, _) = try carThenCopyAndReturn()
+        #expect(harness.chip?.kind == .text)
+        #expect(harness.row.isEmpty, "[복사됨][추천]×4[✕]가 아니라 [복사됨][✕]")
+        #expect(harness.chips.shown == nil)
+    }
+
+    @Test("★ ✕ → 붙여넣기 칩이 물러나고 지금 단어의 추천단어·이모지 칩이 나온다 — 이모지는 복사 전과 같은 값 (D16·D18)")
+    func dismissRevealsWordRow() throws {
+        var (harness, emoji) = try carThenCopyAndReturn()
+        let draws = harness.chips.generator.draws
+        harness.dismiss()
+        #expect(harness.chip == nil)
+        #expect(harness.row == WordSuggestionCandidate.row(
+            words: ["자동차를", "자동차가"], emoji: emoji, sourceWord: "자동차"))
+        #expect(harness.chips.generator.draws == draws, "새로 뽑지 않았다 — 칩이 가린 동안 기억을 버리지 않았다")
+    }
+
+    @Test("★ ✕로 물린 클립보드는 다시 띄워도 칩이 없다 — 내용도 다시 읽지 않는다, 새로 복사하면 뜬다")
+    func dismissedClipboardDoesNotReturn() throws {
+        var (harness, _) = try carThenCopyAndReturn()
+        harness.dismiss()
+        let reads = harness.clipboardReads
+        harness.appear(changeCount: 7, clipboard: Self.copied)
+        #expect(harness.chip == nil)
+        #expect(harness.row.count == 4, "후보 줄이 그대로 — [단어][단어][🚗 자동차][🚗]")
+        #expect(harness.clipboardReads == reads, "소비한 클립보드는 읽지도 않는다")
+        harness.appear(changeCount: 8, clipboard: "또 복사한 글")
+        #expect(harness.chip != nil, "새 복사(changeCount 변화)는 다시 뜬다")
+        #expect(harness.row.isEmpty)
+    }
+
+    @Test("회귀 — 글자를 치면 붙여넣기 칩이 물러나고 후보가 뜬다(클립보드는 소비하지 않는다)")
+    func typingStillReleasesChip() throws {
+        var (harness, _) = try carThenCopyAndReturn()
+        harness.type("fmf")                       // 자동차를
+        #expect(harness.chip == nil)
+        #expect(harness.row.contains(.word("자동차를")))
+        harness.appear(changeCount: 7, clipboard: Self.copied)
+        #expect(harness.chip != nil, "타이핑 억제는 그 등장 동안뿐 — 소비가 아니므로 다음 등장에 다시 뜬다")
+    }
+
+    @Test("회귀 — 인증번호 칩도 같은 규칙이다")
+    func verificationCodeChipToo() {
+        var harness = PasteRowHarness()
+        harness.type("wkehdck")
+        harness.appear(changeCount: 9, clipboard: "[Web발신] 인증번호 [268755]를 입력하세요")
+        #expect(harness.chip?.kind == .verificationCode)
+        #expect(harness.row.isEmpty)
+        harness.dismiss()
+        #expect(harness.row.count == 4)
+    }
+
+    @Test("회귀 — 전체 접근 OFF면 붙여넣기 칩이 없고(읽지도 않는다) 후보 줄은 지금과 같다")
+    func noFullAccessUnchanged() {
+        var harness = PasteRowHarness()
+        harness.hasFullAccess = false
+        harness.type("wkehdck")
+        harness.appear(changeCount: 7, clipboard: Self.copied)
+        #expect(harness.chip == nil)
+        #expect(harness.clipboardReads == 0)
+        #expect(harness.row.count == 4)
+    }
+
+    @Test("회귀 — 채움글 칩이 있으면 붙여넣기 칩이 있든 없든 추천단어를 계산하지 않는다(현행 우선순위)")
+    func snippetPriorityUnchanged() {
+        for hasPasteChip in [false, true] {
+            #expect(!WordSuggestionGate.allowsWords(
+                isSecureTextEntry: false, hasSnippet: true, hasPasteChip: hasPasteChip,
+                isDismissed: false, isSuppressedAfterCursorMove: false))
+        }
+    }
+
+    @Test("붙여넣기 칩 게이트 — 전체 접근·secure·타이핑 억제 중 하나라도 걸리면 칩 없음")
+    func pasteChipGate() throws {
+        let paste = try #require(PasteSuggestion.make(from: Self.copied))
+        #expect(PasteChipGate.visibleChip(
+            paste, hasFullAccess: true, isSecureTextEntry: false, isSuppressedByTyping: false) == paste)
+        for blocked in 0..<3 {
+            #expect(PasteChipGate.visibleChip(
+                paste, hasFullAccess: blocked != 0, isSecureTextEntry: blocked == 1,
+                isSuppressedByTyping: blocked == 2) == nil)
+        }
+        #expect(PasteChipGate.visibleChip(
+            nil, hasFullAccess: true, isSecureTextEntry: false, isSuppressedByTyping: false) == nil)
     }
 }

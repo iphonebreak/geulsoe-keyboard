@@ -708,15 +708,18 @@ final class KeyboardViewController: UIInputViewController {
         //
         // secure 입력란은 둘 다 제외한다 — **복사한 쪽**이 아니라 **붙여넣을 쪽**이 비밀번호 칸인
         // 경우다. 사용자의 "비밀번호 관련 없이 모두 보여준다" 결정은 복사한 쪽 이야기다.
-        let chip: PasteSuggestion? = {
-            guard !secure, let paste = pasteSuggestion else { return nil }
-            return pasteChipSuppressedByTyping ? nil : paste
-        }()
+        // 식은 `PasteChipGate`(KeyboardCore)에 있다 — 익스텐션 타깃은 `swift test`가 닿지 않는다.
+        let chip = PasteChipGate.visibleChip(
+            pasteSuggestion, hasFullAccess: hasFullAccess, isSecureTextEntry: secure,
+            isSuppressedByTyping: pasteChipSuppressedByTyping)
 
         // MARK: 성경 검색 배지 (계획서 2-1·2-6)
         //
         // **우선순위**: 채움글 칩 > 붙여넣기 칩 > 배지 + 추천단어 2개 > 추천단어 3개/도구 행.
         // 칩이 있으면 배지를 숨긴다 — 칩 하나가 이미 287~321pt를 쓴다.
+        // ★ D18(2026-10-06): 붙여넣기 칩이 있으면 **추천단어·이모지 칩도** 띄우지 않는다(아래 `hasPasteChip`) —
+        //   v1.2.0부터 배지만 막고 추천단어는 함께 떠 `[복사됨][추천]×4[✕]`가 말줄임으로 안 보였다(실기 세션 1 K7).
+        //   ✕로 칩을 물리면 지금 단어의 후보가 나온다. 채움글 칩과 붙여넣기 칩은 지금처럼 한 줄에 함께 뜬다.
         // 붙여넣기 칩을 이기게 두는 이유는 4차 A3-4의 재현 경로다: 「믿음」을 쳐 둔 채 앱을
         // 전환했다 돌아오면 꼬리가 다시 서고(배지 조건) 같은 등장에서 억제가 풀려(칩 조건)
         // 둘이 한 줄에 같이 떴다.
@@ -789,7 +792,8 @@ final class KeyboardViewController: UIInputViewController {
         //   (`textDidChange`는 sync 뒤), sync(userEdited == false)에서는 뽑은 값을 버리지도 새로 뽑지도 않는다 —
         //   호스트가 꼬리를 잠깐 비웠다 다시 세워도 같은 값이다(검증 ⑤-2a 참고 2, `EmojiChipState`).
         let wordsAllowed = WordSuggestionGate.allowsWords(
-            isSecureTextEntry: secure, hasSnippet: snippet != nil, isDismissed: dismissedSuggestionWord != nil,
+            isSecureTextEntry: secure, hasSnippet: snippet != nil, hasPasteChip: chip != nil,
+            isDismissed: dismissedSuggestionWord != nil,
             isSuppressedAfterCursorMove: suppressesWordSuggestionsAfterCursorMove
         ) && suggestionEngine != nil
         if secure { Self.emojiChipState.reset() }  // secure는 기억을 비운다(D16 예외)
@@ -959,7 +963,9 @@ final class KeyboardViewController: UIInputViewController {
         playToolbarHaptic()
         guard let inputController, let viewState else { return }
         if viewState.snippetSuggestion != nil { Self.dismissedSnippetTail = inputController.textTail }
-        if !viewState.wordSuggestions.isEmpty, !inputController.currentWord.isEmpty {
+        // D18 — 붙여넣기 칩이 있으면 추천단어는 그려지지 않았다(`KeyboardMetrics.candidateRowWords`) —
+        // 이 ✕는 칩만 물리고, 다시 계산하면 지금 단어의 후보가 나온다. 안 보인 후보를 억제하지 않는다.
+        if viewState.pasteSuggestion == nil, !viewState.wordSuggestions.isEmpty, !inputController.currentWord.isEmpty {
             dismissedSuggestionWord = inputController.currentWord
         }
         if viewState.pasteSuggestion != nil {

@@ -190,6 +190,24 @@ public enum KeyboardMetrics {
         hasSnippet || hasWords || hasPaste
     }
 
+    /// 후보 줄에 그릴 추천단어(이모지 칩 포함) — **붙여넣기 칩이 있으면 없다**(D18, 2026-10-06).
+    ///
+    /// 붙여넣기 칩이 있으면 그 줄은 `[칩][✕]`만이다(채움글 칩은 현행대로 함께). v1.2.0부터 둘이 한 줄에
+    /// 함께 떠 `[복사됨][추천]×4[✕]`가 말줄임으로 안 보였다(실기 세션 1 K7). 조립 지점이 이미 후보를 비워
+    /// 넘기지만(`WordSuggestionGate`의 `hasPasteChip`) 그림 쪽도 같은 규칙을 지킨다 — ✕를 누르면 칩이
+    /// 물러나고 이 함수가 후보를 그대로 돌려준다.
+    public static func candidateRowWords(
+        _ words: [WordSuggestionCandidate], hasPaste: Bool
+    ) -> [WordSuggestionCandidate] {
+        hasPaste ? [] : words
+    }
+
+    /// 후보 줄에 성경 배지를 그리는가 — 붙여넣기 칩이 있으면 그리지 않는다(D18, `candidateRowWords`와 같은 이유).
+    /// 조립 지점은 칩이 있으면 검색 예약부터 하지 않는다(배지 수 nil).
+    public static func candidateRowShowsBadge(hasPaste: Bool) -> Bool {
+        !hasPaste
+    }
+
     /// 추천단어를 몇 개까지 띄울까 — **실제 배지 유무**로 갈린다.
     ///
     /// ## ★ 자리 예약을 되돌렸다 (2026-09-21 저녁 → 밤)
