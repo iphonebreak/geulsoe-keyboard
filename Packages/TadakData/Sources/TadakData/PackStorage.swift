@@ -1,8 +1,10 @@
 import Foundation
 import TadakDomain
 
-// 외부 채움글 저장(1-b) 공용 부품 — 위치·세대 카운터·파일 읽기·사용자 문구 저장 경계.
+// 외부 채움글 저장(1-b)의 **읽기 쪽** 공용 부품 — 위치·세대 카운터 읽기·파일 읽기·켜진 내장 문구.
 // PDR `docs/design-reviews/external-snippet-packs.md` 2절(계획 A: 파일 + snapshot)·8절(snapshot 계약).
+// **이 모듈(TadakData)은 키보드가 링크한다 — 여기에 쓰기 메서드를 두지 않는다.** 쓰기(`PackStore`·세대 setter·내 채움글 저장)는
+// 앱 전용 모듈 PackImport에 있다(codex 반론 #11 — 키보드에서 부르면 빌드가 안 된다).
 
 /// 저장 위치. **변환본(꺼진 팩 포함)은 앱 전용**, 키보드가 읽는 **활성 snapshot만 App Group 공유**에 둔다(2절 그림).
 public enum PackStorageLocations {
@@ -11,22 +13,16 @@ public enum PackStorageLocations {
         groupContainer.appendingPathComponent("Library/Application Support/ExternalPacks", isDirectory: true)
     }
 
-    /// 앱 전용 — 변환본 JSON과 목록(`library.json`). 키보드 프로세스에서는 부르지 않는다
-    public static func appLibraryRoot() -> URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
-        return base.appendingPathComponent("ExternalPacks", isDirectory: true)
-    }
-
     public static var groupContainer: URL? {
         FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: AppGroupSettingsRepository.appGroupIdentifier)
     }
 
-    static func generationDirectory(_ generation: Int, in root: URL) -> URL {
+    /// snapshot 세대 폴더 `g<N>` — 앱(쓰기)과 키보드(읽기)가 같은 이름을 쓴다
+    public static func generationDirectory(_ generation: Int, in root: URL) -> URL {
         root.appendingPathComponent("g\(generation)", isDirectory: true)
     }
 
-    static let manifestFileName = "manifest.json"
+    public static let manifestFileName = "manifest.json"
 }
 
 /// 세대 카운터 둘(8-1) — 키보드는 읽기만 한다. 값은 신호일 뿐, 내용은 snapshot 파일에서 읽는다.
@@ -37,16 +33,11 @@ public protocol PackGenerationReading: Sendable {
     var packsGeneration: Int { get }
 }
 
-/// 앱만 쓴다(키보드는 전체 접근 없이 App Group에 쓸 수 없다 — 비대칭).
-public protocol PackGenerationWriting: PackGenerationReading {
-    func setUserSnippetsGeneration(_ value: Int)
-    func setPacksGeneration(_ value: Int)
-}
-
-/// App Group `UserDefaults`의 두 정수 — `keyboard.userSnippetsGeneration`·`keyboard.packsGeneration`(8-1).
-public struct AppGroupPackGenerations: PackGenerationWriting {
-    static let userKey = "keyboard.userSnippetsGeneration"
-    static let packsKey = "keyboard.packsGeneration"
+/// App Group `UserDefaults`의 두 정수 — `keyboard.userSnippetsGeneration`·`keyboard.packsGeneration`(8-1). **읽기 전용** —
+/// 쓰는 쪽(`AppGroupPackGenerationWriter`)은 앱 전용 모듈 PackImport에 있다.
+public struct AppGroupPackGenerations: PackGenerationReading {
+    public static let userKey = "keyboard.userSnippetsGeneration"
+    public static let packsKey = "keyboard.packsGeneration"
     private let suiteName: String
 
     public init(suiteName: String = AppGroupSettingsRepository.appGroupIdentifier) {
@@ -57,8 +48,6 @@ public struct AppGroupPackGenerations: PackGenerationWriting {
 
     public var userSnippetsGeneration: Int { defaults?.integer(forKey: Self.userKey) ?? 0 }
     public var packsGeneration: Int { defaults?.integer(forKey: Self.packsKey) ?? 0 }
-    public func setUserSnippetsGeneration(_ value: Int) { defaults?.set(value, forKey: Self.userKey) }
-    public func setPacksGeneration(_ value: Int) { defaults?.set(value, forKey: Self.packsKey) }
 }
 
 /// 키보드의 파일 읽기 — **짧게 열어 전부 읽고 바로 놓는다**(8-2). 크기를 먼저 보고(9-4 ③) 그다음 읽는다.
@@ -83,10 +72,15 @@ public struct SystemPackFileReader: PackFileReading {
     }
 }
 
-/// 내 채움글 저장 경계 — 제품은 App Group `UserDefaults`(`AppGroupSnippetRepository`). **쓰기는 `PackStore`만** 한다(AC-2).
-public protocol UserSnippetStoring: Sendable {
-    func entries() -> [SnippetEntry]
-    @discardableResult func save(_ entries: [SnippetEntry]) -> Bool
+/// 켜진 내장 문구 팩 — 키보드(`KeyboardViewController.rebuildSnippetMatcher`)와 앱(PackImport `PackStore` baseline)이 같은 순서·같은 모양을 쓴다
+/// (국가 상징문 → 인사·상용구). 날짜·성경은 문구가 없는 계산 팩이라 baseline에 들지 않는다.
+public enum BuiltInSnippetEntries {
+    public static func enabled(
+        disabled: Set<String>, anthem: any SnippetRepository, greetings: any SnippetRepository
+    ) -> [SnippetEntry] {
+        var entries: [SnippetEntry] = []
+        if !disabled.contains(SnippetPack.anthem) { entries += anthem.entries() }
+        if !disabled.contains(SnippetPack.greetings) { entries += greetings.entries() }
+        return entries
+    }
 }
-
-extension AppGroupSnippetRepository: UserSnippetStoring {}

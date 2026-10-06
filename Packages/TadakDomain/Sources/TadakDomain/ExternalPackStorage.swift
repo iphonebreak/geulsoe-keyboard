@@ -3,8 +3,8 @@ import Foundation
 // 외부 채움글 팩 저장(1-b) — PDR `docs/design-reviews/external-snippet-packs.md` 2절(계획 A: 파일 + snapshot, R1 확정
 // 2026-10-06 P-1 통과)·7절(변환본)·8절(snapshot 계약)·9-4(키보드 재검사)·9-5(재구성 키)·10-4/U1(순서 목록).
 //
-// 앱(`PackStore`, TadakData)이 쓰고 키보드(`PackSnapshotLoader`, TadakData)가 읽는 **값의 모양**만 여기 둔다 —
-// 파일 입출력은 TadakData, 매칭은 KeyboardCore. **팩 본문·단축어·이름·권리는 사용자 입력이다** — 로그·네트워크 0.
+// 앱(`PackStore`, **앱 전용 PackImport**)이 쓰고 키보드(`PackSnapshotLoader`, TadakData)가 읽는 **값의 모양**만 여기 둔다 —
+// 파일 읽기는 TadakData, 파일 쓰기는 PackImport(키보드 바이너리에 실리지 않는다), 매칭은 KeyboardCore. **팩 본문·단축어·이름·권리는 사용자 입력이다** — 로그·네트워크 0.
 
 /// 채움글 순서 목록의 한 줄 — 「내 채움글」도 한 줄이다(U1). 위에 있는 쪽이 같은 단축어에서 먼저 뜬다.
 /// 내장 팩은 이 목록 밖에서 그 뒤에 온다(10-3 분기 순서 불변).

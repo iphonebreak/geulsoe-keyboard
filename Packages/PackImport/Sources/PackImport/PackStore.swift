@@ -1,9 +1,12 @@
 import Foundation
+import TadakData
 import TadakDomain
 
 /// 외부 채움글·내 채움글·내장 팩 켬/끔의 **유일한 쓰기 진입점**(PDR `external-snippet-packs.md` 9-1·9-2, AC-2·3).
 ///
-/// **컨테이너 앱 전용이다** — 키보드는 `PackSnapshotLoader`로 읽기만 한다(App Group 쓰기는 전체 접근이 필요하다).
+/// **컨테이너 앱 전용이다** — 앱 전용 모듈 `PackImport`에 있어 키보드 바이너리에 **링크되지 않는다**(키보드에서 부르면 빌드가 안 된다 —
+/// 보안 규칙 「키보드는 외부 채움글 저장소에 쓰지 않는다」를 컴파일러가 지킨다, codex 반론 #11). 키보드는 TadakData의
+/// `PackSnapshotLoader`로 읽기만 한다(App Group 쓰기는 전체 접근이 필요하다).
 ///
 /// ## 하나의 직렬 경로 (9-1·9-2)
 ///
@@ -118,7 +121,7 @@ public final class PackStore: @unchecked Sendable {
             // App Group이 없으면(있을 수 없는 구성) 앱 폴더에 쓴다 — 키보드는 못 보지만 앱은 죽지 않는다
             snapshotRoot: group.map(PackStorageLocations.snapshotRoot(groupContainer:))
                 ?? PackStorageLocations.appLibraryRoot().appendingPathComponent("snapshot-fallback", isDirectory: true),
-            generations: AppGroupPackGenerations(), userSnippets: AppGroupSnippetRepository(),
+            generations: AppGroupPackGenerationWriter(), userSnippets: AppGroupUserSnippetStore(),
             builtInEntries: { disabled in BuiltInSnippetEntries.enabled(disabled: disabled, anthem: anthem, greetings: greetings) },
             disabledBuiltIns: { AppGroupSettingsRepository().load().disabledSnippetPacks })
     }()
@@ -539,17 +542,4 @@ struct PackLibrary: Codable, Equatable {
     var revision = 0
     var order: [SnippetSourceSlot] = SnippetSourceSlot.defaultOrder
     var packs: [String: Entry] = [:]
-}
-
-/// 켜진 내장 문구 팩 — 키보드(`KeyboardViewController.rebuildSnippetMatcher`)와 앱(`PackStore` baseline)이 같은 순서·같은 모양을 쓴다
-/// (국가 상징문 → 인사·상용구). 날짜·성경은 문구가 없는 계산 팩이라 baseline에 들지 않는다.
-public enum BuiltInSnippetEntries {
-    public static func enabled(
-        disabled: Set<String>, anthem: any SnippetRepository, greetings: any SnippetRepository
-    ) -> [SnippetEntry] {
-        var entries: [SnippetEntry] = []
-        if !disabled.contains(SnippetPack.anthem) { entries += anthem.entries() }
-        if !disabled.contains(SnippetPack.greetings) { entries += greetings.entries() }
-        return entries
-    }
 }

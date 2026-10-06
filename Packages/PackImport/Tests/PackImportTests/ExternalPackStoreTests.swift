@@ -1,7 +1,8 @@
 import Foundation
 import Testing
 import TadakDomain
-@testable import TadakData
+@testable import PackImport
+import TadakData
 
 // 외부 채움글 1-b — 앱 `PackStore`(직렬 큐·커밋 게이트·snapshot·GC)와 키보드 `PackSnapshotLoader`(9-4 순차 로드·8절 재시도).
 // PDR `docs/design-reviews/external-snippet-packs.md` AC-2~9·AC-26. 파일 시스템은 임시 폴더를 주입한다.

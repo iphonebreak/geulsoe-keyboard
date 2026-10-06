@@ -242,7 +242,7 @@ public struct PackSnapshotLoader: Sendable {
     }
 
     /// manifest의 파일 이름은 snapshot 폴더 안의 이름 하나뿐이다 — 경로 이동(`..`·`/`)을 받지 않는다
-    static func isPlainFileName(_ name: String) -> Bool {
+    public static func isPlainFileName(_ name: String) -> Bool {
         !name.isEmpty && !name.contains("/") && name != "." && name != ".." && !name.hasPrefix(".")
     }
 }
