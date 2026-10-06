@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import KeyboardCore
 @testable import KeyboardUI
@@ -138,10 +139,25 @@ struct ToolbarCandidateRuleTests {
         #expect(KeyboardMetrics.showsDismissButton(hasSnippet: false, hasWords: true, hasPaste: false))
     }
 
-    @Test("회귀 — 채움글 칩은 현행 그대로: 붙여넣기 칩과 함께여도 ✕ 하나, 도구 행 없음")
-    func snippetWithPasteUnchanged() {
-        #expect(KeyboardMetrics.candidateRowWords([], hasPaste: true).isEmpty)
-        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: true, hasWords: false, hasPaste: true))
+    // MARK: - D19 붙여넣기 칩이 채움글 칩보다 먼저 (PDR `emoji-word-suggestion.md` D19)
+
+    private static let greeting = SnippetSuggestion(trigger: "새해인사", title: "새해 인사", body: "새해 복 많이 받으세요")
+    private static let today = SnippetSuggestion(
+        trigger: "오늘 날짜", title: "오늘 날짜", body: "2026. 9. 27.", computedAt: Date(timeIntervalSince1970: 0), kind: .dateOnly)
+
+    @Test("★ D19 — 붙여넣기 칩이 있으면 채움글 칩(날짜 포함)을 그리지 않는다 · ✕ 하나 ([붙여넣기][✕])",
+          arguments: [greeting, today])
+    func pasteChipHidesSnippet(_ snippet: SnippetSuggestion) {
+        let visible = KeyboardMetrics.candidateRowSnippet(snippet, hasPaste: true)
+        #expect(visible == nil, "[붙여넣기][채움글][✕]가 아니다")
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: visible != nil, hasWords: false, hasPaste: true))
+    }
+
+    @Test("D19 — ✕로 붙여넣기 칩이 물러나면 채움글 칩이 그려진다(✕ 유지) · 붙여넣기 칩이 없으면 지금과 같다",
+          arguments: [greeting, today])
+    func afterPasteDismissSnippetReturns(_ snippet: SnippetSuggestion) {
+        #expect(KeyboardMetrics.candidateRowSnippet(snippet, hasPaste: false) == snippet)
+        #expect(KeyboardMetrics.candidateRowSnippet(nil, hasPaste: false) == nil)
         #expect(KeyboardMetrics.showsDismissButton(hasSnippet: true, hasWords: false, hasPaste: false))
     }
 

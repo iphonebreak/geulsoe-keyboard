@@ -192,7 +192,7 @@ public enum KeyboardMetrics {
 
     /// 후보 줄에 그릴 추천단어(이모지 칩 포함) — **붙여넣기 칩이 있으면 없다**(D18, 2026-10-06).
     ///
-    /// 붙여넣기 칩이 있으면 그 줄은 `[칩][✕]`만이다(채움글 칩은 현행대로 함께). v1.2.0부터 둘이 한 줄에
+    /// 붙여넣기 칩이 있으면 그 줄은 `[칩][✕]`만이다(채움글 칩도 — `candidateRowSnippet`, D19). v1.2.0부터 둘이 한 줄에
     /// 함께 떠 `[복사됨][추천]×4[✕]`가 말줄임으로 안 보였다(실기 세션 1 K7). 조립 지점이 이미 후보를 비워
     /// 넘기지만(`WordSuggestionGate`의 `hasPasteChip`) 그림 쪽도 같은 규칙을 지킨다 — ✕를 누르면 칩이
     /// 물러나고 이 함수가 후보를 그대로 돌려준다.
@@ -200,6 +200,15 @@ public enum KeyboardMetrics {
         _ words: [WordSuggestionCandidate], hasPaste: Bool
     ) -> [WordSuggestionCandidate] {
         hasPaste ? [] : words
+    }
+
+    /// 후보 줄에 그릴 채움글 칩(날짜·시간 칩 포함) — **붙여넣기 칩이 있으면 없다**(D19, 2026-10-06).
+    ///
+    /// 붙여넣기 칩이 먼저다 — `[붙여넣기][채움글][✕]`가 한 줄에 함께 떠 말줄임 위험이 있었다(D18 구현 중 발견).
+    /// 조립 지점이 이미 비워 넘기지만(`SnippetChipGate`) 그림 쪽도 같은 규칙을 지킨다 — ✕로 붙여넣기 칩을 물리면
+    /// 이 함수가 채움글 칩을 그대로 돌려주고, 칩은 평소처럼 아래에서 떠오른다.
+    public static func candidateRowSnippet(_ snippet: SnippetSuggestion?, hasPaste: Bool) -> SnippetSuggestion? {
+        hasPaste ? nil : snippet
     }
 
     /// 후보 줄에 성경 배지를 그리는가 — 붙여넣기 칩이 있으면 그리지 않는다(D18, `candidateRowWords`와 같은 이유).

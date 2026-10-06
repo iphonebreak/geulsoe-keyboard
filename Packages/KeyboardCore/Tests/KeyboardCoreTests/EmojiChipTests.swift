@@ -509,18 +509,21 @@ struct EmojiChipInsertionTests {
 
 // MARK: - D18 붙여넣기 칩이 있으면 [칩][✕]만 (PDR `emoji-word-suggestion.md` D18, 실기 세션 1 K7)
 
-/// 조립 지점(`KeyboardViewController`)과 **같은 순서**로 붙여넣기 칩과 추천단어 줄을 함께 계산하는 하네스.
+/// 조립 지점(`KeyboardViewController`)과 **같은 순서**로 붙여넣기 칩·채움글 칩·추천단어 줄을 함께 계산하는 하네스.
 ///
 /// - 등장(`appear`) = `probePasteboard` — 타이핑 억제를 풀고, `PasteboardProbe` 게이트를 지나면 칩을 만든다.
 ///   전체 접근이 없으면 읽지 않는다. 그 뒤 등장 sync(이모지 칩 상태는 프로세스 수명, D16)
-/// - 키(`type`) = `updateSuggestionBar(userEdited: true)` — 타이핑 억제를 먼저 켜고 칩 → 게이트 → 이모지 순
-/// - ✕(`dismiss`) = `handleDismissSuggestions` — 칩이 있으면 그 클립보드를 소비하고 칩만 내린 뒤 sync로 다시 계산
+/// - 키(`type`) = `updateSuggestionBar(userEdited: true)` — 타이핑 억제를 먼저 켜고 채움글 매칭 → 붙여넣기 칩 →
+///   채움글 칩(D19) → 단어 게이트 → 이모지 순
+/// - ✕(`dismiss`) = `handleDismissSuggestions` — 붙여넣기 칩이 있으면 그 클립보드를 소비하고 그 칩만 내린다(D18·D19).
+///   없고 채움글 칩이 있으면 그 꼬리를 숨긴다(`dismissedSnippetTail`). 그 뒤 sync로 다시 계산
 @MainActor
 private struct PasteRowHarness {
     var chips = ChipHarness()
     let baseResolver: EmojiCandidateResolver?
     var hasFullAccess = true
-    var hasSnippet = false
+    /// 채움글 매처 — nil이면 채움글 칩이 없다(D18 케이스)
+    var snippetMatcher: SnippetMatcher?
     /// 사전 엔진이 돌려줄 단어 후보(가짜) — 게이트가 닫히면 계산하지 않는다
     let engineWords = ["자동차를", "자동차가"]
     private(set) var pasteSuggestion: PasteSuggestion?
@@ -528,14 +531,27 @@ private struct PasteRowHarness {
     private(set) var probedChangeCount: Int?
     /// VC의 `static consumedPasteboardChangeCount` — 프로세스 수명
     private(set) var consumedChangeCount: Int?
+    /// VC의 `static dismissedSnippetTail` — 프로세스 수명
+    private(set) var dismissedSnippetTail: String?
     private(set) var chip: PasteSuggestion?
+    private(set) var snippet: SnippetSuggestion?
     private(set) var row: [WordSuggestionCandidate] = []
     private(set) var clipboardReads = 0
     /// 지난 등장 때 받은 문서 — 등장마다 출력 기록이 새로 시작되므로 그 앞에 붙여 문서 전체를 낸다
     private var documentBase = ""
     var documentText: String { documentBase + chips.output.text }
 
-    init() { baseResolver = chips.resolver }
+    init(snippetMatcher: SnippetMatcher? = nil) {
+        baseResolver = chips.resolver
+        self.snippetMatcher = snippetMatcher
+    }
+
+    /// 문서에 이미 글이 있는 입력란에 키보드가 뜬다(클립보드 없음)
+    mutating func open(document: String) {
+        documentBase = document
+        chips.reappear(documentTail: document)
+        recompute(userEdited: false)
+    }
 
     /// 키보드 등장 — 다른 앱에서 복사하고 돌아온 순간. 문서는 그대로다
     mutating func appear(changeCount: Int, clipboard: String) {
@@ -556,45 +572,50 @@ private struct PasteRowHarness {
                 probedChangeCount = changeCount
             }
         }
-        gateBeforeEmoji()
         documentBase = documentTail
-        chips.reappear(documentTail: documentTail)
-        finishRow()
+        chips.reappear(documentTail: documentTail)   // 안의 계산은 sync(peek)라 기억을 건드리지 않는다
+        recompute(userEdited: false)
     }
 
+    /// 두벌식 키 — 키마다 조립 지점처럼 다시 계산한다(문서 글자가 바뀌었을 때만 D17 해제)
     mutating func type(_ keys: String) {
-        suppressedByTyping = true
-        gateBeforeEmoji()
-        chips.type(keys)
-        finishRow()
+        for key in keys {
+            let revision = chips.controller.documentRevision
+            chips.controller.handle(key == "⌫" ? .backspace : .character(String(key)))
+            if chips.controller.documentRevision != revision { chips.state.documentDidChange() }
+            recompute(userEdited: true)
+        }
     }
 
-    /// ✕ — 칩이 있으면 그 클립보드를 소비하고 칩을 내린다(추천단어는 안 보였으니 억제하지 않는다)
+    /// ✕ — 붙여넣기 칩이 있으면 그 클립보드만 소비하고 칩을 내린다(안 보인 채움글·추천단어는 억제하지 않는다)
     mutating func dismiss() {
+        if chip == nil, snippet != nil { dismissedSnippetTail = chips.controller.textTail }
         if chip != nil {
             consumedChangeCount = probedChangeCount
             pasteSuggestion = nil
         }
-        gateBeforeEmoji()
-        chips.recompute(isUserEdit: false)
-        finishRow()
+        recompute(userEdited: false)
     }
 
     private var wordsAllowed: Bool {
         WordSuggestionGate.allowsWords(
-            isSecureTextEntry: false, hasSnippet: hasSnippet, hasPasteChip: chip != nil,
+            isSecureTextEntry: false, hasSnippet: snippet != nil, hasPasteChip: chip != nil,
             isDismissed: false, isSuppressedAfterCursorMove: false)
     }
 
-    /// 칩 판정 → 게이트 → 이모지 리졸버 — 조립 지점의 순서
-    private mutating func gateBeforeEmoji() {
+    /// 조립 지점(`updateSuggestionBar`)의 순서 그대로
+    private mutating func recompute(userEdited: Bool) {
+        let tail = chips.controller.textTail
+        let matched = snippetMatcher?.suggestion(forTail: tail, isSecureTextEntry: false)
+        if userEdited, let dismissed = dismissedSnippetTail, dismissed != tail { dismissedSnippetTail = nil }
+        if userEdited { suppressedByTyping = true }
         chip = PasteChipGate.visibleChip(
             pasteSuggestion, hasFullAccess: hasFullAccess, isSecureTextEntry: false,
             isSuppressedByTyping: suppressedByTyping)
+        snippet = SnippetChipGate.visibleSnippet(
+            matched, isDismissed: dismissedSnippetTail != nil, hasPasteChip: chip != nil)
         chips.resolver = wordsAllowed ? baseResolver : nil
-    }
-
-    private mutating func finishRow() {
+        chips.recompute(isUserEdit: userEdited)
         row = WordSuggestionCandidate.row(
             words: wordsAllowed ? engineWords : [], emoji: chips.shown, sourceWord: chips.controller.currentWord)
     }
@@ -702,5 +723,133 @@ struct PasteChipWordRowTests {
         }
         #expect(PasteChipGate.visibleChip(
             nil, hasFullAccess: true, isSecureTextEntry: false, isSuppressedByTyping: false) == nil)
+    }
+}
+
+// MARK: - D19 붙여넣기 칩이 채움글 칩보다 먼저 (PDR `emoji-word-suggestion.md` D19)
+
+@MainActor
+@Suite("D19 — 붙여넣기 칩이 있으면 채움글 칩(날짜 포함)도 같은 줄에 없다, ✕로 물리면 채움글 칩")
+struct PasteChipSnippetRowTests {
+
+    private static let copied = "다른 앱에서 복사한 글"
+    private static let greeting = SnippetEntry(trigger: "새해인사", title: "새해 인사", body: "새해 복 많이 받으세요")
+
+    private static var dateMatcher: SnippetMatcher {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Seoul")!
+        calendar.firstWeekday = 2
+        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 27, hour: 21, minute: 54))!
+        return SnippetMatcher(bible: nil, entries: [],
+                              dates: DateSnippetParser(style: .formal, calendar: calendar, now: { now }))
+    }
+
+    /// 단축어를 쳐 채움글 칩이 뜬 문서에서 다른 앱으로 가 복사하고 돌아온다
+    private func snippetThenCopyAndReturn(
+        matcher: SnippetMatcher = SnippetMatcher(bible: nil, entries: [greeting]), document: String = "새해인사"
+    ) throws -> (PasteRowHarness, SnippetSuggestion) {
+        var harness = PasteRowHarness(snippetMatcher: matcher)
+        harness.open(document: document)
+        let snippet = try #require(harness.snippet, "복사 전 — 채움글 칩이 떠 있다")
+        #expect(harness.row.isEmpty, "채움글 칩이 있으면 추천단어는 없다(현행)")
+        harness.appear(changeCount: 7, clipboard: Self.copied)
+        return (harness, snippet)
+    }
+
+    @Test("★ 붙여넣기 칩 + 채움글 칩 → 붙여넣기 칩만 ([붙여넣기][채움글][✕]가 아니라 [붙여넣기][✕])")
+    func pasteChipHidesSnippet() throws {
+        let (harness, _) = try snippetThenCopyAndReturn()
+        #expect(harness.chip?.kind == .text)
+        #expect(harness.snippet == nil)
+        #expect(harness.row.isEmpty)
+    }
+
+    @Test("★ ✕ → 붙여넣기 칩이 물러나고 채움글 칩이 나온다 — 채움글은 숨김 처리되지 않는다")
+    func dismissRevealsSnippet() throws {
+        var (harness, snippet) = try snippetThenCopyAndReturn()
+        harness.dismiss()
+        #expect(harness.chip == nil)
+        #expect(harness.snippet == snippet)
+        #expect(harness.dismissedSnippetTail == nil, "안 보였던 채움글 칩을 ✕가 숨기지 않는다")
+        #expect(harness.row.isEmpty, "채움글 칩이 있으면 추천단어는 없다(현행)")
+    }
+
+    @Test("★ ✕로 물린 클립보드는 다시 띄워도 붙여넣기 칩이 없고 채움글 칩이 뜬다 — 내용도 다시 읽지 않는다")
+    func dismissedClipboardDoesNotReturn() throws {
+        var (harness, snippet) = try snippetThenCopyAndReturn()
+        harness.dismiss()
+        let reads = harness.clipboardReads
+        harness.appear(changeCount: 7, clipboard: Self.copied)
+        #expect(harness.chip == nil)
+        #expect(harness.snippet == snippet)
+        #expect(harness.clipboardReads == reads)
+        harness.appear(changeCount: 8, clipboard: "또 복사한 글")
+        #expect(harness.chip != nil, "새 복사는 다시 붙여넣기 칩이 먼저다")
+        #expect(harness.snippet == nil)
+    }
+
+    @Test("회귀 — 채움글 칩의 ✕는 그대로: 꼬리를 숨기고 재표시로는 되살아나지 않으며, 숨긴 뒤 후보 규칙은 현행")
+    func snippetDismissUnchanged() throws {
+        var (harness, _) = try snippetThenCopyAndReturn()
+        harness.dismiss()                         // 붙여넣기 칩
+        harness.dismiss()                         // 채움글 칩
+        #expect(harness.snippet == nil)
+        #expect(harness.dismissedSnippetTail == "새해인사")
+        #expect(!harness.row.isEmpty, "채움글 칩이 물러나면 추천단어 줄(현행)")
+        harness.appear(changeCount: 7, clipboard: Self.copied)
+        #expect(harness.snippet == nil, "재표시로 되살아나지 않는다")
+        #expect(harness.chip == nil)
+    }
+
+    @Test("회귀 — 붙여넣기 칩이 없으면 채움글 칩과 그 ✕는 지금과 같다")
+    func snippetWithoutPasteUnchanged() throws {
+        var harness = PasteRowHarness(snippetMatcher: SnippetMatcher(bible: nil, entries: [Self.greeting]))
+        harness.open(document: "새해인사")
+        #expect(harness.snippet?.title == "새해 인사")
+        harness.dismiss()
+        #expect(harness.snippet == nil)
+        #expect(harness.dismissedSnippetTail == "새해인사")
+    }
+
+    @Test("회귀 — 글자를 치면 붙여넣기 칩이 물러난다(소비 아님) — 그 뒤 채움글 규칙은 현행")
+    func typingReleasesPasteChip() throws {
+        var (harness, _) = try snippetThenCopyAndReturn()
+        harness.type("f")                         // 새해인사 + ㄹ → 꼬리가 바뀌어 단축어가 안 맞는다
+        #expect(harness.chip == nil)
+        #expect(harness.snippet == nil)
+        harness.type("⌫")                         // 지우면 다시 단축어 — 채움글 칩
+        #expect(harness.chip == nil, "그 등장 동안 붙여넣기 칩은 내려가 있다")
+        #expect(harness.snippet?.title == "새해 인사")
+    }
+
+    @Test("★ 날짜 칩도 같다 — 붙여넣기 칩만, ✕ → 날짜 칩")
+    func dateChipSame() throws {
+        var (harness, date) = try snippetThenCopyAndReturn(matcher: Self.dateMatcher, document: "오늘 날짜")
+        #expect(date.body == "2026. 9. 27.")
+        #expect(harness.chip != nil)
+        #expect(harness.snippet == nil)
+        harness.dismiss()
+        #expect(harness.chip == nil)
+        #expect(harness.snippet?.hasSameContent(as: date) == true)
+    }
+
+    @Test("인증번호 칩도 채움글 칩보다 먼저다")
+    func verificationCodeBeforeSnippet() throws {
+        var harness = PasteRowHarness(snippetMatcher: SnippetMatcher(bible: nil, entries: [Self.greeting]))
+        harness.open(document: "새해인사")
+        harness.appear(changeCount: 9, clipboard: "[Web발신] 인증번호 [268755]를 입력하세요")
+        #expect(harness.chip?.kind == .verificationCode)
+        #expect(harness.snippet == nil)
+        harness.dismiss()
+        #expect(harness.snippet?.title == "새해 인사")
+    }
+
+    @Test("채움글 칩 게이트 — 붙여넣기 칩·✕ 숨김 중 하나라도 있으면 없음")
+    func snippetChipGate() {
+        let matched = SnippetSuggestion(trigger: "새해인사", title: "새해 인사", body: "새해 복 많이 받으세요")
+        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: false, hasPasteChip: false) == matched)
+        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: true, hasPasteChip: false) == nil)
+        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: false, hasPasteChip: true) == nil)
+        #expect(SnippetChipGate.visibleSnippet(nil, isDismissed: false, hasPasteChip: false) == nil)
     }
 }

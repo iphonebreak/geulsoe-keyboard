@@ -674,7 +674,7 @@ final class KeyboardViewController: UIInputViewController {
         if userEdited, let dismissedTail = Self.dismissedBibleTail, dismissedTail != inputController.textTail {
             Self.dismissedBibleTail = nil
         }
-        let snippet = (Self.dismissedSnippetTail == nil) ? matched : nil
+        // 채움글 칩(`snippet`)은 붙여넣기 칩 판정 **뒤**에 낸다 — 붙여넣기 칩이 먼저다(D19, 아래 `SnippetChipGate`).
 
         // 채움글 후보가 있으면 툴바는 채움글 칩만 보인다 — 추천단어("절대"·"저를")는 함께
         // 띄우지 않는다 (사용자 결정 2026-09-03: 단축어를 쳤을 땐 "붙여넣을지"만 묻는다).
@@ -712,14 +712,19 @@ final class KeyboardViewController: UIInputViewController {
         let chip = PasteChipGate.visibleChip(
             pasteSuggestion, hasFullAccess: hasFullAccess, isSecureTextEntry: secure,
             isSuppressedByTyping: pasteChipSuppressedByTyping)
+        // ★ D19(2026-10-06): **붙여넣기 칩이 채움글 칩(날짜 칩 포함)보다 먼저다** — 붙여넣기 칩이 있으면 그 줄은
+        //   `[붙여넣기 칩][✕]`만이고, ✕로 칩을 물리면(클립보드 소비) 채움글 칩(+✕)이 나온다. 그 ✕는 기존 채움글 ✕
+        //   그대로(`dismissedSnippetTail`). 예전 주석은 「채움글 > 붙여넣기」라 적었지만 실제로는 둘이 한 줄에 함께 떴다.
+        let snippet = SnippetChipGate.visibleSnippet(
+            matched, isDismissed: Self.dismissedSnippetTail != nil, hasPasteChip: chip != nil)
 
         // MARK: 성경 검색 배지 (계획서 2-1·2-6)
         //
-        // **우선순위**: 채움글 칩 > 붙여넣기 칩 > 배지 + 추천단어 2개 > 추천단어 3개/도구 행.
+        // **우선순위**: 붙여넣기 칩 > 채움글 칩 > 배지 + 추천단어 2개 > 추천단어 3개/도구 행 (D19).
         // 칩이 있으면 배지를 숨긴다 — 칩 하나가 이미 287~321pt를 쓴다.
         // ★ D18(2026-10-06): 붙여넣기 칩이 있으면 **추천단어·이모지 칩도** 띄우지 않는다(아래 `hasPasteChip`) —
         //   v1.2.0부터 배지만 막고 추천단어는 함께 떠 `[복사됨][추천]×4[✕]`가 말줄임으로 안 보였다(실기 세션 1 K7).
-        //   ✕로 칩을 물리면 지금 단어의 후보가 나온다. 채움글 칩과 붙여넣기 칩은 지금처럼 한 줄에 함께 뜬다.
+        //   ✕로 칩을 물리면 지금 단어의 후보(채움글 칩이 맞으면 그 칩, D19)가 나온다.
         // 붙여넣기 칩을 이기게 두는 이유는 4차 A3-4의 재현 경로다: 「믿음」을 쳐 둔 채 앱을
         // 전환했다 돌아오면 꼬리가 다시 서고(배지 조건) 같은 등장에서 억제가 풀려(칩 조건)
         // 둘이 한 줄에 같이 떴다.
@@ -962,9 +967,12 @@ final class KeyboardViewController: UIInputViewController {
     private func handleDismissSuggestions() {
         playToolbarHaptic()
         guard let inputController, let viewState else { return }
-        if viewState.snippetSuggestion != nil { Self.dismissedSnippetTail = inputController.textTail }
-        // D18 — 붙여넣기 칩이 있으면 추천단어는 그려지지 않았다(`KeyboardMetrics.candidateRowWords`) —
-        // 이 ✕는 칩만 물리고, 다시 계산하면 지금 단어의 후보가 나온다. 안 보인 후보를 억제하지 않는다.
+        // D18·D19 — 붙여넣기 칩이 있으면 채움글 칩·추천단어는 그려지지 않았다(`KeyboardMetrics.candidateRowSnippet`·
+        // `candidateRowWords`) — 이 ✕는 붙여넣기 칩만 물리고, 다시 계산하면 채움글 칩 또는 지금 단어의 후보가 나온다.
+        // 안 보인 후보를 숨김 처리하지 않는다.
+        if viewState.pasteSuggestion == nil, viewState.snippetSuggestion != nil {
+            Self.dismissedSnippetTail = inputController.textTail
+        }
         if viewState.pasteSuggestion == nil, !viewState.wordSuggestions.isEmpty, !inputController.currentWord.isEmpty {
             dismissedSuggestionWord = inputController.currentWord
         }

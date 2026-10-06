@@ -94,8 +94,8 @@ public struct PasteSuggestion: Equatable, Sendable {
 }
 
 /// 툴바에 붙여넣기 칩을 **지금** 띄울까 — 조립 지점(`updateSuggestionBar`)의 조건식을 옮겼다
-/// (익스텐션 타깃은 `swift test`가 닿지 않는다). 이 결과가 추천단어 게이트(`WordSuggestionGate`의
-/// `hasPasteChip`, D18)와 성경 배지 예약을 함께 정한다.
+/// (익스텐션 타깃은 `swift test`가 닿지 않는다). 이 결과가 채움글 칩(`SnippetChipGate`, D19)·추천단어 게이트
+/// (`WordSuggestionGate`의 `hasPasteChip`, D18)·성경 배지 예약을 함께 정한다 — **툴바 줄의 맨 앞 우선순위**다.
 public enum PasteChipGate {
     /// - Parameters:
     ///   - suggestion: 등장 1회 읽기가 만든 칩 값(없으면 nil)
@@ -107,5 +107,23 @@ public enum PasteChipGate {
     ) -> PasteSuggestion? {
         guard hasFullAccess, !isSecureTextEntry, !isSuppressedByTyping else { return nil }
         return suggestion
+    }
+}
+
+/// 툴바에 채움글 칩(날짜·시간 칩 포함)을 **지금** 띄울까 — 조립 지점의 조건식을 옮겼다.
+///
+/// **붙여넣기 칩이 먼저다**(D19, 2026-10-06). 붙여넣기 칩이 있으면 그 줄은 `[붙여넣기 칩][✕]`만이고, 그 ✕로 칩을
+/// 물리면(클립보드 소비) 이 함수가 채움글 칩을 돌려준다 — 방금 복사하고 돌아온 사람은 붙여넣으려는 것이다(D18과 같은 이유).
+/// 예전 주석은 「채움글 > 붙여넣기」라 적었지만 실제로는 `[붙여넣기][채움글][✕]`가 한 줄에 함께 떠 말줄임 위험이 있었다.
+public enum SnippetChipGate {
+    /// - Parameters:
+    ///   - matched: 꼬리로 맞춘 채움글 후보(`SnippetMatcher`)
+    ///   - isDismissed: ✕로 숨긴 꼬리가 남아 있다(`dismissedSnippetTail`) — 사용자 편집으로 꼬리가 바뀔 때 풀린다
+    ///   - hasPasteChip: 붙여넣기 칩이 보인다(`PasteChipGate.visibleChip`의 결과)
+    public static func visibleSnippet(
+        _ matched: SnippetSuggestion?, isDismissed: Bool, hasPasteChip: Bool
+    ) -> SnippetSuggestion? {
+        guard !isDismissed, !hasPasteChip else { return nil }
+        return matched
     }
 }

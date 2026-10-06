@@ -245,9 +245,9 @@ private struct SuggestionToolbar: View {
     let onBibleBadgeTap: (() -> Void)?
 
     var body: some View {
-        let snippet = state.snippetSuggestion
-        // D18 — 붙여넣기 칩이 있으면 `[칩][✕]`만: 추천단어·이모지 칩·배지를 같은 줄에 그리지 않는다
+        // D18·D19 — 붙여넣기 칩이 있으면 `[칩][✕]`만: 채움글 칩·추천단어·이모지 칩·배지를 같은 줄에 그리지 않는다
         let pasteStandsAlone = state.pasteSuggestion != nil
+        let snippet = KeyboardMetrics.candidateRowSnippet(state.snippetSuggestion, hasPaste: pasteStandsAlone)
         let words = KeyboardMetrics.candidateRowWords(state.wordSuggestions, hasPaste: pasteStandsAlone)
         // ★ **배지는 여기 안 넣는다** — 배지만 떠 있을 때는 ✕가 없어야 한다 (사용자 결정 2026-09-21).
         //
