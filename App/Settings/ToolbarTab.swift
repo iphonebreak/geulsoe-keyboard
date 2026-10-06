@@ -244,6 +244,13 @@ struct ToolbarTab: View {
             Toggle(isOn: fullAccessBinding(\.pasteSuggestionEnabled)) {
                 settingLabel("복사한 텍스트 제안")
             }
+            // 복사한 사진 도우미(v1.3.0 ④ B, PDR `clipboard-image-history.md` 6-1) — **기본 꺼짐**, 클립보드 기록과 따로.
+            // 설계서 6절은 화면 자리·문구를 정하지 않았다 — 같은 툴바 붙여넣기 칩 자리를 쓰는 「복사한 …」 제안 토글들
+            // 바로 아래에 두고, 같은 전체 접근 시트(끔 → 켬)를 쓴다. 끄면 키보드가 다음 설정 재로드에서 사진 사본을 비운다
+            // (앱 쪽에 지울 저장분은 없다 — 사진은 키보드 메모리에만 있다).
+            Toggle(isOn: fullAccessBinding(\.copiedPhotoHelperEnabled)) {
+                settingLabel("복사한 사진 도우미")
+            }
             Button("클립보드 기록 지우기", role: .destructive) {
                 showsClipboardClearDialog = true
             }
@@ -287,7 +294,8 @@ struct ToolbarTab: View {
             // 안심 문장이고, 뒷 문장은 **개인정보 처리방침이 이용자 권리로 명시한 것**이라
             // 안내 없이 지우면 방침과 화면이 어긋난다 (반론자 R-3).
             Text("전체 접근 없이도 한글 입력·채움글·추천단어는 그대로 동작해요.\n"
-                 + "클립보드 기록을 끄면 저장분이 바로 삭제돼요.")
+                 + "클립보드 기록을 끄면 저장분이 바로 삭제돼요.\n"
+                 + "사진 도우미는 복사한 사진을 툴바에 보여 주고, 탭하면 120초 동안 이 기기에서만 붙여넣을 수 있게 다시 담아요. 끄면 남아 있던 사본도 바로 지워져요.")
         }
     }
 

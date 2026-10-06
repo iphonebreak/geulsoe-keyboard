@@ -27,6 +27,7 @@ public struct KeyboardRootView: View {
     private let onSnippetTap: ((SnippetSuggestion) -> Void)?
     private let onWordTap: ((WordSuggestionCandidate) -> Void)?
     private let onPasteboardCodeTap: (() -> Void)?
+    private let onCopiedPhotoTap: ((CopiedPhotoChip) -> Void)?
     private let onToolTap: ((ToolbarTool) -> Void)?
     private let onCursorMove: ((Int) -> Void)?
     private let onEmojiTap: ((String) -> Void)?
@@ -68,6 +69,7 @@ public struct KeyboardRootView: View {
     ///   - onSnippetTap: 툴바 채움글 칩을 탭했을 때. nil이면 칩을 그리지 않는다.
     ///   - onWordTap: 추천단어 후보(단어 칩·이모지 칩)를 탭했을 때. nil이면 후보를 그리지 않는다.
     ///   - onPasteboardCodeTap: 인증번호 붙여넣기 칩을 탭했을 때. nil이면 칩을 그리지 않는다.
+    ///   - onCopiedPhotoTap: 사진 칩(「사진 복사」·「복사됨」)을 탭했을 때(v1.3.0 ④ B). nil이면 칩을 그리지 않는다.
     ///   - onToolTap: 툴바 도구(내리기·클립보드·이모지)를 탭했을 때. nil이면 도구 행을 그리지 않는다.
     ///   - onClipboardEntryTap/Delete/Clear: 클립보드 기록 패널 항목 삽입·삭제·모두 지우기.
     ///   - onCursorDrag: 스페이스 트랙패드 모드의 문자 단위 커서 이동 (진동 없이 연속 호출된다).
@@ -86,6 +88,7 @@ public struct KeyboardRootView: View {
         onSnippetTap: ((SnippetSuggestion) -> Void)? = nil,
         onWordTap: ((WordSuggestionCandidate) -> Void)? = nil,
         onPasteboardCodeTap: (() -> Void)? = nil,
+        onCopiedPhotoTap: ((CopiedPhotoChip) -> Void)? = nil,
         onToolTap: ((ToolbarTool) -> Void)? = nil,
         onCursorMove: ((Int) -> Void)? = nil,
         onEmojiTap: ((String) -> Void)? = nil,
@@ -106,6 +109,7 @@ public struct KeyboardRootView: View {
         self.onSnippetTap = onSnippetTap
         self.onWordTap = onWordTap
         self.onPasteboardCodeTap = onPasteboardCodeTap
+        self.onCopiedPhotoTap = onCopiedPhotoTap
         self.onToolTap = onToolTap
         self.onCursorMove = onCursorMove
         self.onEmojiTap = onEmojiTap
@@ -157,6 +161,7 @@ public struct KeyboardRootView: View {
                 onSnippetTap: onSnippetTap,
                 onWordTap: onWordTap,
                 onPasteboardCodeTap: onPasteboardCodeTap,
+                onCopiedPhotoTap: onCopiedPhotoTap,
                 onToolTap: onToolTap,
                 onCursorMove: onCursorMove,
                 onDismissSuggestions: onDismissSuggestions,
@@ -239,6 +244,7 @@ private struct SuggestionToolbar: View {
     let onSnippetTap: ((SnippetSuggestion) -> Void)?
     let onWordTap: ((WordSuggestionCandidate) -> Void)?
     let onPasteboardCodeTap: (() -> Void)?
+    let onCopiedPhotoTap: ((CopiedPhotoChip) -> Void)?
     let onToolTap: ((ToolbarTool) -> Void)?
     let onCursorMove: ((Int) -> Void)?
     let onDismissSuggestions: (() -> Void)?
@@ -246,7 +252,8 @@ private struct SuggestionToolbar: View {
 
     var body: some View {
         // D18·D19 — 붙여넣기 칩이 있으면 `[칩][✕]`만: 채움글 칩·추천단어·이모지 칩·배지를 같은 줄에 그리지 않는다
-        let pasteStandsAlone = state.pasteSuggestion != nil
+        // 사진 칩(v1.3.0 ④ B)도 같은 붙여넣기 칩 자리다 — 텍스트 칩이 있으면 조립 지점이 사진 칩을 비워 넣는다
+        let pasteStandsAlone = PasteChipGate.hasPasteChip(text: state.pasteSuggestion, photo: state.copiedPhoto)
         let snippet = KeyboardMetrics.candidateRowSnippet(state.snippetSuggestion, hasPaste: pasteStandsAlone)
         let words = KeyboardMetrics.candidateRowWords(state.wordSuggestions, hasPaste: pasteStandsAlone)
         // ★ **배지는 여기 안 넣는다** — 배지만 떠 있을 때는 ✕가 없어야 한다 (사용자 결정 2026-09-21).
@@ -262,7 +269,7 @@ private struct SuggestionToolbar: View {
         let hasCandidates = KeyboardMetrics.showsDismissButton(
             hasSnippet: snippet != nil,
             hasWords: !words.isEmpty,
-            hasPaste: state.pasteSuggestion != nil
+            hasPaste: pasteStandsAlone
         )
         // **칩만 있을 때는 가운데 정렬한다** (사용자 요청 2026-09-11, 사장님 결정 5).
         //
@@ -276,11 +283,14 @@ private struct SuggestionToolbar: View {
         //
         // **칩이 실제로 있을 때만** 켠다. 후보가 하나도 없는 경우(도구 행·"글쇠" 자리 표시)도
         // `words.isEmpty`라서, 그 조건만 보면 도구 행이 선행 `Spacer`에 눌려 회귀한다.
-        let centersChipOnly = (snippet != nil || state.pasteSuggestion != nil) && words.isEmpty
+        let centersChipOnly = (snippet != nil || pasteStandsAlone) && words.isEmpty
         return HStack(spacing: 10) {
             if centersChipOnly { Spacer(minLength: 0) }
             if let paste = state.pasteSuggestion, let onPasteboardCodeTap {
                 PasteChip(suggestion: paste, theme: theme, action: onPasteboardCodeTap)
+            } else if let photo = state.copiedPhoto, let onCopiedPhotoTap {
+                // 탭한 칩을 그대로 넘긴다 — 조립 지점이 「지금 떠 있는 칩」과 비교해 빠른 두 번째 탭을 거른다
+                CopiedPhotoChipView(chip: photo, theme: theme) { onCopiedPhotoTap(photo) }
             }
             if let snippet, let onSnippetTap {
                 SnippetChip(suggestion: snippet, theme: theme) {
@@ -668,6 +678,42 @@ private struct PasteChip: View {
         case .verificationCode: "복사한 인증번호 \(suggestion.preview) 붙여넣기"
         case .text: "복사한 내용 \(suggestion.preview) 붙여넣기"
         }
+    }
+}
+
+/// 사진 칩(v1.3.0 ④ B, PDR `clipboard-image-history.md` 1-2) — 붙여넣기 칩 자리에 썸네일 + 「사진 복사」/「복사됨 · …」.
+///
+/// **서브트리 구조는 단계와 무관하게 같다** — 썸네일 `Image` 하나 + 글자 `Text` 하나. 단계(탭 전·뒤)는 글자 내용만
+/// 바꾼다(키캡·칩은 누르는 도중 구조를 바꾸지 않는다 — CLAUDE.md). 색은 `PasteChip`과 같은 이유로 `keyText`.
+/// 썸네일은 메모리의 축소 그림(긴 변 96px)뿐이다 — 원본도 파일도 아니다.
+private struct CopiedPhotoChipView: View {
+
+    let chip: CopiedPhotoChip
+    let theme: ResolvedTheme
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(decorative: chip.thumbnail.image, scale: 1)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 24, height: 24)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                Text(chip.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(theme.keyText)
+            .padding(.leading, 6)
+            .padding(.trailing, 12)
+            .padding(.vertical, 4)
+            .background(theme.characterKey, in: Capsule())
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(chip.accessibilityLabel)
     }
 }
 
