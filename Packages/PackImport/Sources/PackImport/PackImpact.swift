@@ -401,14 +401,17 @@ public struct PackStanding: Equatable, Sendable {
 /// 팩 상세 화면의 읽기 모델 — `PackStore.packDetail(_:)`
 public struct PackDetail: Equatable, Sendable {
 
-    /// 사용법 한 줄 — 친 단축어 → 칩 제목
+    /// 사용법 한 줄 — 친 단축어 → 들어가는 문구(본문). 칩 제목은 5-A 「이렇게 칩이 떠요」가 쓴다
     public struct Example: Equatable, Sendable {
         public var trigger: String
         public var title: String
+        /// 칩을 누르면 들어가는 전문 — 팩 상세 「사용법」·완료 화면 「이렇게 써 보세요」의 결과 줄(사장님 실기 2026-10-07)
+        public var body: String
 
-        public init(trigger: String, title: String) {
+        public init(trigger: String, title: String, body: String) {
             self.trigger = trigger
             self.title = title
+            self.body = body
         }
     }
 
@@ -437,11 +440,11 @@ public struct PackDetail: Equatable, Sendable {
                 .first { if case .owned = $0.status { true } else { false } }
             let format = owned?.display ?? template.titleFormat
             return [Example(trigger: format.replacingOccurrences(of: TemplatePatternSpec.placeholder, with: String(first.n)),
-                            title: template.title(for: first))]
+                            title: template.title(for: first), body: first.body)]
         }
         let ranked = pack.entries.map { entry -> (example: Example, isShown: Bool) in
             let shown = entry.triggers.first { !hidden.contains(SnippetEntry.normalizedTrigger($0)) }
-            return (Example(trigger: shown ?? entry.primaryTrigger, title: entry.title), shown != nil)
+            return (Example(trigger: shown ?? entry.primaryTrigger, title: entry.title, body: entry.body), shown != nil)
         }
         return (ranked.filter(\.isShown) + ranked.filter { !$0.isShown }).prefix(3).map(\.example)
     }

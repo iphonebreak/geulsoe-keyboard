@@ -251,22 +251,28 @@ public enum PackNoticeCopy {
         }
     }
 
-    /// 틀 행 설명 줄 — 이름은 다른 팩 이름(`PackDetail.name(of:)`)
-    public static func patternLine(_ status: PackStanding.PatternStatus, name: (String) -> String) -> String {
+    /// 틀 행 설명 줄 — 이름은 다른 팩 이름(`PackDetail.name(of:)`). 주어는 **뜨는 문구**다 — 「이 팩이 써요」는 「이 팩을 써요」로
+    /// 읽혔다(사장님 실기 2026-10-07). 이 틀을 치면 어느 문구가 뜨는지로 말하고, 가정(꺼진·쉬는 팩)이면 「켜면(다시 뜨면)」을 붙인다(검증 F-5)
+    public static func patternLine(_ status: PackStanding.PatternStatus, premise: StandingPremise? = nil,
+                                   name: (String) -> String) -> String {
+        let condition = switch premise {
+        case nil: ""
+        case .ifEnabled?: "켜면 "
+        case .ifResumed?: "다시 뜨면 "
+        }
         switch status {
         case .owned(let shared):
-            guard let first = shared.first else { return "이 팩이 써요" }
+            guard let first = shared.first else { return "\(condition)이 팩 문구가 떠요" }
             let others = shared.count > 1 ? "「\(name(first))」 외 \(number(shared.count - 1))개 팩도" : "「\(name(first))」도"
-            return "아래 \(others) 같은 틀 — 위에 있는 이 팩이 써요"
+            return "아래 \(others) 같은 틀이지만 \(condition)위에 있는 이 팩 문구가 떠요"
         case .outranked(let owner):
-            let ownerName = name(owner)
-            return "위에 있는 「\(ownerName)」\(subjectParticle(after: ownerName)) 같은 틀을 써요"
+            return "같은 틀이라 위에 있는 「\(name(owner))」 문구가 먼저 떠요"
         case .shadowed(let triggers):
             // 가림은 **그 끝말로 끝나는 입력에서만**이다 — 「이 틀은 안 떠요」는 범위를 과장했다(화면 확인 S-3, 시안 4-I·5-C 꼴)
             let first = triggers.first ?? ""
             let many = triggers.count > 1
-            let subject = many ? "「\(first)」 외 \(number(triggers.count - 1))개가" : "「\(first)」\(subjectParticle(after: first))"
-            return "「…\(first)」\(many ? " 등" : "")\(directionParticle(after: many ? "등" : first)) 끝나는 입력에서는 단축어 \(subject) 먼저 떠요"
+            let subject = many ? "「\(first)」 외 \(number(triggers.count - 1))개" : "「\(first)」"
+            return "「…\(first)」\(many ? " 등" : "")\(directionParticle(after: many ? "등" : first)) 끝나는 입력에서는 단축어 \(subject) 문구가 먼저 떠요"
         }
     }
 
@@ -308,7 +314,28 @@ public enum PackNoticeCopy {
     /// 내장 팩 상세와 같은 문구
     public static let usageFooter = "단축어를 커서 끝까지 치면 툴바에 칩이 떠요. 칩을 누르면 단축어가 전문으로 바뀌어요."
 
+    /// 5-A 「이렇게 칩이 떠요」 — 칩 제목
     public static func usageResult(_ title: String) -> String { "→ \(title)" }
+
+    /// 팩 상세 「사용법」·완료 화면 「이렇게 써 보세요」 — 그 단축어를 쳐서 칩을 누르면 **들어가는 문구**(본문, 사장님 실기 2026-10-07).
+    /// 여러 줄이면 **줄을 빈칸 하나로 이어** 한 줄로, 길면 자르고 끝에 「…」 — 한 줄을 넘지 않게(화면도 한 줄로 자른다).
+    /// 첫 줄만 보이면 「안녕하세요.」처럼 어느 문구인지 모를 때가 많아 잇는다(코디네이터, 사장님 실기 2026-10-07 뒤)
+    public static func usageResult(body: String) -> String {
+        let lines = body.split(whereSeparator: \.isNewline).map(trimmedSpaces).filter { !$0.isEmpty }
+        guard !lines.isEmpty else { return "→" }
+        let joined = lines.joined(separator: " ")
+        if joined.count > usageResultLength { return "→ \(trimmedSpaces(joined.prefix(usageResultLength)))…" }
+        return "→ \(joined)"
+    }
+
+    /// 앞뒤 공백을 뗀다(Foundation 없이)
+    private static func trimmedSpaces(_ text: Substring) -> Substring {
+        guard let start = text.firstIndex(where: { !$0.isWhitespace }), let end = text.lastIndex(where: { !$0.isWhitespace }) else { return "" }
+        return text[start...end]
+    }
+
+    /// 사용법 결과 줄에 보일 본문 글자 수 — 넘으면 자르고 「…」
+    static let usageResultLength = 30
 
     public static let deletePackButton = "팩 삭제"
 

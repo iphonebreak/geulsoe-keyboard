@@ -260,9 +260,9 @@ struct PackImportFormTests {
     @Test("5-A 칩 미리보기 — 첫 비지 않은 틀(칩 제목 형식)에 첫 번호, 그 칸이 틀리면 없음, 문구형은 없음")
     func chipExample() throws {
         var form = PackImportForm(draft: try numberedDraft())
-        #expect(form.chipExample == PackDetail.Example(trigger: "사자성어 1번", title: "예시 제목 하나"))
+        #expect(form.chipExample == PackDetail.Example(trigger: "사자성어 1번", title: "예시 제목 하나", body: "예시 본문 하나"))
         form.setTemplate("", at: 0)
-        #expect(form.chipExample == PackDetail.Example(trigger: "성어 1번", title: "예시 제목 하나"))
+        #expect(form.chipExample == PackDetail.Example(trigger: "성어 1번", title: "예시 제목 하나", body: "예시 본문 하나"))
         form.setTemplate("성{n}번", at: 0)
         #expect(form.chipExample == nil)
         #expect(PackImportForm(draft: try phrasesDraft()).chipExample == nil)
@@ -659,7 +659,7 @@ struct PackImportCommitStoreTests {
         let completion = try #require(confirmation.completion)
         #expect(completion.kind == .imported && completion.isEnabled)
         #expect(completion.name == "바꾼 이름" && completion.itemCount == 2 && completion.skippedCount == 0)
-        #expect(completion.examples == [PackDetail.Example(trigger: "고사성어 1번", title: "예시 제목 하나")])
+        #expect(completion.examples == [PackDetail.Example(trigger: "고사성어 1번", title: "예시 제목 하나", body: "예시 본문 하나")])
         #expect(completion.notice == nil)
         #expect(!confirmation.hasDraft)
 
@@ -766,7 +766,7 @@ struct PackImportCommitStoreTests {
         try await run(&confirmation, confirmation.confirm(filledForm(draft, name: "뒤 팩")), client: store.client)
         let completion = try #require(confirmation.completion)
         // 별칭 「성어 {n}번」은 정규화 모양으로 저장돼 있다(화면 확인 O-5 — 상세의 틀 절과 같은 모양). 띄어쓰기는 매칭이 보지 않는다
-        #expect(completion.examples == [PackDetail.Example(trigger: "성어1번", title: "예시 제목 하나")])
+        #expect(completion.examples == [PackDetail.Example(trigger: "성어1번", title: "예시 제목 하나", body: "예시 본문 하나")])
         #expect(completion.examples == store.store.packDetail(completion.packID)?.examples)
     }
 

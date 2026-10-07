@@ -1805,7 +1805,7 @@ struct PackImpactStoreTests {
         let detail = try #require(h.store.packDetail(a))
         #expect(detail.summary.name == "사자성어 예시 팩")
         #expect(detail.license == "자체 작성")
-        #expect(detail.examples == [.init(trigger: "사자성어 1번", title: "사자성어 1번")], "제목이 빈 항목은 틀로 채운 제목(칩과 같다)")
+        #expect(detail.examples == [.init(trigger: "사자성어 1번", title: "사자성어 1번", body: "예시 본문 1")], "제목이 빈 항목은 틀로 채운 제목(칩과 같다)")
         #expect(detail.standing?.patterns.map(\.status) == [.owned(sharedWith: [])])
         #expect(detail.name(of: a) == "사자성어 예시 팩")
         #expect(h.store.packDetail("없는 팩") == nil)
@@ -1816,8 +1816,8 @@ struct PackImpactStoreTests {
         ]), source: .csv))
         let phrasesDetail = try #require(h.store.packDetail(phrasesID))
         // 화면 확인 O-1 — 내 채움글에 밀린 「장」 대신 같은 항목의 안 밀린 단축어 「회사장」을 보인다
-        #expect(phrasesDetail.examples == [.init(trigger: "회사장", title: "장 제목"), .init(trigger: "인사", title: "인사 제목"),
-                                           .init(trigger: "회의", title: "회의 제목")])
+        #expect(phrasesDetail.examples == [.init(trigger: "회사장", title: "장 제목", body: "본문"), .init(trigger: "인사", title: "인사 제목", body: "본문"),
+                                           .init(trigger: "회의", title: "회의 제목", body: "본문")])
         #expect(phrasesDetail.standing?.hiddenTriggers == [.init(trigger: "장", owner: .userSnippets)], "내 채움글이 위라 「장」은 뒤 순서")
     }
 

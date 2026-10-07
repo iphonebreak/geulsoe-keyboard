@@ -71,8 +71,8 @@ public struct PackEncodingReview: Equatable, Sendable {
     /// 두 방식 모두 파일 전체를 읽는다(4-C)
     public var bothReadable: Bool { utf8.isReadable && cp949.isReadable }
 
-    /// 표본 수와 한 표본의 글자 수 — 길면 자르고 「…」
-    static let sampleCount = 3
+    /// 표본 수와 한 표본의 글자 수 — 길면 자르고 「…」. 두 줄이다(사장님 실기 2026-10-07 — 셋일 때 머리글 칸이 다 차지했다)
+    static let sampleCount = 2
     public static let sampleLength = 30
 
     // MARK: - 원본 바이트에서
@@ -111,35 +111,68 @@ public struct PackEncodingReview: Equatable, Sendable {
         var metaSeparator: UInt8?
     }
 
-    /// 비ASCII가 든 표본 자리의 처음 몇 개. 칸은 줄(LF·CR)과 흔한 구분자(`,`·`;`·탭)로 자른다 — 모두 ASCII라 CP949의 둘째 바이트
-    /// (0x41 이상)와 겹치지 않아, 같은 구간을 두 방식으로 읽으면 같은 자리가 나온다(4-C의 é / 챕).
-    /// **머리글 위의 `#` 줄은 그 줄 전체가 자리 하나**다(R29 — 「이름 : 값」으로 보인다). 머리글 뒤(첫 `#` 아닌 줄 다음)의 `#`는 본문 글자다(5-3)
+    /// 표본 자리 두 개 — **실제 데이터가 보이게** 고른다(사장님 실기 2026-10-07: 표본이 머리글 칸 「단축어·제목·본문」뿐이라
+    /// 글자가 맞는지 알 수 없었다).
+    ///
+    /// 1. 머리글 위 `#` 줄 가운데 비ASCII가 든 **첫 줄 하나**(R29 — 그 줄 전체가 자리 하나, 「이름 : 값」으로 보인다)
+    /// 2. 데이터 줄마다 **칸 하나** — 한글이 든 칸이 우선(두 방식 어느 쪽으로 읽어도 한글이 나오는 칸 — 바이트만 보고 정하므로 두 방식이
+    ///    **같은 자리**를 보인다), 없으면 비ASCII가 든 첫 칸. 한글 칸이 있는 줄이 먼저다
+    /// 3. **머리글 줄**(첫 `#` 아닌 줄)의 칸은 위 둘로 모자랄 때만 채운다 — 사용자가 적은 데이터가 아니라 칸 이름이다
+    ///
+    /// 보이는 순서는 파일 순서다. 칸은 줄(LF·CR)과 흔한 구분자(`,`·`;`·탭)로 자른다 — 모두 ASCII라 CP949의 둘째 바이트(0x41 이상)와
+    /// 겹치지 않아, 같은 구간을 두 방식으로 읽으면 같은 자리가 나온다(4-C의 é / 챕). 따옴표는 보지 않으므로 여러 줄 본문의 다음 줄도
+    /// 데이터 줄 하나로 센다(보여 주기용). 머리글 뒤(첫 `#` 아닌 줄 다음)의 `#`는 본문 글자다(5-3)
     static func sampleUnits(_ bytes: [UInt8]) -> [SampleUnit] {
-        var units: [SampleUnit] = []
+        var meta: SampleUnit?
+        var header: [SampleUnit] = []
+        // 데이터 줄 자리 — 한글 칸이 있는 줄을 먼저 고르고, 보일 때는 줄 순서(`line`)로 늘어놓는다
+        var hangulRows: [(line: Int, unit: SampleUnit)] = []
+        var otherRows: [(line: Int, unit: SampleUnit)] = []
         var beforeHeader = true
         var lineStart = 0
+        var lineNumber = 0
         for index in 0...bytes.count where index == bytes.count || bytes[index] == 0x0A || bytes[index] == 0x0D {
             let line = bytes[lineStart..<index]
             lineStart = index + 1
             let cells = line.split(omittingEmptySubsequences: false, whereSeparator: separators.contains)
             guard cells.contains(where: { !$0.isEmpty }) else { continue }   // 빈 줄·구분자만 — 머리글 앞이어도 그대로
+            lineNumber += 1
             if beforeHeader, startsWithHash(cells[0]) {
-                guard line.contains(where: { $0 >= 0x80 }) else { continue }
+                guard meta == nil, line.contains(where: { $0 >= 0x80 }) else { continue }
                 // 정보 줄은 키 뒤의 첫 구분자 하나로만 나눈다 — 값 안의 다른 기호(`;`·탭)는 글자다
                 let separator = line.first(where: separators.contains) ?? 0x2C
                 var metaCells = line.split(omittingEmptySubsequences: false) { $0 == separator }
                 while metaCells.last?.isEmpty == true { metaCells.removeLast() }   // 끝의 빈 칸(시트 폭 패딩)
-                units.append(SampleUnit(cells: metaCells, metaSeparator: separator))
-            } else {
+                meta = SampleUnit(cells: metaCells, metaSeparator: separator)
+            } else if beforeHeader {
                 beforeHeader = false
-                for cell in cells where cell.contains(where: { $0 >= 0x80 }) {
-                    units.append(SampleUnit(cells: [cell], metaSeparator: nil))
-                    if units.count == sampleCount { break }
+                header = cells.filter { $0.contains { $0 >= 0x80 } }.prefix(sampleCount).map { SampleUnit(cells: [$0], metaSeparator: nil) }
+            } else {
+                let nonASCII = cells.filter { $0.contains { $0 >= 0x80 } }
+                guard let first = nonASCII.first else { continue }
+                if let hangul = nonASCII.first(where: containsHangul) {
+                    hangulRows.append((lineNumber, SampleUnit(cells: [hangul], metaSeparator: nil)))
+                } else if otherRows.count < sampleCount {
+                    otherRows.append((lineNumber, SampleUnit(cells: [first], metaSeparator: nil)))
                 }
+                if hangulRows.count == rowCount(meta) { break }   // 데이터 한글 칸이 찼으면 더 볼 것이 없다
             }
-            if units.count == sampleCount { break }
         }
-        return units
+        // 파일 순서 — 정보 줄 → (모자라면) 머리글 칸 → 데이터 줄
+        let rows = (hangulRows + otherRows).prefix(rowCount(meta)).sorted { $0.line < $1.line }.map(\.unit)
+        let headerFill = header.prefix(rowCount(meta) - rows.count)
+        return (meta.map { [$0] } ?? []) + headerFill + rows
+    }
+
+    /// 데이터 줄 표본 수 — 정보 줄 표본이 있으면 하나 덜
+    private static func rowCount(_ meta: SampleUnit?) -> Int { sampleCount - (meta == nil ? 0 : 1) }
+
+    /// 두 방식 중 하나로라도 읽으면 한글(음절·자모)이 나오는 칸 — 사람이 글자가 맞는지 알아볼 수 있는 칸이다. 바이트만 보고 정한다
+    static func containsHangul(_ cell: ArraySlice<UInt8>) -> Bool {
+        [strictUTF8(cell), strictCP949(cell)].contains { text in
+            text?.unicodeScalars.contains { (0xAC00...0xD7A3).contains($0.value) || (0x1100...0x11FF).contains($0.value)
+                || (0x3130...0x318F).contains($0.value) } ?? false
+        }
     }
 
     /// 칸을 자르는 흔한 구분자 `,`·`;`·탭 — 따옴표는 보지 않는다(보여 주기용, 본 읽기는 `CSVRecordParser`)

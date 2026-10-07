@@ -128,7 +128,7 @@ struct PackImportSessionTransitionTests {
         #expect(review.cp949.isReadable)
         #expect(!review.utf8.isReadable)
         #expect(review.utf8.failedLines == 3)                 // 머리글·두 행 — 셋 다 한글
-        #expect(review.cp949.texts.first == "단축어")
+        #expect(review.cp949.texts == ["주소", "새해인사"], "표본은 머리글 칸이 아니라 데이터 줄(사장님 실기 2026-10-07)")
         session.confirmEncoding()
         #expect(session.preview?.draft.entries.map(\.title) == ["회사 주소", "새해 인사"])
     }
@@ -676,34 +676,71 @@ struct PackEncodingReviewTests {
         #expect(review.multilineBodyCount == 2)
     }
 
-    @Test("표본은 비ASCII가 든 칸의 처음 세 개 — 따옴표·앞뒤 공백을 떼고 길면 자른다")
+    @Test("표본은 두 줄 — 데이터 줄마다 칸 하나 · 따옴표·앞뒤 공백을 떼고 길면 자른다")
     func samples() throws {
         let long = String(repeating: "긴", count: 60)
-        let text = "trigger,body\nhi,\" 새해 인사 \"\nyo,회사 주소\nok,\(long)\nno,또 하나\n"
+        let text = "trigger,body\nhi,\" 새해 인사 \"\nok,\(long)\nyo,회사 주소\nno,또 하나\n"
         let review = try #require(started(.file(Data(text.utf8))).review)
-        #expect(review.utf8.samples.count == 3)
+        #expect(review.utf8.samples.count == 2)
         #expect(review.utf8.texts[0] == "새해 인사")
-        #expect(review.utf8.texts[1] == "회사 주소")
-        #expect(review.utf8.texts[2] == String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…")
+        #expect(review.utf8.texts[1] == String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…")
         #expect(review.utf8.samples.allSatisfy { $0?.meta == nil }, "데이터 칸은 정보 줄이 아니다")
+    }
+
+    // MARK: 사장님 실기 2026-10-07 — 표본이 머리글 칸(「단축어·제목·본문」)뿐이라 글자가 맞는지 알 수 없었다
+
+    @Test("★ 머리글 칸은 표본을 차지하지 않는다 — 정보 줄이 없으면 데이터 두 줄, 있으면 첫 정보 줄 하나 + 데이터 한 줄")
+    func samplesShowData() throws {
+        let rows = "단축어,제목,본문\n회의시작,회의 시작 인사,안녕하세요\n일정조율,일정 조율 문의,\"안녕하세요.\n가능하신 시간\"\n"
+        let plain = try #require(started(.file(Data(rows.utf8))).review)
+        #expect(plain.utf8.samples == [cell("회의시작"), cell("일정조율")])
+        let withMeta = try #require(started(.file(Data(("#이름,업무 상용구 예시,\n#출처,자체 작성,\n" + rows).utf8))).review)
+        #expect(withMeta.utf8.samples.map(PackImportCopy.sampleLine) == ["이름 : 업무 상용구 예시", "회의시작"])
+    }
+
+    @Test("★ 데이터 칸에 비ASCII가 없을 때만 머리글 칸으로 채운다 — 보이는 순서는 파일 순서")
+    func headerFillsOnlyWhenShort() throws {
+        let headerOnly = try #require(started(.file(Data("단축어,본문\nhi,hello\n".utf8))).review)
+        #expect(headerOnly.utf8.samples == [cell("단축어"), cell("본문")])
+        let metaAndHeader = try #require(started(.file(Data("#이름,예시 팩\n단축어,본문\nhi,hello\n".utf8))).review)
+        #expect(metaAndHeader.utf8.samples == [meta(.name, "예시 팩"), cell("단축어")])
+        let oneRow = try #require(started(.file(Data("단축어,body\nhi,새해\nyo,hello\n".utf8))).review)
+        #expect(oneRow.utf8.samples == [cell("단축어"), cell("새해")])
+    }
+
+    @Test("★ 한글이 든 칸이 우선 — 줄 안에서도(기호 칸 건너뜀), 줄 사이에서도(한글 줄 먼저 · 보이는 순서는 파일 순서)")
+    func hangulCellsFirst() throws {
+        let inRow = try #require(started(.file(Data("번호,제목,본문\n1,—,일석이조\n2,★,☆\n3,삼고초려,x\n".utf8))).review)
+        #expect(inRow.utf8.samples == [cell("일석이조"), cell("삼고초려")])
+        let fallback = try #require(started(.file(Data("번호,제목,본문\n1,★,☆\n2,삼고초려,x\n".utf8))).review)
+        #expect(fallback.utf8.samples == [cell("★"), cell("삼고초려")], "한글 줄이 하나뿐이면 기호 줄로 채운다")
+    }
+
+    @Test("★ 같은 자리 — CP949 파일의 데이터 줄 표본을 UTF-8 쪽도 같은 자리로(읽을 수 없는 칸)")
+    func dataSamplesSamePlaceBothEncodings() throws {
+        let review = try #require(started(.file(cp949("번호,제목,본문\n1,가나,다라\n2,마바,사아\n"))).review)
+        #expect(review.cp949.samples == [cell("가나"), cell("마바")])
+        #expect(review.utf8.samples == [nil, nil])
     }
 
     // MARK: R29 — 정보 줄은 「이름 : …」 꼴로, 한 줄이 표본 하나
 
-    @Test("★ R29 — 머리글 위 정보 줄은 원문(`#이름,…,`)이 아니라 칸과 값으로: 한 줄 = 표본 하나(줄을 더 만들지 않는다)")
+    @Test("★ R29 — 머리글 위 정보 줄은 원문(`#이름,…,`)이 아니라 칸과 값으로: 한 줄 = 표본 하나(줄을 더 만들지 않는다) · 정보 줄은 첫 줄 하나만")
     func metaLinesBecomeLabeledSamples() throws {
         let text = "#이름,사자성어 넘버스,\n#틀,넘버스성어 {n}번\n#출처,자체 작성\n번호,제목,본문\n1,가나,다라\n"
         let review = try #require(started(.file(Data(text.utf8))).review)
-        #expect(review.utf8.samples == [meta(.name, "사자성어 넘버스"), meta(.template, "넘버스성어 {n}번"), meta(.license, "자체 작성")])
-        #expect(review.utf8.samples.map(PackImportCopy.sampleLine) == ["이름 : 사자성어 넘버스", "틀 : 넘버스성어 {n}번", "출처 : 자체 작성"])
+        #expect(review.utf8.samples == [meta(.name, "사자성어 넘버스"), cell("가나")])
+        #expect(review.utf8.samples.map(PackImportCopy.sampleLine) == ["이름 : 사자성어 넘버스", "가나"])
+        let template = try #require(started(.file(Data("#틀,넘버스성어 {n}번\n#출처,자체 작성\n번호,제목,본문\n1,가나,다라\n".utf8))).review)
+        #expect(template.utf8.samples.map(PackImportCopy.sampleLine) == ["틀 : 넘버스성어 {n}번", "가나"])
     }
 
     @Test("★ R29 — 옛 `#권리` 줄도 「출처 : …」 · 따옴표로 감싼 키·값 · 틀 별칭은 「, 」로 잇는다 · 끝의 빈 칸(시트 폭 패딩)은 뺀다")
     func metaLineVariants() throws {
-        let text = "\"#권리\",\"글쇠, 자체 작성\",,\n#틀,사자성어 {n}번,성어 {n}번,,\n단축어,본문\n가,나\n"
-        let review = try #require(started(.file(Data(text.utf8))).review)
-        #expect(review.utf8.samples.map(PackImportCopy.sampleLine)
-                    == ["출처 : 글쇠, 자체 작성", "틀 : 사자성어 {n}번, 성어 {n}번", "단축어"])
+        let license = try #require(started(.file(Data("\"#권리\",\"글쇠, 자체 작성\",,\n단축어,본문\n가,나\n".utf8))).review)
+        #expect(license.utf8.samples.map(PackImportCopy.sampleLine) == ["출처 : 글쇠, 자체 작성", "가"])
+        let aliases = try #require(started(.file(Data("#틀,사자성어 {n}번,성어 {n}번,,\n번호,제목,본문\n1,가,나\n".utf8))).review)
+        #expect(aliases.utf8.samples.map(PackImportCopy.sampleLine) == ["틀 : 사자성어 {n}번, 성어 {n}번", "가"])
     }
 
     @Test("R29 — 정보 줄은 키 뒤의 첫 구분자로만 나눈다 — 값 안의 다른 기호(`;`·쉼표)는 글자 그대로")
@@ -714,12 +751,12 @@ struct PackEncodingReviewTests {
         #expect(semicolon.utf8.samples.first == meta(.license, "가, 나"))
     }
 
-    @Test("R29 — 정보 줄 표본 한 줄과 데이터 칸이 섞여 처음 세 개 · 값이 길면 값을 자른다")
+    @Test("R29 — 정보 줄 표본 한 줄 + 데이터 줄 하나 · 값이 길면 값을 자른다")
     func metaAndCellsMixed() throws {
         let long = String(repeating: "긴", count: 60)
         let text = "#이름,\(long)\n단축어,본문\n가나,다라\n마바,사아\n"
         let review = try #require(started(.file(Data(text.utf8))).review)
-        #expect(review.utf8.samples == [meta(.name, String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…"), cell("단축어"), cell("본문")])
+        #expect(review.utf8.samples == [meta(.name, String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…"), cell("가나")])
     }
 
     @Test("R29 — 머리글 뒤의 `#`(본문 칸)는 정보 줄이 아니다 · 모르는 `#` 키는 칸 이름 없이 원문 그대로(파서가 따로 거부한다)")

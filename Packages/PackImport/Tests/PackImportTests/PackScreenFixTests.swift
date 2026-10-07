@@ -88,7 +88,7 @@ struct ShadowRangeCopyTests {
             #expect(!line.contains("이 틀은 안 떠요"), "\(line)")
             #expect(line.contains("끝나는 입력에서는"), "\(line)")
         }
-        #expect(lines[0] == "「…번호3번」으로 끝나는 입력에서는 단축어 「번호3번」이 먼저 떠요")
+        #expect(lines[0] == "「…번호3번」으로 끝나는 입력에서는 단축어 「번호3번」 문구가 먼저 떠요")
         #expect(lines[3] == "「…장」 등으로 끝나는 입력에서는 내장 팩 단축어가 먼저 떠요.")
     }
 }
@@ -125,7 +125,7 @@ struct UsageExampleTests {
             PackStanding.Pattern(pattern: value, display: display, status: status)
         }
         let triggers = { (patterns: [PackStanding.Pattern]) in PackDetail.examples(of: pack, patterns: patterns).map(\.trigger) }
-        #expect(PackDetail.examples(of: pack) == [PackDetail.Example(trigger: "사자성어 3번", title: "제목")], "자리를 모르면 대표 틀")
+        #expect(PackDetail.examples(of: pack) == [PackDetail.Example(trigger: "사자성어 3번", title: "제목", body: "본문")], "자리를 모르면 대표 틀")
         #expect(triggers([pattern(first, "사자성어 {n}번", .owned(sharedWith: [])), pattern(alias, "성어{n}번", .owned(sharedWith: []))])
                     == ["사자성어 3번"])
         #expect(triggers([pattern(first, "사자성어 {n}번", .outranked(by: "a")), pattern(alias, "성어{n}번", .owned(sharedWith: []))])

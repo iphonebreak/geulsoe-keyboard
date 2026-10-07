@@ -46,7 +46,7 @@ struct PackImpactCopyTests {
         #expect(PackNoticeCopy.packRowDetail(summary("x", nil, mode: nil, count: 0, status: .unavailable)) == nil)
     }
 
-    @Test("★ 2-E — 팩 상세: 스위치·정보·틀 상태 배지와 설명 줄·풋터·사용법·삭제")
+    @Test("★ 2-E — 팩 상세: 스위치·정보·틀 상태 배지와 설명 줄·풋터·사용법(결과는 본문 첫 줄)·삭제")
     func detailCopy() {
         #expect(PackNoticeCopy.useToggle == "이 팩 사용")
         #expect(PackNoticeCopy.infoHeader == "정보" && PackNoticeCopy.kindLabel == "종류" && PackNoticeCopy.licenseLabel == "출처")
@@ -57,19 +57,33 @@ struct PackImpactCopyTests {
         #expect(PackNoticeCopy.patternBadge(.owned(sharedWith: [])) == "사용 중")
         #expect(PackNoticeCopy.patternBadge(.outranked(by: "a")) == "뒤 순서")
         #expect(PackNoticeCopy.patternBadge(.shadowed(by: ["장"])) == "가려짐")
-        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: []), name: name) == "이 팩이 써요")
-        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: ["b"]), name: name) == "아래 「예시 번호 팩」도 같은 틀 — 위에 있는 이 팩이 써요")
+        // 주어는 뜨는 문구 — 「이 팩이 써요」는 「이 팩을 써요」로 읽혔다(사장님 실기 2026-10-07)
+        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: []), name: name) == "이 팩 문구가 떠요")
+        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: ["b"]), name: name) == "아래 「예시 번호 팩」도 같은 틀이지만 위에 있는 이 팩 문구가 떠요")
         #expect(PackNoticeCopy.patternLine(.owned(sharedWith: ["b", "c"]), name: name)
-                == "아래 「예시 번호 팩」 외 1개 팩도 같은 틀 — 위에 있는 이 팩이 써요")
-        #expect(PackNoticeCopy.patternLine(.outranked(by: "a"), name: name) == "위에 있는 「사자성어 예시 팩」이 같은 틀을 써요")
+                == "아래 「예시 번호 팩」 외 1개 팩도 같은 틀이지만 위에 있는 이 팩 문구가 떠요")
+        #expect(PackNoticeCopy.patternLine(.outranked(by: "a"), name: name) == "같은 틀이라 위에 있는 「사자성어 예시 팩」 문구가 먼저 떠요")
         // 화면 확인 S-3 — 가림은 그 끝말로 끝나는 입력에서만(「이 틀은 안 떠요」는 범위 과장)
-        #expect(PackNoticeCopy.patternLine(.shadowed(by: ["장"]), name: name) == "「…장」으로 끝나는 입력에서는 단축어 「장」이 먼저 떠요")
+        #expect(PackNoticeCopy.patternLine(.shadowed(by: ["장"]), name: name) == "「…장」으로 끝나는 입력에서는 단축어 「장」 문구가 먼저 떠요")
         #expect(PackNoticeCopy.patternLine(.shadowed(by: ["번호3번", "번"]), name: name)
-                    == "「…번호3번」 등으로 끝나는 입력에서는 단축어 「번호3번」 외 1개가 먼저 떠요")
-        #expect(PackNoticeCopy.patternLine(.shadowed(by: ["자"]), name: name) == "「…자」로 끝나는 입력에서는 단축어 「자」가 먼저 떠요")
+                    == "「…번호3번」 등으로 끝나는 입력에서는 단축어 「번호3번」 외 1개 문구가 먼저 떠요")
+        #expect(PackNoticeCopy.patternLine(.shadowed(by: ["자"]), name: name) == "「…자」로 끝나는 입력에서는 단축어 「자」 문구가 먼저 떠요")
+        for status: PackStanding.PatternStatus in [.owned(sharedWith: []), .owned(sharedWith: ["b"]), .outranked(by: "a"), .shadowed(by: ["장"])] {
+            let line = PackNoticeCopy.patternLine(status, name: name)
+            #expect(!line.contains("써요") && line.contains("문구가"), "\(line)")
+        }
         #expect(PackNoticeCopy.usageHeader == "사용법")
         #expect(PackNoticeCopy.usageFooter == "단축어를 커서 끝까지 치면 툴바에 칩이 떠요. 칩을 누르면 단축어가 전문으로 바뀌어요.")
-        #expect(PackNoticeCopy.usageResult("예시 제목 둘") == "→ 예시 제목 둘")
+        #expect(PackNoticeCopy.usageResult("예시 제목 둘") == "→ 예시 제목 둘")   // 5-A 「이렇게 칩이 떠요」 — 칩 제목
+        // 사용법·「이렇게 써 보세요」 결과는 칩 제목이 아니라 들어가는 문구(본문) — 여러 줄이면 첫 줄 + 「…」, 길면 자르고 「…」(사장님 실기 2026-10-07)
+        #expect(PackNoticeCopy.usageResult(body: "예시 본문 한 줄") == "→ 예시 본문 한 줄")
+        #expect(PackNoticeCopy.usageResult(body: "안녕하세요.\n오늘 회의를 시작하겠습니다.") == "→ 안녕하세요. 오늘 회의를 시작하겠습니다.", "여러 줄은 빈칸으로 잇는다")
+        #expect(PackNoticeCopy.usageResult(body: "안녕하세요.\n오늘 회의를 시작하겠습니다.\n자료는 메일로 보내 드렸습니다.") == "→ 안녕하세요. 오늘 회의를 시작하겠습니다. 자료는 메일로…", "이은 뒤 길면 30자에서 자른다")
+        #expect(PackNoticeCopy.usageResult(body: "\n  첫 줄 \r\n\n") == "→ 첫 줄", "빈 줄·앞뒤 공백은 줄로 치지 않는다")
+        let thirty = String(repeating: "가", count: PackNoticeCopy.usageResultLength)
+        #expect(PackNoticeCopy.usageResult(body: thirty) == "→ " + thirty, "딱 맞으면 자르지 않는다")
+        #expect(PackNoticeCopy.usageResult(body: thirty + "나") == "→ " + thirty + "…")
+        #expect(PackNoticeCopy.usageResult(body: String(thirty.dropLast()) + " 나다") == "→ " + String(thirty.dropLast()) + "…", "자른 끝의 공백은 뗀다")
         #expect(PackNoticeCopy.deletePackButton == "팩 삭제")
     }
 
@@ -85,7 +99,7 @@ struct PackImpactCopyTests {
                 == "목록에서 위에 있는 쪽이 먼저 떠요. 이 팩 문구를 쓰려면 「외부 채움글」 목록에서 이 팩을 길게 눌러 더 위로 올려 주세요.")
     }
 
-    @Test("★ 검증 F-5 — 꺼진·쉬는 팩 상세는 「켜면(다시 뜨면)」 전제를 머리·배지에 보인다 — 지금 뜨는 팩은 그대로")
+    @Test("★ 검증 F-5 — 꺼진·쉬는 팩 상세는 「켜면(다시 뜨면)」 전제를 머리·배지·설명 줄에 보인다 — 지금 뜨는 팩은 그대로")
     func standingPremiseCopy() {
         #expect(PackNoticeCopy.standingPremise(.on) == nil && PackNoticeCopy.standingPremise(.unavailable) == nil)
         #expect(PackNoticeCopy.standingPremise(.off) == .ifEnabled)
@@ -102,10 +116,24 @@ struct PackImpactCopyTests {
         #expect(PackNoticeCopy.patternBadge(.owned(sharedWith: []), premise: .ifResumed) == "뜨면 사용")
         #expect(PackNoticeCopy.patternBadge(.outranked(by: "a"), premise: .ifEnabled) == "뒤 순서")
         #expect(PackNoticeCopy.patternBadge(.shadowed(by: ["장"]), premise: .ifEnabled) == "가려짐")
+        // 설명 줄도 같은 전제 — 이 팩 문구가 뜨는 것은 켜면(다시 뜨면). 뒤 순서·가려짐은 다른 문구가 먼저 뜨는 것이라 그대로
+        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: []), premise: nil, name: name) == "이 팩 문구가 떠요")
+        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: []), premise: .ifEnabled, name: name) == "켜면 이 팩 문구가 떠요")
+        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: []), premise: .ifResumed, name: name) == "다시 뜨면 이 팩 문구가 떠요")
+        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: ["b"]), premise: .ifEnabled, name: name)
+                == "아래 「예시 번호 팩」도 같은 틀이지만 켜면 위에 있는 이 팩 문구가 떠요")
+        #expect(PackNoticeCopy.patternLine(.owned(sharedWith: ["b", "c"]), premise: .ifResumed, name: name)
+                == "아래 「예시 번호 팩」 외 1개 팩도 같은 틀이지만 다시 뜨면 위에 있는 이 팩 문구가 떠요")
+        #expect(PackNoticeCopy.patternLine(.outranked(by: "a"), premise: .ifEnabled, name: name)
+                == PackNoticeCopy.patternLine(.outranked(by: "a"), name: name))
+        #expect(PackNoticeCopy.patternLine(.shadowed(by: ["장"]), premise: .ifResumed, name: name)
+                == PackNoticeCopy.patternLine(.shadowed(by: ["장"]), name: name))
         // 가정 문구에는 「지금」·「사용 중」이 없다 — 꺼진 팩이 지금 쓰이는 것처럼 보이지 않게
         let premised = [PackNoticeCopy.StandingPremise.ifEnabled, .ifResumed].flatMap {
             [PackNoticeCopy.templatesHeader($0), PackNoticeCopy.hiddenTriggersHeader(count: 37, premise: $0),
-             PackNoticeCopy.patternBadge(.owned(sharedWith: []), premise: $0)]
+             PackNoticeCopy.patternBadge(.owned(sharedWith: []), premise: $0),
+             PackNoticeCopy.patternLine(.owned(sharedWith: []), premise: $0, name: name),
+             PackNoticeCopy.patternLine(.owned(sharedWith: ["b"]), premise: $0, name: name)]
         }
         for text in premised { #expect(!text.contains("지금") && !text.contains("사용 중"), "\(text)") }
     }
@@ -136,17 +164,18 @@ var stage3Copy: [String] {
         PackNoticeCopy.useToggle, PackNoticeCopy.infoHeader, PackNoticeCopy.kindLabel, PackNoticeCopy.licenseLabel, PackNoticeCopy.infoFooter,
         PackNoticeCopy.templatesHeader, PackNoticeCopy.templatesFooter, PackNoticeCopy.hiddenTriggersHeader(count: 37),
         PackNoticeCopy.hiddenTriggerBadge, PackNoticeCopy.usageHeader, PackNoticeCopy.usageFooter, PackNoticeCopy.deletePackButton,
+        PackNoticeCopy.usageResult("예시 제목 둘"), PackNoticeCopy.usageResult(body: "예시 본문 첫 줄\n둘째 줄"),
         PackNoticeCopy.deleteTitle(name: "회사 상용구"), PackNoticeCopy.deleteMessage(itemCount: 37), PackNoticeCopy.deleteMessage(itemCount: 0)
     ]
     texts += [sajaseongeo, examplePack, company].compactMap(PackNoticeCopy.packRowDetail)
     let statuses: [PackStanding.PatternStatus] = [.owned(sharedWith: []), .owned(sharedWith: ["b"]), .owned(sharedWith: ["b", "c"]),
                                                   .outranked(by: "a"), .shadowed(by: ["장"]), .shadowed(by: ["장", "번"])]
     texts += statuses.flatMap { [PackNoticeCopy.patternBadge($0), PackNoticeCopy.patternLine($0, name: name)] }
-    // 검증 F-5 — 꺼진·쉬는 팩의 가정 머리·배지
+    // 검증 F-5 — 꺼진·쉬는 팩의 가정 머리·배지·설명 줄
     let premises: [PackNoticeCopy.StandingPremise] = [.ifEnabled, .ifResumed]
     texts += premises.flatMap { premise in
         [PackNoticeCopy.templatesHeader(premise), PackNoticeCopy.hiddenTriggersHeader(count: 37, premise: premise)]
-            + statuses.map { PackNoticeCopy.patternBadge($0, premise: premise) }
+            + statuses.flatMap { [PackNoticeCopy.patternBadge($0, premise: premise), PackNoticeCopy.patternLine($0, premise: premise, name: name)] }
     }
     texts += [PackImpact.Source.userSnippets, .pack("c")].map { PackNoticeCopy.hiddenTriggerLine(owner: $0, name: name) }
     texts += [[.userSnippets], [.userSnippets, .pack("c")]].map { PackNoticeCopy.hiddenTriggersFooter(owners: $0, name: name) }

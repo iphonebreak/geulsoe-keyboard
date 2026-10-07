@@ -397,9 +397,10 @@ struct PackImportCompletionSections: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(example.trigger)
                         .font(.body.monospacedDigit())
-                    Text(PackNoticeCopy.usageResult(example.title))
+                    Text(PackNoticeCopy.usageResult(body: example.body))
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 .accessibilityElement(children: .combine)
             }

@@ -239,7 +239,7 @@ struct ExternalPackDetailView: View {
                 Section {
                     ForEach(standing.patterns, id: \.pattern) { item in
                         standingRow(title: item.display, monospaced: true,
-                                    line: PackNoticeCopy.patternLine(item.status, name: detail.name(of:)),
+                                    line: PackNoticeCopy.patternLine(item.status, premise: premise, name: detail.name(of:)),
                                     badge: PackNoticeCopy.patternBadge(item.status, premise: premise), tint: tint(item.status))
                     }
                 } header: {
@@ -269,9 +269,10 @@ struct ExternalPackDetailView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(example.trigger)
                             .font(.body.monospacedDigit())
-                        Text(PackNoticeCopy.usageResult(example.title))
+                        Text(PackNoticeCopy.usageResult(body: example.body))
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
                     }
                     .accessibilityElement(children: .combine)
                 }
