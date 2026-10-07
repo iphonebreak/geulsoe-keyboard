@@ -162,25 +162,29 @@ struct PackImportCopyMappingTests {
         #expect(PackImportPreview.percent(skipped: skipped, of: total) == percent)
     }
 
-    @Test("4-B·4-C 글자 확인 — 상태 줄(둘 다 읽힘 / 다른 쪽이 깨짐 / 고른 쪽이 깨짐)과 표 머리")
+    /// ★ 상태 줄 표 — **고른 쪽이 깨졌을 때만** 문장, 고른 쪽이 읽히면 다른 쪽이 깨졌어도 nil(사장님 실기 2026-10-07 — 양쪽 대칭)
+    static let encodingStatusTable: [(PackEncodingReview.Encoding, Int, Int, String?)] = [
+        (.utf8, 0, 37, nil),                                                                        // UTF-8 고름 · CP949 깨짐 — 실기 지적
+        (.cp949, 37, 0, nil),                                                                       // CP949 고름·읽힘 · UTF-8 깨짐
+        (.utf8, 37, 0, "UTF-8로는 읽을 수 없어요(깨진 글자 37행). 다른 쪽을 골라 주세요."),
+        (.cp949, 0, 37, "한국어(CP949)로는 읽을 수 없어요(깨진 글자 37행). 다른 쪽을 골라 주세요."),
+        (.utf8, 1_234, 0, "UTF-8로는 읽을 수 없어요(깨진 글자 1,234행). 다른 쪽을 골라 주세요."),     // 검증 F-6 ② 천 단위 쉼표(S-4)
+        (.cp949, 37, 1_234, "한국어(CP949)로는 읽을 수 없어요(깨진 글자 1,234행). 다른 쪽을 골라 주세요."),  // 둘 다 깨짐 — 고른 쪽 수
+        (.utf8, 0, 0, "두 가지로 다 읽혀요. 표본을 보고 맞는 쪽을 골라 주세요."),                           // 4-C
+        (.cp949, 0, 0, "두 가지로 다 읽혀요. 표본을 보고 맞는 쪽을 골라 주세요.")
+    ]
+
+    @Test("★ 4-B·4-C 글자 확인 상태 줄 — 고른 쪽이 깨졌을 때만 문장, 둘 다 읽히면 4-C", arguments: encodingStatusTable)
+    func encodingStatus(selected: PackEncodingReview.Encoding, utf8Failed: Int, cp949Failed: Int, line: String?) {
+        #expect(PackImportCopy.encodingStatus(review(selected: selected, utf8Failed: utf8Failed, cp949Failed: cp949Failed)) == line)
+    }
+
+    @Test("4-B·4-C 글자 확인 — 표 머리·방식 이름")
     func encodingLines() {
         let both = review(selected: .utf8, utf8Failed: 0, cp949Failed: 0)
-        #expect(PackImportCopy.encodingStatus(both) == "두 가지로 다 읽혀요. 표본을 보고 맞는 쪽을 골라 주세요.")
         #expect(PackImportCopy.samplesHeader(both) == "파일에서 찾은 표본 — UTF-8")
         #expect(PackImportCopy.alternativeHeader(both) == "한국어(CP949)로 고르면")
-
-        let cp949 = review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)
-        #expect(PackImportCopy.encodingStatus(cp949) == "UTF-8로는 읽을 수 없어요(깨진 글자 37행).")
-        #expect(PackImportCopy.samplesHeader(cp949) == "파일에서 찾은 표본")
-
-        // 검증 F-6 ② — 다른 쪽 깨진 글자 수도 숫자 함수를 거친다(S-4 — 천 단위 쉼표)
-        #expect(PackImportCopy.encodingStatus(review(selected: .cp949, utf8Failed: 1_234, cp949Failed: 0))
-                == "UTF-8로는 읽을 수 없어요(깨진 글자 1,234행).")
-        #expect(PackImportCopy.encodingStatus(review(selected: .utf8, utf8Failed: 1_234, cp949Failed: 0))
-                == "UTF-8로는 읽을 수 없어요(깨진 글자 1,234행). 다른 쪽을 골라 주세요.")
-
-        let broken = review(selected: .utf8, utf8Failed: 37, cp949Failed: 0)
-        #expect(PackImportCopy.encodingStatus(broken) == "UTF-8로는 읽을 수 없어요(깨진 글자 37행). 다른 쪽을 골라 주세요.")
+        #expect(PackImportCopy.samplesHeader(review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)) == "파일에서 찾은 표본")
         #expect(PackImportCopy.encodingName(.utf8) == "UTF-8")
         #expect(PackImportCopy.encodingName(.cp949) == "한국어(CP949)")
     }
@@ -346,8 +350,8 @@ var stage4Copy: [String] {
     for selected in [PackEncodingReview.Encoding.utf8, .cp949] {
         for failed in [(0, 0), (37, 0), (0, 37)] {
             let shown = review(selected: selected, utf8Failed: failed.0, cp949Failed: failed.1)
-            texts += [PackImportCopy.encodingStatus(shown), PackImportCopy.samplesHeader(shown), PackImportCopy.alternativeHeader(shown)]
-            texts += [PackImportCopy.cp949Caution(shown)].compactMap { $0 }
+            texts += [PackImportCopy.samplesHeader(shown), PackImportCopy.alternativeHeader(shown)]
+            texts += [PackImportCopy.encodingStatus(shown), PackImportCopy.cp949Caution(shown)].compactMap { $0 }
         }
     }
     for kind in [PackImportSource.Kind.file, .paste] {

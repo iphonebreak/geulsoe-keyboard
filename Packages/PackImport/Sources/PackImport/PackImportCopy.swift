@@ -136,14 +136,13 @@ public enum PackImportCopy {
 
     public static func count(_ value: Int) -> String { "\(PackNoticeCopy.number(value))개" }
 
-    /// 구분 줄 — 둘 다 읽힘(4-C) · 다른 쪽이 깨짐(4-B) · **고른 쪽이 깨짐**(「다음」이 먹지 않는다)
-    public static func encodingStatus(_ review: PackEncodingReview) -> String {
+    /// 구분 줄 — 둘 다 읽힘(4-C) · **고른 쪽이 깨짐**(「다음」이 먹지 않는다). 고른 쪽이 읽히면 다른 쪽이 깨졌어도 줄이 없다(nil) —
+    /// UTF-8을 골랐는데 「한국어(CP949)로는 읽을 수 없어요」가 보이던 것(사장님 실기 2026-10-07). 양쪽 대칭
+    public static func encodingStatus(_ review: PackEncodingReview) -> String? {
         if review.bothReadable { return "두 가지로 다 읽혀요. 표본을 보고 맞는 쪽을 골라 주세요." }
         let selected = review.reading(review.selected)
-        guard selected.isReadable else {
-            return "\(encodingName(review.selected))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(selected.failedLines))행). 다른 쪽을 골라 주세요."
-        }
-        return "\(encodingName(review.other))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(review.reading(review.other).failedLines))행)."
+        guard !selected.isReadable else { return nil }
+        return "\(encodingName(review.selected))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(selected.failedLines))행). 다른 쪽을 골라 주세요."
     }
 
     /// 상태 줄 아래 한 줄 — **고른 방식이 한국어(CP949)이고 읽힐 때만**(계획서 11절 F-1). 엑셀 「쉼표로 구분된 값」(CP949)은 `—` 같은 기호를

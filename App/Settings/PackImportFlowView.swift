@@ -179,10 +179,11 @@ struct PackImportFlowView: View {
         } header: {
             Text(PackImportCopy.encodingQuestion)
         } footer: {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(PackImportCopy.encodingStatus(review))
-                if let caution = PackImportCopy.cp949Caution(review) {
-                    Text(caution)
+            // 상태 줄·CP949 안내 둘 다 없으면 풋터 자체를 두지 않는다(빈 자리 없음)
+            let lines = [PackImportCopy.encodingStatus(review), PackImportCopy.cp949Caution(review)].compactMap { $0 }
+            if !lines.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(lines, id: \.self) { Text($0) }
                 }
             }
         }
