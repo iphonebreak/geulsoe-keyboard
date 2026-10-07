@@ -2,9 +2,10 @@ import Foundation
 
 /// 고정 샘플 — 3-A 「처음이라면」의 번호형·문구형 샘플과 3-C 공유 시트(PDR `docs/design-reviews/external-snippet-packs.md` 6-6·13-1(R5), AC-29).
 ///
-/// 번들 리소스 `Samples/`는 기획자 원본 `docs/design/external-snippet-packs/sample-*.original.csv`를 **바이트 그대로** 복사한 것이다
-/// (6-6 ③ — 번들 이름만 `sample-*.csv`, 해시는 제작 기록 `sample-build-record.md`와 같다: `PackSampleTests`). 내용은 가짜 문구다(U6).
-/// 이 모듈은 앱 전용이라 샘플도 키보드 바이너리에 실리지 않는다. xlsx 샘플 2종은 1-e 리소스다 — 지금 번들에는 CSV뿐이다(AC-35).
+/// 번들 리소스 `Samples/`는 기획자 원본 `docs/design/external-snippet-packs/sample-*.original.csv`와 그 원본에서 만든 xlsx
+/// (`tools/generate_sample_xlsx.py`, 1-e ④)를 **바이트 그대로** 복사한 것이다(6-6 ③ — 번들 이름만 `sample-*.csv`·`sample-*.xlsx`,
+/// 해시는 제작 기록 `sample-build-record.md`와 같다: `PackSampleTests`). 내용은 가짜 문구다(U6). 이 모듈은 앱 전용이라 샘플도 키보드 바이너리에 실리지 않는다.
+/// **판이 내보내는 형식만 꺼낸다**(`bundledURL`) — CSV 전용판은 xlsx 샘플이 번들에 있어도 알약·공유 사본 어디에도 닿지 않는다(AC-35, 1-e ④ 판별 규칙).
 public enum PackSample {
 
     public enum Kind: CaseIterable, Sendable {
@@ -41,9 +42,10 @@ public enum PackSample {
             }
         }
 
-        /// 번들 파일 — 이 빌드에 없으면 nil(xlsx 샘플은 1-e)
+        /// 번들 파일 — 지금 판이 내보내지 않는 형식(CSV 전용판의 xlsx)이거나 이 빌드에 없으면 nil
         public var bundledURL: URL? {
-            Bundle.module.url(forResource: resourceName, withExtension: format.fileExtension, subdirectory: PackSample.directoryName)
+            guard PackCopySet.current.lines.sampleFormats.contains(format) else { return nil }
+            return Bundle.module.url(forResource: resourceName, withExtension: format.fileExtension, subdirectory: PackSample.directoryName)
         }
 
         /// 사용자에게 보이는 이름 — 「번호형 샘플.csv」(시안 3-C). 「파일에 저장」하면 이 이름으로 남는다

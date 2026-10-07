@@ -153,6 +153,81 @@ struct XLSXAttributeCountTests {
         #expect(try reader.table(for: reader.sheets[0]).row(1)?.cells == [.text(fake)])
     }
 
+    /// 시트 본문 앞에 `prefix` + 속성 `count`개짜리 태그 + `suffix`
+    private func sheetWithHeavyTag(_ count: Int, prefix: String, suffix: String) -> Data {
+        let heavy = "<x" + (0..<count).map { #" a\#($0)="""# }.joined() + "/>"
+        var fixture = XLSXFixture(sheets: [F.sheet(rows: #"<row r="1"><c r="A1" t="s"><v>0</v></c></row>"#, before: prefix + heavy + suffix)],
+                                  sharedStrings: F.plainSST(["회의시작"]))
+        fixture.method = 0
+        return fixture.build()
+    }
+
+    // 검증 F1 — 사전 스캔이 끝 태그를 첫 `>`까지 통째로 건너뛰어 `</zz ` 뒤의 무거운 태그를 세지 않았다. libxml2는 끝 태그 오류 뒤에도
+    // 그 태그를 끝까지 파싱한다(속성 16만 개 6.85초, 제품 경로 0.9MB 파일 41.7초 — macOS libxml2 2.9.13). 정상 XML에서 `<`는 주석·CDATA·
+    // 처리 명령 안에만 올 수 있으므로, **태그(시작·끝·`<!…>`) 안에서 `<`를 만나면 사전 스캔이 거부한다** — 파서가 어디서 멈추는지에 기대지 않는다
+    @Test("★ 검증 F1 — 태그 안의 `<`(끝 태그·선언·소문자 cdata·속성 값·닫히지 않은 시작 태그) 뒤 속성 16만 개 태그는 1.5초 안에 거부",
+          .timeLimit(.minutes(1)), arguments: [
+              ("짝 없는 끝 태그 + 공백", "<y></zz ", "</y>"),
+              ("같은 이름 끝 태그 + 공백", "<y></y ", ""),
+              ("<!X 선언 꼴", "<y><!X ", "</y>"),
+              ("소문자 <![cdata[ — CDATA는 대문자만", "<y><![cdata[ ", " ]]></y>"),
+              ("속성 값 안의 <", #"<y><q a=""#, #""/></y>"#),
+              ("시작 태그 안 홀로 선 큰따옴표", #"<y><q " "#, "</y>"),
+              ("값 뒤 따옴표 하나 더", #"<y><q a="1"" "#, "</y>"),
+              ("닫히지 않은 시작 태그", "<y><q ", "</y>"),
+          ])
+    func lessThanInsideTag(_ label: String, _ prefix: String, _ suffix: String) {
+        let data = sheetWithHeavyTag(160_000, prefix: prefix, suffix: suffix)
+        var failure: XLSXWorkbookFailure?
+        let elapsed = seconds { failure = openFailure(data) }
+        #expect(failure == .malformedXML, "\(label)")
+        #expect(elapsed < 1.5, "\(label): \(elapsed)초")
+    }
+
+    // 위 시험은 파서까지 간다 — libxml2가 그 자리에서 멈추면(판마다 다를 수 있다, iOS 기기 판 미확인) 사전 스캔이 비켜 가도 빨리 끝난다.
+    // 그래서 **사전 스캔 자체**가 거부하는지 따로 고정한다(기기 libxml2와 무관해지는 것이 이 수정의 목적이다)
+    @Test("★ 검증 F1 — 사전 스캔이 직접 거부한다(파서에 기대지 않음): 태그 안의 `<` · 대문자가 아닌 CDATA 표지", arguments: [
+        "<a></zz <b/></a>", "<a></a <b/>", "<a><!X <b/></a>", "<a><![cdata[ <b/> ]]></a>", "<a><![CData[ <b/> ]]></a>",
+        #"<a><q v="<b/>"/></a>"#, "<a><q v='<'/></a>", "<a><q <b/></a>", "<a><q/ <b/></a>",
+    ])
+    func prescanRejectsLessThanInTags(_ xml: String) {
+        #expect(throws: XLSXWorkbookFailure.malformedXML) { try XLSXXML.prescan(Data(xml.utf8)) }
+    }
+
+    @Test("사전 스캔이 받는 정상 꼴 — 주석·CDATA·처리 명령 안의 `<`, 값 안의 `>`, 공백·줄바꿈 든 끝 태그, 빈 요소", arguments: [
+        "<a><!-- <b c='1'> --></a>", "<a><![CDATA[<b>]]></a>", "<a><?p <b>?></a>", #"<a q="x>y"></a >"#, "<a><b/></a\n>", "<a>1 &lt; 2</a>",
+    ])
+    func prescanAcceptsWellFormed(_ xml: String) throws {
+        try XLSXXML.prescan(Data(xml.utf8))
+    }
+
+    // 검증 F5 — 건너뛰기가 표지의 **끝에서 멈추고 다시 센다**(파일 끝까지 건너뛰지 않는다)
+    @Test("★ 검증 F5 — 주석·처리 명령·CDATA·끝 태그 **뒤의** 무거운 태그는 다시 센다(1.5초 안에 속성 수로 거부)",
+          .timeLimit(.minutes(1)), arguments: [
+              ("주석 뒤", "<!-- 메모 <a> -->", ""),
+              ("처리 명령 뒤", "<?pi <a> ?>", ""),
+              ("CDATA 뒤", "<y><![CDATA[<a>]]></y>", ""),
+              ("끝 태그 뒤", "<y></y>", ""),
+              ("공백 든 끝 태그 뒤", "<y></y >", ""),
+          ])
+    func heavyTagAfterSkippedMarkup(_ label: String, _ prefix: String, _ suffix: String) {
+        let data = sheetWithHeavyTag(160_000, prefix: prefix, suffix: suffix)
+        var failure: XLSXWorkbookFailure?
+        let elapsed = seconds { failure = openFailure(data) }
+        #expect(failure == .tooManyAttributes, "\(label)")
+        #expect(elapsed < 1.5, "\(label): \(elapsed)초")
+    }
+
+    @Test("정상 XML은 그대로 — 주석·CDATA·처리 명령 안의 `<`, 값 안의 `>`, 공백 든 끝 태그, 빈 요소")
+    func wellFormedMarkupStillReads() throws {
+        let rows = #"<row r="1"><c r="A1" t="inlineStr"><is><t><![CDATA[a<b>c]]></t></is></c><c r="B1" t="s"><v>0</v></c></row >"#
+        let before = #"<!-- <x a="1"> --><?pi <x> ?><y q="a>b"></y ><z/>"#
+        var fixture = XLSXFixture(sheets: [F.sheet(rows: rows, before: before)], sharedStrings: F.plainSST(["회의시작"]))
+        fixture.method = 0
+        var reader = try XLSXWorkbookReader.open(fixture.build())
+        #expect(try reader.table(for: reader.sheets[0]).row(1)?.cells == [.text("a<b>c"), .text("회의시작")])
+    }
+
     @Test("xmlns 선언도 속성으로 센다 — 루트에 접두 선언 63개 + 기본 2개")
     func namespaceDeclarationsCount() {
         let declarations = (0..<63).map { #" xmlns:p\#($0)="urn:p\#($0)""# }.joined()
@@ -191,6 +266,49 @@ struct XLSXTableTextTests {
     func underLimitAccepted() {
         #expect(openFailure(amplified(bytes: 12_000, rows: 499)) == nil)
         #expect(openFailure(amplified(bytes: 12_000, rows: 501)) == .tooMuchText)
+    }
+
+    // 승인 메모 ③ · 검증 F2 — 칸 상한을 128KB로 올리면 칸 하나의 정리·검사 비용이 커진다. 표 합 6MB(S3)가 먼저 묶는지 판정 경로 끝까지 잰다
+    @Test("★ 검증 F2 — 128KB 칸 × 45행(표 약 5.9MB)을 판정 경로 끝까지: 긴 본문은 행 건너뜀, 앞 ZWJ만 긴 본문은 정리 뒤 받음 — 2초 안",
+          .timeLimit(.minutes(1)), arguments: [false, true])
+    func longCellsThroughPipeline(_ leadingZWJ: Bool) throws {
+        let cell = leadingZWJ ? String(repeating: "\u{200D}", count: 43_689) + "가" : String(repeating: "가", count: 43_690)
+        #expect(cell.utf8.count == 131_070)
+        let header = #"<row r="1"><c r="A1" t="inlineStr"><is><t>번호</t></is></c><c r="B1" t="inlineStr"><is><t>본문</t></is></c></row>"#
+        let rows = (2...46).map { #"<row r="\#($0)"><c r="A\#($0)"><v>\#($0)</v></c><c r="B\#($0)" t="s"><v>0</v></c></row>"# }.joined()
+        var fixture = XLSXFixture(sheets: [F.sheet(rows: header + rows)], sharedStrings: F.plainSST([cell]))
+        fixture.method = 0
+        let data = fixture.build()
+        var draft: PackDraft?
+        let elapsed = seconds { draft = try? WorkbookHelper.draft(data) }
+        let result = try #require(draft)
+        if leadingZWJ {
+            #expect(result.acceptedRecordCount == 45 && result.sanitizedCharacterCount == 45 * 43_689 && result.items.allSatisfy { $0.body == "가" })
+        } else {
+            #expect(result.acceptedRecordCount == 0 && result.skipped.count == 45 && result.skipped.allSatisfy { $0.reason == .bodyTooLong })
+        }
+        #expect(elapsed < 2, "\(elapsed)초")
+    }
+
+    // 검증 F6 — 숫자 칸을 합에서 빼는 뮤테이션이 살았다(숫자는 공유 증폭이 없어 위험은 시트 파트 크기 안이지만 계약은 「글·숫자 합」이다)
+    @Test("★ 검증 F6 — 숫자 칸도 합에 든다: 숫자만·글과 숫자 섞임 모두 상한에서 거부, 상한 안은 받는다(상한을 줄여 본다)", arguments: [
+        (#"<c r="A1"><v>12345</v></c><c r="B1"><v>67890</v></c>"#, 10, nil),
+        (#"<c r="A1"><v>12345</v></c><c r="B1"><v>678901</v></c>"#, 10, XLSXWorkbookFailure.tooMuchText),
+        (#"<c r="A1" t="s"><v>0</v></c><c r="B1"><v>12345</v></c>"#, 17, nil),
+        (#"<c r="A1" t="s"><v>0</v></c><c r="B1"><v>123456</v></c>"#, 17, XLSXWorkbookFailure.tooMuchText),
+    ] as [(String, Int, XLSXWorkbookFailure?)])
+    func numbersCount(_ cells: String, limit: Int, expected: XLSXWorkbookFailure?) throws {
+        // 공유 문자열 「회의시작」 = 12B
+        var fixture = XLSXFixture(sheets: [F.sheet(rows: #"<row r="1">\#(cells)</row>"#)], sharedStrings: F.plainSST(["회의시작"]))
+        fixture.method = 0
+        var limits = XLSXWorkbookLimits.product
+        limits.tableTextBytes = limit
+        var reader = try XLSXWorkbookReader.open(fixture.build(), limits: limits)
+        if let expected {
+            #expect(throws: expected) { _ = try reader.table(for: reader.sheets[0]) }
+        } else {
+            #expect(try reader.table(for: reader.sheets[0]).rows.count == 1)
+        }
     }
 
     @Test("★ ③까지 — 가져오기 파이프라인은 「파일이 너무 커요」로 끝난다(판정 경로에 6MB 넘는 글이 들어가지 않는다)")

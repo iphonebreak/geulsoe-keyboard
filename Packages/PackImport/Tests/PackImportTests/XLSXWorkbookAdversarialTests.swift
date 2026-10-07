@@ -308,12 +308,13 @@ extension WorkbookCase {
         WorkbookCase(id: "T01", title: "공유 문자열 항목 50,001개", build: fixture {
             $0.sharedStrings = F.sst((0...50_000).map { "<t>\($0)</t>" })
         }, expect: .openFails(.tooManySharedStrings)),
-        WorkbookCase(id: "T02", title: "공유 문자열 하나 12,001바이트(본문 상한 초과)", build: fixture {
-            $0.sharedStrings = F.plainSST([String(repeating: "a", count: 12_001)])
+        // 칸 상한 = 엑셀 셀 최대(32,767자) 쪽 131,072B(승인 메모 ③, 검증 F2) — 본문 상한(12,000B)을 넘는 칸은 표에 실리고 판정이 자리별로 정한다
+        WorkbookCase(id: "T02", title: "공유 문자열 하나 131,073바이트(칸 상한 초과)", build: fixture {
+            $0.sharedStrings = F.plainSST([String(repeating: "a", count: 131_073)])
             $0.method = 0
         }, expect: .openFails(.textTooLong)),
-        WorkbookCase(id: "T03", title: "인라인 문자열 12,001바이트", build: sheet(
-            #"<row r="1"><c r="A1" t="inlineStr"><is><t>\#(String(repeating: "가", count: 4_000))</t><r><t>bb</t></r></is></c></row>"#, stored: true
+        WorkbookCase(id: "T03", title: "인라인 문자열 131,073바이트(조각을 이은 길이)", build: sheet(
+            #"<row r="1"><c r="A1" t="inlineStr"><is><t>\#(String(repeating: "가", count: 43_690))</t><r><t>bbb</t></r></is></c></row>"#, stored: true
         ), expect: .tableFails(.textTooLong)),
         WorkbookCase(id: "T04", title: "공유 문자열 색인 == 항목 수", build: sheet(#"<row r="1"><c r="A1" t="s"><v>1</v></c></row>"#),
                      expect: .tableFails(.invalidSharedStringIndex)),
@@ -325,9 +326,19 @@ extension WorkbookCase {
                      expect: .tableFails(.invalidSharedStringIndex)),
         WorkbookCase(id: "T08", title: "공유 문자열 파트 없이 t=\"s\"", build: fixture { $0.sharedStrings = nil },
                      expect: .tableFails(.invalidSharedStringIndex)),
-        WorkbookCase(id: "T09", title: "숫자 <v> 12,001바이트", build: sheet(
-            #"<row r="1"><c r="A1"><v>\#(String(repeating: "1", count: 12_001))</v></c></row>"#, stored: true
+        WorkbookCase(id: "T09", title: "숫자 <v> 131,073바이트", build: sheet(
+            #"<row r="1"><c r="A1"><v>\#(String(repeating: "1", count: 131_073))</v></c></row>"#, stored: true
         ), expect: .tableFails(.textTooLong)),
+        WorkbookCase(id: "T10", title: "공유 문자열 하나 정확히 131,072바이트는 받는다(본문 상한 12,000B를 넘어도)", build: fixture {
+            $0.sharedStrings = F.plainSST([String(repeating: "a", count: 131_072)])
+            $0.method = 0
+        }, expect: .tableRows([1])),
+        WorkbookCase(id: "T11", title: "인라인 문자열 정확히 131,072바이트는 받는다", build: sheet(
+            #"<row r="1"><c r="A1" t="inlineStr"><is><t>\#(String(repeating: "가", count: 43_690))</t><r><t>bb</t></r></is></c></row>"#, stored: true
+        ), expect: .tableRows([1])),
+        WorkbookCase(id: "T12", title: "숫자 <v> 정확히 131,072바이트는 받는다", build: sheet(
+            #"<row r="1"><c r="A1"><v>\#(String(repeating: "1", count: 131_072))</v></c></row>"#, stored: true
+        ), expect: .tableRows([1])),
     ]
 
     // 스타일 색인·서식 표
@@ -484,7 +495,8 @@ struct XLSXWorkbookAdversarialTests {
             WorkbookCase.fixture { $0.sheets[0].name = marker; $0.sheets[0].state = "hidden" }(),
             WorkbookCase.fixture { $0.sheets[0].name = marker; $0.sheets[0].target = "../\(marker).xml" }(),
             WorkbookCase.fixture { $0.sharedStrings = XLSXFixture.sst(["<t>\(marker)</t><t>&\(marker);</t>"]) }(),
-            WorkbookCase.fixture { $0.sharedStrings = XLSXFixture.plainSST([marker + String(repeating: "가", count: 4_000)]); $0.method = 0 }(),
+            // 칸 상한(131,072B) 초과 — 표식 18B + 131,070B
+            WorkbookCase.fixture { $0.sharedStrings = XLSXFixture.plainSST([marker + String(repeating: "가", count: 43_690)]); $0.method = 0 }(),
         ]
         for probe in probes {
             do {

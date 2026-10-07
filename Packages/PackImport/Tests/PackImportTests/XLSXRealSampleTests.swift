@@ -218,9 +218,9 @@ struct XLSXRealSampleTests {
 
         let decoded = try PackTextDecoder.decode(Data(contentsOf: csv), choice: .automatic)
         let records = try CSVRecordParser.parse(decoded.text, delimiter: .comma).records.filter { !$0.isBlank }
-        // 지금 Fixtures의 xlsx는 아직 옛 `#권리`판이다(R27 — ④에서 `#출처`판으로 다시 만들면 이 치환을 뺀다)
+        // xlsx는 `#출처`판(1-e ④-가) — 원본 CSV와 글자 그대로 같다(셀 안 줄바꿈만 6-4 정리 뒤 LF)
         let expected = records.map { record in
-            Array(record.cells.map { $0 == "#출처" ? "#권리" : $0.replacingOccurrences(of: "\r\n", with: "\n") }
+            Array(record.cells.map { $0.replacingOccurrences(of: "\r\n", with: "\n") }
                 .reversed().drop(while: \.isEmpty).reversed())
         }
         let actual = table.rows.map { row in

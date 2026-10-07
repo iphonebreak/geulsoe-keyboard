@@ -87,10 +87,11 @@ enum WorkbookBuilder {
         return F.sheet(name, rows: rowsXML(rows), state: state, index: index, before: columns, after: mergeCells)
     }
 
-    /// 시트 여럿 — 날짜 서식(내장 14)을 스타일 색인 1에 둔다
-    static func workbook(_ sheets: [XLSXFixture.Sheet]) -> Data {
+    /// 시트 여럿 — 날짜 서식(내장 14)을 스타일 색인 1에 둔다. 같은 글자가 긴 칸은 압축비 상한(①)에 먼저 걸리지 않게 `stored`
+    static func workbook(_ sheets: [XLSXFixture.Sheet], stored: Bool = false) -> Data {
         var fixture = XLSXFixture(sheets: sheets)
         fixture.styles = F.stylesXML(xfs: [0, 14])
+        if stored { fixture.method = 0 }
         return fixture.build()
     }
 
@@ -99,8 +100,8 @@ enum WorkbookBuilder {
     }
 
     /// 글 칸 표 → 시트 하나짜리 xlsx
-    static func workbook(grid: [[String]], name: String = "문구") -> Data {
-        workbook(grid.map { WorkbookRow.text($0) }, name: name)
+    static func workbook(grid: [[String]], name: String = "문구", stored: Bool = false) -> Data {
+        workbook([sheet(name, grid.map { WorkbookRow.text($0) })], stored: stored)
     }
 
     /// 같은 표를 **스프레드시트가 CSV로 저장한 꼴** — 모든 행을 표 폭까지 빈 칸으로 채우고(엑셀·구글 실측, 5-3), 쉼표·따옴표·줄바꿈이 든 칸만 따옴표.
@@ -262,13 +263,24 @@ let equivalenceCases: [EquivalenceCase] = [
     EquivalenceCase(id: "유효 0", grid: [["번호", "본문"], ["0", "가"], ["", "나"]]),
 ]
 
+/// 검증 F2 · PDR 6-5b 앞 승인 메모 ③ — **본문 상한(12,000B)을 넘는 칸**. xlsx 칸 상한은 엑셀 셀 최대(약 131,072B)라 이 칸들은 표에 실리고
+/// CSV와 같은 판정이 자리별로 정한다(행 건너뜀·받음·미리 채우지 않음 — 파일 거부 없음). 4,001자 한글 = 12,003B
+private let overBodyCell = String(repeating: "가", count: 4_001)
+
+let longCellCases: [EquivalenceCase] = [
+    EquivalenceCase(id: "12,003B 본문 칸 — 그 행만 건너뜀", grid: [["번호", "본문"], ["1", overBodyCell], ["2", "나"]]),
+    EquivalenceCase(id: "12,003B 모르는 열(메모) 칸 — 받음", grid: [["번호", "본문", "메모"], ["1", "가", overBodyCell], ["2", "나", ""]]),
+    EquivalenceCase(id: "12,003B #이름 값 — 받고 이름은 미리 채우지 않음", grid: [["#이름", overBodyCell], ["번호", "본문"], ["1", "가"]]),
+    EquivalenceCase(id: "12,003B 제목 칸 — 그 행만 건너뜀", grid: [["번호", "제목", "본문"], ["1", overBodyCell, "가"], ["2", "나", "다"]]),
+]
+
 // MARK: - AC-32
 
 @Suite("외부 채움글 1-e ③ — AC-32 xlsx와 CSV는 같은 판정 경로")
 struct PackWorkbookEquivalenceTests {
 
     @Test("★ 같은 표 — xlsx로 읽은 것과 스프레드시트가 저장한 CSV로 읽은 것이 같은 판정(항목·건너뜀 번호와 사유·정보 줄·중복·모르는 열·정리 건수·구조 오류)",
-          arguments: equivalenceCases)
+          arguments: equivalenceCases + longCellCases)
     func sameVerdict(_ testCase: EquivalenceCase) {
         let csv = PackVerdictResult.csv(testCase.grid)
         let xlsx = PackVerdictResult.xlsx(WorkbookBuilder.workbook(grid: testCase.grid))
@@ -293,7 +305,7 @@ struct PackWorkbookEquivalenceTests {
         #expect(failures.last.map { if case .verdict(let verdict) = $0 { verdict.acceptedRecordCount == 0 } else { false } } == true)
     }
 
-    @Test("★ 샘플 2종 — 같은 내용의 xlsx(옛 `#권리`판)와 원본 CSV(`#출처`, UTF-8 BOM·CRLF·여러 줄 본문)가 같은 초안", arguments: ["sample-numbered", "sample-phrases"])
+    @Test("★ 샘플 2종 — 같은 내용의 xlsx(`#출처`판, ④-가)와 원본 CSV(`#출처`, UTF-8 BOM·CRLF·여러 줄 본문)가 같은 초안", arguments: ["sample-numbered", "sample-phrases"])
     func samplesMatchOriginalCSV(_ name: String) throws {
         let xlsx = try #require(Bundle.module.url(forResource: name, withExtension: "xlsx", subdirectory: "Fixtures"))
         let csv = try #require(Bundle.module.url(forResource: "\(name).original", withExtension: "csv", subdirectory: "Fixtures"))
@@ -304,6 +316,29 @@ struct PackWorkbookEquivalenceTests {
         // 원본 쪽 정보만 다르다 — xlsx는 인코딩·칸 나누기가 없고 시트 이름이 있다
         #expect(fromXLSX.delimiter == nil && fromXLSX.delimiterCandidates.isEmpty && fromXLSX.encoding == nil && !fromXLSX.needsEncodingConfirmation)
         #expect(fromXLSX.sheetName == name && fromCSV.sheetName == nil && fromCSV.delimiter == .comma)
+    }
+
+    @Test("★ 검증 F2 — 본문 상한을 넘는 칸 표가 뜻대로다: 본문·제목은 그 행 건너뜀, 메모 열은 받음, #이름은 미리 채우지 않음(파일 거부 0)")
+    func longCellsExercisePaths() throws {
+        let verdicts = longCellCases.map { PackVerdictResult.xlsx(WorkbookBuilder.workbook(grid: $0.grid)) }
+        guard case .verdict(let body) = verdicts[0], case .verdict(let memo) = verdicts[1], case .verdict(let name) = verdicts[2],
+              case .verdict(let title) = verdicts[3] else { Issue.record("파일 거부가 있다: \(verdicts)"); return }
+        #expect(body.skipped == ["2:bodyTooLong"] && body.acceptedRecordCount == 1)
+        #expect(memo.skipped.isEmpty && memo.acceptedRecordCount == 2 && memo.ignoredColumnCount == 1)
+        #expect(name.meta.name == nil && name.meta.issues == [.nameTooLong] && name.acceptedRecordCount == 1)
+        #expect(title.skipped == ["2:titleTooLong"] && title.acceptedRecordCount == 1)
+    }
+
+    @Test("★ 검증 F2 — 칸 상한 경계: 131,072B 메모 칸은 xlsx도 CSV와 같이 받고, 131,073B 칸은 파일 거부(엑셀이 만들 수 없는 크기)")
+    func cellLimitBoundary() {
+        #expect(XLSXWorkbookLimits.product.textBytes == 131_072)
+        let fits = [["번호", "본문", "메모"], ["1", "가", String(repeating: "a", count: 131_072)]]
+        let csv = PackVerdictResult.csv(fits)
+        guard case .verdict(let verdict) = csv else { Issue.record("CSV가 초안이 아니다"); return }
+        #expect(verdict.acceptedRecordCount == 1)
+        #expect(PackVerdictResult.xlsx(WorkbookBuilder.workbook(grid: fits, stored: true)) == csv)
+        let over = [["번호", "본문", "메모"], ["1", "가", String(repeating: "a", count: 131_073)]]
+        #expect(PackVerdictResult.xlsx(WorkbookBuilder.workbook(grid: over, stored: true)) == .failure(.workbook(.textTooLong)))
     }
 
     @Test("CSV만의 단계는 xlsx에 없다 — 구분자 시험(5-2)의 「열 수 과반 불일치」는 CSV 전체 거부, xlsx는 그 행만 건너뜀(5-4)")
@@ -339,7 +374,12 @@ let priorityCases: [PriorityCase] = [
     PriorityCase(id: "숫자 — 모르는 열(R19)", row: WorkbookRow([.number("1"), .text("가"), .text("나"), .number("3")]), expected: .numberCell),
     PriorityCase(id: "숫자가 병합보다 먼저", row: WorkbookRow([.number("1"), .number("5"), .text("나")]), merged: true, expected: .numberCell),
     PriorityCase(id: "병합", row: WorkbookRow([.number("1"), .text("가"), .text("나")]), merged: true, expected: .merged),
-    PriorityCase(id: "6-4 사유가 열 수보다 먼저(머리글 밖 수식)", row: WorkbookRow([.number("1"), .text("가"), .text("나"), nil, .formula]), expected: .formula),
+    PriorityCase(id: "머리글 밖 칸의 수식도 사유", row: WorkbookRow([.number("1"), .text("가"), .text("나"), nil, .formula]), expected: .formula),
+    // 검증 F4 — 위 행은 수식 칸이 빈 글이라 열 수 검사를 어차피 통과해 순서를 가르지 못했다. 머리글 밖에 **글**이 있어 열 수로도 걸리는 행
+    PriorityCase(id: "6-4 사유가 열 수보다 먼저(머리글 밖 글 + 수식)", row: WorkbookRow([.number("1"), .formula, .text("나"), nil, .text("넘침")]),
+                 expected: .formula),
+    PriorityCase(id: "6-4 사유가 열 수보다 먼저(머리글 밖 글 + 날짜)", row: WorkbookRow([.number("1"), .text("가"), .date, nil, .text("넘침")]),
+                 expected: .dateFormat),
     PriorityCase(id: "6-4 사유가 번호 형식보다 먼저", row: WorkbookRow([.text("12a"), .date, .text("나")]), expected: .dateFormat),
     PriorityCase(id: "6-4 사유가 빈 본문보다 먼저", row: WorkbookRow([.number("1"), .formula]), expected: .formula),
     PriorityCase(id: "번호 열의 날짜는 날짜 서식", row: WorkbookRow([.date, .text("가"), .text("나")]), expected: .dateFormat),
@@ -830,7 +870,7 @@ struct PackWorkbookCopyTests {
         #expect(PackImportCopy.skipFix(SkippedRecord(row: 12, reason: .emptyBody)) == PackImportCopy.skipFix(.emptyBody))
     }
 
-    @Test("★ 4-G 엑셀 사유 — 비밀번호·옛 형식 / 매크로 / 너무 큼 / 항목 많음 / 보이는 시트 없음 / 긴 글 / 그 밖은 「읽을 수 없어요」 묶음")
+    @Test("★ 4-G 엑셀 사유 — 비밀번호·옛 형식 / 매크로 / 너무 큼 / 항목 많음 / 보이는 시트 없음 / 그 밖은(칸 상한 초과 포함) 「읽을 수 없어요」 묶음")
     func workbookFailures() {
         func message(_ failure: XLSXWorkbookFailure) -> String {
             PackImportCopy.failureMessage(.structural(.workbook(failure)), source: .file)
@@ -846,10 +886,11 @@ struct PackWorkbookCopyTests {
         let tooMany = PackImportCopy.failureMessage(.structural(.tooManyRecords), source: .file)
         for failure: XLSXWorkbookFailure in [.tooManyRows, .tooManyCells, .tooManySharedStrings] { #expect(message(failure) == tooMany, "\(failure)") }
         #expect(message(.noVisibleSheet) == "보이는 시트가 없어요. 숨긴 시트는 가져오지 않으니 숨기기를 풀어 주세요.")
-        #expect(message(.textTooLong) == "칸 하나의 글이 너무 길어요. 본문은 한 칸에 3,000자까지예요.")
         let unreadable = "이 엑셀 파일을 읽을 수 없어요. 엑셀에서 「Excel 통합 문서(.xlsx)」로 다시 저장해 주세요."
+        // 칸 상한(약 131,072B)은 엑셀 셀 최대보다 커서 엑셀이 만들 수 없는 파일이다 — 「읽을 수 없어요」 묶음(승인 메모 ③, 검증 F2)
         for failure: XLSXWorkbookFailure in [.archive(.notZip), .archive(.encrypted), .archive(.crcMismatch), .archive(.zip64), .doctypeOrEntity,
-                                             .malformedXML, .notSpreadsheet, .brokenRelationship, .invalidCellReference, .sheetNotFound] {
+                                             .malformedXML, .notSpreadsheet, .brokenRelationship, .invalidCellReference, .sheetNotFound,
+                                             .textTooLong] {
             #expect(message(failure) == unreadable, "\(failure)")
         }
         #expect(PackImportCopy.failureFooter(.structural(.workbook(.malformedXML)), source: .file) == "파일 내용은 보여 주지 않아요.")

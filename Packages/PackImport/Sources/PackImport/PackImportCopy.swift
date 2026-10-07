@@ -528,7 +528,8 @@ public enum PackImportCopy {
     }
 
     /// 4-G 엑셀 행(시안 표) — 컨테이너·XML 거부 코드를 사용자가 할 수 있는 일로 묶는다: 비밀번호·옛 형식 / 매크로 / 너무 큼 / 항목 많음 /
-    /// 보이는 시트 없음 / 긴 글 / 그 밖은 「읽을 수 없어요」 하나(계획 ③ — 손상·적대 구조를 사용자가 구별할 까닭이 없다).
+    /// 보이는 시트 없음 / 그 밖은 「읽을 수 없어요」 하나(계획 ③ — 손상·적대 구조를 사용자가 구별할 까닭이 없다). 칸 하나가 상한(엑셀 셀 최대 쪽)을
+    /// 넘는 `textTooLong`도 엑셀이 만들 수 없는 파일이라 그 묶음이다(승인 메모 ③ — 본문 상한을 넘는 칸은 CSV처럼 행에서 다룬다).
     /// **xlsx를 받는 판에서만 닿는다**(CSV 전용판 세션은 xlsx로 읽지 않는다 — AC-35). 시트 이름·파트 이름·내용 없음(AC-34)
     private static func workbookMessage(_ failure: XLSXWorkbookFailure) -> String {
         switch failure {
@@ -542,10 +543,8 @@ public enum PackImportCopy {
             message(.tooManyRecords, kind: .file)
         case .noVisibleSheet:
             "보이는 시트가 없어요. 숨긴 시트는 가져오지 않으니 숨기기를 풀어 주세요."
-        case .textTooLong:
-            "칸 하나의 글이 너무 길어요. 본문은 한 칸에 \(PackNoticeCopy.number(PackLimits.body.characters))자까지예요."
         case .archive, .doctypeOrEntity, .unsupportedTextEncoding, .malformedXML, .nestingTooDeep, .tooManyAttributes, .notSpreadsheet,
-             .unsafeRelationshipTarget,
+             .textTooLong, .unsafeRelationshipTarget,
              .brokenRelationship, .unexpectedPart, .malformedPart, .sheetNotFound, .invalidSharedStringIndex, .invalidStyleIndex,
              .invalidCellReference, .unknownCellType, .invalidMergeRange:
             "이 엑셀 파일을 읽을 수 없어요. 엑셀에서 「Excel 통합 문서(.xlsx)」로 다시 저장해 주세요."

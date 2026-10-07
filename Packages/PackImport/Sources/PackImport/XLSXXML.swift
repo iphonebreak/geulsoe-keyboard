@@ -83,7 +83,9 @@ enum XLSXXML {
 
     /// 시작 태그마다 **따옴표 밖의 `=`**를 센다(속성·xmlns 선언 하나에 하나) — 상한을 넘으면 거부(S2). 따옴표를 아는 작은 상태 기계다:
     /// 속성 값 안의 `>`(XML이 허용)로 태그를 쪼개 우회할 수 없고, 태그 밖 본문의 `=`(「======」 구분선)는 세지 않는다.
-    /// 주석·CDATA·처리 명령·`<!…>`·끝 태그는 건너뛴다(본문에는 날 `<`가 올 수 없으니 `<`가 곧 표지의 시작이다). 형식 오류는 파서 몫이다
+    /// 주석·CDATA(대문자 표지만 — XML이 그렇다)·처리 명령은 끝 표지까지 건너뛴다 — 그 안에서만 `<`가 글자일 수 있다.
+    /// **태그(시작·끝·`<!…>`) 안에서 `<`를 만나면 거부한다**(검증 F1): 정상 XML은 태그 안에 `<`가 없는데, 셈이 태그 경계를 파서와 다르게
+    /// 보면 그 뒤 무거운 태그를 세지 못한다(`</zz <x 속성 16만…>` — libxml2는 끝 태그 오류 뒤에도 그 태그를 끝까지 파싱한다). 그 밖의 형식 오류는 파서 몫이다
     private static func countAttributes(_ bytes: [UInt8], from start: Int, limit: Int) throws(XLSXWorkbookFailure) {
         let lessThan: UInt8 = 0x3C, greaterThan: UInt8 = 0x3E, equals: UInt8 = 0x3D
         let doubleQuote: UInt8 = 0x22, singleQuote: UInt8 = 0x27, bang: UInt8 = 0x21, question: UInt8 = 0x3F, slash: UInt8 = 0x2F
@@ -94,23 +96,24 @@ enum XLSXXML {
             case bang:
                 if matches(bytes, at: index, "<!--") {
                     index = skip(past: Array("-->".utf8), in: bytes, from: index + 4)
-                } else if matches(bytes, at: index, "<![cdata[") {
+                } else if bytes[index...].starts(with: Array("<![CDATA[".utf8)) {
                     index = skip(past: Array("]]>".utf8), in: bytes, from: index + 9)
                 } else {
-                    index = skip(past: [greaterThan], in: bytes, from: index + 2)
+                    index = try skipTag(bytes, from: index + 2)
                 }
             case question:
                 index = skip(past: Array("?>".utf8), in: bytes, from: index + 2)
             case slash:
-                index = skip(past: [greaterThan], in: bytes, from: index + 2)
+                index = try skipTag(bytes, from: index + 2)
             default:
-                // 시작 태그 — 따옴표 밖 `>`에서 끝난다
+                // 시작 태그 — 따옴표 밖 `>`에서 끝난다. 값 안이든 밖이든 `<`는 형식 오류다(값 안의 `<`는 `&lt;`여야 한다)
                 var count = 0
                 var quote: UInt8?
                 index += 1
                 while index < bytes.count {
                     let byte = bytes[index]
                     index += 1
+                    if byte == lessThan { throw .malformedXML }
                     if let open = quote {
                         if byte == open { quote = nil }
                     } else if byte == doubleQuote || byte == singleQuote {
@@ -129,6 +132,19 @@ enum XLSXXML {
     /// `needle` 바로 뒤 자리 — 없으면 끝
     private static func skip(past needle: [UInt8], in bytes: [UInt8], from start: Int) -> Int {
         firstIndex(of: needle, in: bytes, from: start).map { $0 + needle.count } ?? bytes.count
+    }
+
+    /// 끝 태그·`<!…>` — 첫 `>` 바로 뒤(없으면 끝). 그 전에 `<`가 오면 거부한다 — `<`를 넘어 건너뛰면 다음 태그를 세지 못한다(검증 F1)
+    private static func skipTag(_ bytes: [UInt8], from start: Int) throws(XLSXWorkbookFailure) -> Int {
+        var index = start
+        while index < bytes.count {
+            switch bytes[index] {
+            case 0x3E: return index + 1
+            case 0x3C: throw .malformedXML
+            default: index += 1
+            }
+        }
+        return bytes.count
     }
 
     /// `<?xml … encoding="…"?>`가 있으면 UTF-8이어야 한다

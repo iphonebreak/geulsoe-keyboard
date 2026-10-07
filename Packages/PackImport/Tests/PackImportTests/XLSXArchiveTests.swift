@@ -20,15 +20,15 @@ struct ArchiveSample: Sendable, CustomTestStringConvertible {
         ("xl/sharedStrings.xml", .sharedStrings), ("xl/styles.xml", .styles),
     ]
 
+    /// 1-e ④-가 스크립트 판(`tools/generate_sample_xlsx.py`) — 파트 7개, `docProps`·테마 없음. 크기는 제작 기록 「엔트리 원본 크기」
     static let bundled: [ArchiveSample] = [
         ArchiveSample(file: "sample-numbered.xlsx", entries: [
-            "[Content_Types].xml": 1_168, "_rels/.rels": 588, "xl/workbook.xml": 1_279, "xl/_rels/workbook.xml.rels": 698,
-            "xl/worksheets/sheet1.xml": 3_630, "xl/theme/theme1.xml": 8_722, "xl/styles.xml": 18_811, "xl/sharedStrings.xml": 2_979,
-            "docProps/core.xml": 593, "docProps/app.xml": 806,
+            "[Content_Types].xml": 817, "_rels/.rels": 297, "xl/workbook.xml": 332, "xl/_rels/workbook.xml.rels": 566,
+            "xl/worksheets/sheet1.xml": 3_028, "xl/styles.xml": 934, "xl/sharedStrings.xml": 2_979,
         ], parts: required),
         ArchiveSample(file: "sample-phrases.xlsx", entries: [
-            "[Content_Types].xml": 930, "_rels/.rels": 297, "xl/workbook.xml": 1_278, "xl/_rels/workbook.xml.rels": 698,
-            "xl/worksheets/sheet1.xml": 3_083, "xl/theme/theme1.xml": 8_722, "xl/styles.xml": 18_939, "xl/sharedStrings.xml": 2_720,
+            "[Content_Types].xml": 817, "_rels/.rels": 297, "xl/workbook.xml": 331, "xl/_rels/workbook.xml.rels": 566,
+            "xl/worksheets/sheet1.xml": 2_474, "xl/styles.xml": 934, "xl/sharedStrings.xml": 2_757,
         ], parts: required),
     ]
 
@@ -81,7 +81,7 @@ struct XLSXArchiveTests {
         }
     }
 
-    @Test("★ 샘플 xlsx 2종(재압축 판, 플래그 0x0000) — 엔트리·필요한 파트가 기대대로", arguments: ArchiveSample.bundled)
+    @Test("★ 샘플 xlsx 2종(스크립트 판, 플래그 0x0000·deflate) — 엔트리·필요한 파트가 기대대로", arguments: ArchiveSample.bundled)
     func bundledSamples(_ sample: ArchiveSample) throws {
         let name = (sample.file as NSString).deletingPathExtension
         let url = try #require(Bundle.module.url(forResource: name, withExtension: "xlsx", subdirectory: "Fixtures"))

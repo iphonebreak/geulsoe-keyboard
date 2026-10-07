@@ -76,4 +76,56 @@ struct PackTextSanitizerTests {
     func loneZWJAtEdges() {
         #expect(PackTextSanitizer.sanitize("\u{200D}가나\u{200D}").text == "가나")
     }
+
+    @Test("맨 앞·맨 뒤 ZWJ가 여럿이어도 전부 떼고 하나하나 센다 — ZWJ만 든 글은 빈 글, 가운데 ZWJ는 남는다")
+    func manyEdgeZWJ() {
+        #expect(PackTextSanitizer.sanitize("\u{200D}\u{200D}\u{200D}가\u{200D}나\u{200D}\u{200D}") == ("가\u{200D}나", 5))
+        #expect(PackTextSanitizer.sanitize(String(repeating: "\u{200D}", count: 4)) == ("", 4))
+        #expect(PackTextSanitizer.sanitize("\u{200B}\u{200D}가") == ("가", 2), "앞의 제로폭 공백을 빼고 나면 ZWJ가 맨 앞이다")
+    }
+}
+
+// 검증 F3(`docs/release/verify-ext-1e-123.md`) — 맨 앞 ZWJ를 하나씩 `removeFirst()`로 떼면 앞 ZWJ 수 × 글 길이(제곱)다.
+// 3MB 붙여넣기(앞 ZWJ 99.9만 개) 실측 33.2초(디버그) — CSV판 출하 경로다. 결과는 작은 입력에서 같으니 큰 입력 + 경과 시간 상한으로 고정한다
+@Suite("문자 정리 — 맨 앞 ZWJ 떼기는 선형 (검증 F3)")
+struct PackTextSanitizerTimeTests {
+
+    private func seconds(_ work: () -> Void) -> Double {
+        let duration = ContinuousClock().measure(work)
+        return Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+    }
+
+    /// 본문 열을 줄 첫 칸에 둔다 — 쉼표 바로 뒤의 ZWJ는 CSV 파서가 쉼표와 한 글자로 묶는다(검증 관찰, 범위 밖)
+    private let leadingZWJ = 999_000
+    private var pasted: String { "본문,번호\n" + String(repeating: "\u{200D}", count: leadingZWJ) + "가,1\n" }
+
+    @Test("★ 3MB 붙여넣기(본문 앞 ZWJ 99.9만 개) — 1초 안에 초안, 본문은 「가」, 정리 99.9만 건", .timeLimit(.minutes(1)))
+    func pastedLeadingZWJ() throws {
+        let text = pasted
+        #expect(text.utf8.count <= PackLimits.fileBytes)
+        var outcome: PackImportOutcome?
+        let elapsed = seconds { outcome = try? PackImporter.read(text: text) }
+        guard case .draft(let draft)? = outcome else { Issue.record("초안이 아니다: \(String(describing: outcome))"); return }
+        #expect(draft.items.map(\.body) == ["가"] && draft.sanitizedCharacterCount == leadingZWJ)
+        #expect(elapsed < 1, "\(elapsed)초")
+    }
+
+    @Test("★ 같은 글을 파일로(UTF-8) — 디코드 뒤 같은 함수라 1초 안", .timeLimit(.minutes(1)))
+    func fileLeadingZWJ() throws {
+        let data = Data(pasted.utf8)
+        var outcome: PackImportOutcome?
+        let elapsed = seconds { outcome = try? PackImporter.read(data) }
+        guard case .draft(let draft)? = outcome else { Issue.record("초안이 아니다: \(String(describing: outcome))"); return }
+        #expect(draft.items.map(\.body) == ["가"] && draft.sanitizedCharacterCount == leadingZWJ)
+        #expect(elapsed < 1, "\(elapsed)초")
+    }
+
+    @Test("함수 자체 — 앞 ZWJ 100만 개 + 뒤 ZWJ 100만 개도 1초 안")
+    func sanitizeDirectly() {
+        let zwj = String(repeating: "\u{200D}", count: 1_000_000)
+        var result: (text: String, removed: Int)?
+        let elapsed = seconds { result = PackTextSanitizer.sanitize(zwj + "가" + zwj) }
+        #expect(result?.text == "가" && result?.removed == 2_000_000)
+        #expect(elapsed < 1, "\(elapsed)초")
+    }
 }

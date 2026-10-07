@@ -38,10 +38,10 @@ public enum PackTextSanitizer {
                 scalars.append(scalar)
             }
         }
-        while scalars.first == "\u{200D}" {
-            scalars.removeFirst()
-            removed += 1
-        }
+        // 앞 ZWJ는 세어 한 번에 뗀다 — 하나씩 `removeFirst()`하면 앞 ZWJ 수 × 길이(3MB 붙여넣기 33초, 검증 F3). 뒤는 `removeLast`가 O(1)
+        let leadingZWJ = scalars.prefix { $0 == "\u{200D}" }.count
+        scalars.removeFirst(leadingZWJ)
+        removed += leadingZWJ
         while scalars.last == "\u{200D}" {
             scalars.removeLast()
             removed += 1

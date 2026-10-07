@@ -176,8 +176,9 @@ public struct XLSXWorkbookLimits: Equatable, Sendable {
     public var cells: Int
     /// 공유 문자열 항목 ≤ 50,000
     public var sharedStrings: Int
-    /// 글 하나(공유·인라인 문자열, 숫자 `<v>`)의 UTF-8 바이트 — 본문 상한(`PackLimits.body` 12,000B). 본문이 가장 큰 칸이라 이보다 긴 글은
-    /// 어떤 칸에도 들어갈 수 없다. 공유 문자열은 여러 셀이 같은 글을 가리켜 뒤 단계 처리량이 부풀 수 있어 여기서 끊는다(파일 거부) `[판단]`
+    /// 글 하나(공유·인라인 문자열, 숫자 `<v>`)의 UTF-8 바이트 — **엑셀 셀 최대(32,767자) 쪽 131,072B**(1-e ③ 승인 메모 ③). 넘으면 엑셀이
+    /// 만들 수 없는 파일이라 거부한다. 그 아래는 본문 상한(12,000B)을 넘어도 표에 싣고 **CSV와 같은 판정**이 자리별로 정한다(본문·제목은 그 행
+    /// 건너뜀, 모르는 열은 받음, 정보 줄은 미리 채우지 않음 — AC-32). 공유 문자열 증폭은 표 글 합 상한(`tableTextBytes`, S3)이 묶는다
     public var textBytes: Int
     /// 시트 이름 UTF-8 바이트 — 엑셀은 31자, 넉넉히 255B(①의 엔트리 이름 상한과 같다) `[판단]`
     public var sheetNameBytes: Int
@@ -203,7 +204,7 @@ public struct XLSXWorkbookLimits: Equatable, Sendable {
 
     public static let product = XLSXWorkbookLimits(
         archive: .product, depth: 32, scannedRows: 20_000, cells: 100_000, sharedStrings: 50_000,
-        textBytes: PackLimits.body.utf8Bytes, sheetNameBytes: 255, attributesPerElement: 64, tableTextBytes: PackLimits.fileBytes * 2
+        textBytes: 131_072, sheetNameBytes: 255, attributesPerElement: 64, tableTextBytes: PackLimits.fileBytes * 2
     )
 }
 

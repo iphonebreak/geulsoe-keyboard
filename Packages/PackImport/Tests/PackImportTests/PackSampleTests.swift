@@ -16,6 +16,12 @@ private let recordedSHA256: [PackSample.Kind: String] = [
     .phrases: "e97413f0853cca93b6ef6043fd8d8be0b9f15a0fc0dffb41cd69d04a2ba1ef9d"
 ]
 
+/// 제작 기록 표의 xlsx SHA-256 — 1-e ④-가 `tools/generate_sample_xlsx.py` 산출물(`#출처`판·열 너비·본문 줄바꿈). 다시 만들면 기록과 함께 고친다
+private let recordedXLSXSHA256: [PackSample.Kind: String] = [
+    .numbered: "5bd1c1cfa3d14307eee0af2b8993bbb7f1cea291cc16c003c141d294c856b5c0",
+    .phrases: "292b72433f452c0b4e59f8f09be378e2a993bbcb1b393aa27d4aa5615aa49301"
+]
+
 /// 기획자 원본 이름 — 시험 픽스처(`Fixtures/`, 4단계에 원본을 그대로 복사)와 문서 폴더에 같은 이름으로 있다
 private func originalName(_ kind: PackSample.Kind) -> String { kind == .numbered ? "sample-numbered.original" : "sample-phrases.original" }
 
@@ -28,6 +34,16 @@ private let sampleDocsDirectory = URL(fileURLWithPath: #filePath)
 private let hasSampleDocs = FileManager.default.fileExists(atPath: sampleDocsDirectory.appendingPathComponent("sample-build-record.md").path)
 
 private func csvFile(_ kind: PackSample.Kind) -> PackSample.File { PackSample.File(kind: kind, format: .csv) }
+
+private func xlsxFile(_ kind: PackSample.Kind) -> PackSample.File { PackSample.File(kind: kind, format: .xlsx) }
+
+private func resourceName(_ kind: PackSample.Kind) -> String { kind == .numbered ? "sample-numbered" : "sample-phrases" }
+
+/// 번들 샘플 폴더의 xlsx — **판을 거치지 않고** 폴더에서 바로(번들에 무엇이 실렸는지 보는 시험용). 앱은 `PackSample.File.bundledURL`만 쓴다
+private func bundledXLSXData(_ kind: PackSample.Kind) throws -> Data {
+    let directory = try #require(PackSample.bundledDirectory)
+    return try Data(contentsOf: directory.appendingPathComponent("\(resourceName(kind)).xlsx"))
+}
 
 private func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 
@@ -43,6 +59,97 @@ private func recordedHash(_ original: String) throws -> String {
 private let dangerousLeadingCharacters: Set<Character> = ["=", "+", "-", "@", "＝", "＋", "－", "＠", "\t", "\r", "\n", "\r\n"]
 
 private func startsDangerously(_ cell: String) -> Bool { cell.first.map(dangerousLeadingCharacters.contains) ?? false }
+
+// MARK: - xlsx 샘플 검사 — `tools/check_sample_xlsx.py`의 A29·A47과 같은 규칙(독립 오라클은 파이썬, 이쪽은 번들에 실린 바이트를 매 빌드 본다)
+
+/// AC-29 대상 글 — 표의 글·숫자 칸 전부 + 공유 문자열 항목 전부(칸이 가리키지 않는 항목도 — 파이썬 A29와 같다). 6-4 정리(`_xHHHH_`·CRLF) 뒤
+func workbookSampleTexts(_ data: Data) throws -> (cells: [String], sharedStrings: [String]) {
+    var reader = try XLSXWorkbookReader.open(data)
+    let table = try reader.table(for: try #require(reader.sheets.first))
+    let cells = table.rows.flatMap(\.cells).compactMap { cell -> String? in
+        switch cell {
+        case .text(let text), .number(let text): text
+        case .blank: nil
+        case .unsupported(let kind): "<\(kind)>"
+        }
+    }
+    var archive = try XLSXArchive.open(data)
+    let handler = SharedStringsHandler(limits: .product)
+    try XLSXXML.parse(try archive.read("xl/sharedStrings.xml", as: .sharedStrings), maxDepth: 32, maxAttributes: 64, handler: handler)
+    return (cells, handler.strings)
+}
+
+/// AC-47(값 기준) — 파이썬 A47과 같은 규칙: 금지 파트(custom·customXml·persons·댓글) · 모든 엔트리의 `absPath`·사용자 경로·이메일 꼴
+/// (XML·rels가 아니면 UTF-16LE로도 읽는다) · 콘텐츠 타입·관계의 `persons`·`customXml` 참조 · 작성자·수정자(빈 값·「글쇠」만)·Company·Manager 값 ·
+/// `author` 요소·속성. 걸린 것의 **자리만**(파트 이름·규칙) 돌려준다 — 값은 담지 않는다
+enum SamplePrivacyLint {
+    static let forbiddenParts = #"(?i)^(docProps/custom\.xml|customXml/|xl/persons/|xl/comments|xl/threadedComments/)"#
+    static let userPath = #"(?i)/Users/|/home/|[A-Za-z]:\\|\\Users\\|file:"#
+    static let email = #"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}"#
+    static let neutralAuthors: Set<String> = ["", "글쇠"]
+
+    static func findings(_ data: Data) throws -> [String] {
+        var archive = try XLSXArchive.open(data)
+        var found: [String] = []
+        for name in archive.entryNames.sorted() {
+            if name.range(of: forbiddenParts, options: .regularExpression) != nil { found.append("\(name): 금지 파트") }
+            let bytes = [UInt8](try archive.read(name, as: .worksheet))
+            let isXML = name.hasSuffix(".xml") || name.hasSuffix(".rels")
+            var texts = [String(decoding: bytes, as: UTF8.self)]
+            if !isXML {
+                let units = stride(from: 0, to: bytes.count - 1, by: 2).map { UInt16(bytes[$0]) | UInt16(bytes[$0 + 1]) << 8 }
+                texts.append(String(decoding: units, as: UTF16.self))
+            }
+            for text in texts {
+                if text.lowercased().contains("abspath") { found.append("\(name): absPath") }
+                if text.range(of: userPath, options: .regularExpression) != nil { found.append("\(name): 사용자 경로") }
+                if text.range(of: email, options: .regularExpression) != nil { found.append("\(name): 이메일") }
+            }
+            if name == "[Content_Types].xml" || name.hasSuffix(".rels") {
+                let lowered = texts[0].lowercased()
+                if lowered.contains("persons") || lowered.contains("customxml") { found.append("\(name): persons·customXml 참조") }
+            }
+            guard isXML else { continue }
+            let walker = ElementWalker()
+            let parser = XMLParser(data: Data(bytes))
+            parser.shouldProcessNamespaces = true
+            parser.delegate = walker
+            guard parser.parse() else { found.append("\(name): XML 아님"); continue }
+            for element in walker.elements {
+                if element.name == "creator" || element.name == "lastModifiedBy" {
+                    if !neutralAuthors.contains(element.text) { found.append("\(name): \(element.name)") }
+                } else if element.name == "Company" || element.name == "Manager" {
+                    if !element.text.isEmpty { found.append("\(name): \(element.name)") }
+                } else if element.name == "author" || element.hasAuthorAttribute {
+                    found.append("\(name): author")
+                }
+            }
+        }
+        return found
+    }
+
+    /// 요소마다 (로컬 이름, 앞뒤 공백 뗀 글, `author` 속성 여부)
+    private final class ElementWalker: NSObject, XMLParserDelegate {
+        struct Element { let name: String; var text: String; let hasAuthorAttribute: Bool }
+        private var stack: [Element] = []
+        private(set) var elements: [Element] = []
+
+        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?,
+                    attributes: [String: String]) {
+            stack.append(Element(name: elementName, text: "", hasAuthorAttribute: attributes["author"] != nil))
+        }
+
+        func parser(_ parser: XMLParser, foundCharacters string: String) {
+            if !stack.isEmpty { stack[stack.count - 1].text += string }
+        }
+
+        func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
+            guard var element = stack.popLast() else { return }
+            element.text = element.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            elements.append(element)
+        }
+    }
+}
 
 @Suite("외부 채움글 1-c 6단계 ④ — 고정 샘플 CSV (AC-29 · 제작 기록 해시)")
 struct PackSampleBundleTests {
@@ -113,6 +220,115 @@ struct PackSampleBundleTests {
     }
 }
 
+@Suite("외부 채움글 1-e ④ — 고정 샘플 xlsx (번들 = 제작 기록 = 픽스처 · AC-29 · AC-47)")
+struct PackSampleWorkbookTests {
+
+    @Test("★ 번들 xlsx SHA-256 == 제작 기록 — 시험 픽스처와 바이트가 같다(④-가 스크립트 산출물을 바이트 그대로)", arguments: PackSample.Kind.allCases)
+    func hashMatchesRecord(_ kind: PackSample.Kind) throws {
+        let bundled = try bundledXLSXData(kind)
+        #expect(sha256(bundled) == recordedXLSXSHA256[kind])
+        let fixture = try #require(Bundle.module.url(forResource: resourceName(kind), withExtension: "xlsx", subdirectory: "Fixtures"))
+        #expect(bundled == (try Data(contentsOf: fixture)))
+        #expect(bundled.starts(with: [0x50, 0x4B, 0x03, 0x04]))
+    }
+
+    @Test("제작 기록 문서와 대조 — xlsx 해시 표가 기록 표와 같고, 번들 파일이 문서 폴더의 정본과 같다(문서가 있는 기기에서만)",
+          .enabled(if: hasSampleDocs), arguments: PackSample.Kind.allCases)
+    func recordDocumentAgrees(_ kind: PackSample.Kind) throws {
+        #expect(recordedXLSXSHA256[kind] == (try recordedHash("\(resourceName(kind)).xlsx")))
+        #expect(try bundledXLSXData(kind) == (try Data(contentsOf: sampleDocsDirectory.appendingPathComponent("\(resourceName(kind)).xlsx"))))
+    }
+
+    @Test("★ AC-29 — 번들 xlsx의 모든 칸(정보 줄·머리글·번호 숫자 포함)과 공유 문자열 항목 전부가 위험 시작 글자로 시작하지 않는다",
+          arguments: PackSample.Kind.allCases)
+    func noDangerousCells(_ kind: PackSample.Kind) throws {
+        let texts = try workbookSampleTexts(try bundledXLSXData(kind))
+        // 검사가 실제 칸을 돈다 — 제작 기록 「행 24 · 셀 70 · 공유 문자열 50」 / 「행 18 · 셀 52 · 공유 문자열 52」
+        #expect(texts.cells.count == (kind == .numbered ? 70 : 52) && texts.sharedStrings.count == (kind == .numbered ? 50 : 52))
+        for text in texts.cells + texts.sharedStrings { #expect(!startsDangerously(text), "\(kind): \(text.debugDescription)") }
+    }
+
+    @Test("★ AC-47 — 번들 xlsx의 모든 엔트리에 개인 정보 0(작성자·수정자·회사·관리자 값·absPath·사용자 경로·이메일·persons·customXml·댓글)",
+          arguments: PackSample.Kind.allCases)
+    func noPrivateData(_ kind: PackSample.Kind) throws {
+        #expect(try SamplePrivacyLint.findings(try bundledXLSXData(kind)) == [])
+    }
+
+    @Test("AC-47 규칙은 실제로 잡는다 — 작성자·absPath·사용자 경로·이메일·Company·author·persons 파트를 넣은 사본")
+    func privacyRuleCatches() throws {
+        var entries = XLSXFixture.singleText().entries()
+        let core = #"<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" "#
+            + #"xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:creator>작성자</dc:creator><cp:lastModifiedBy>글쇠</cp:lastModifiedBy></cp:coreProperties>"#
+        let app = #"<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties">"#
+            + "<Company>회사</Company><Manager></Manager></Properties>"
+        entries.append(ZipEntrySpec("docProps/core.xml", core, method: 0))
+        entries.append(ZipEntrySpec("docProps/app.xml", app, method: 0))
+        entries.append(ZipEntrySpec("xl/persons/person.xml", #"<?xml version="1.0"?><personList author="a"/>"#, method: 0))
+        entries.append(ZipEntrySpec("xl/extra.bin", "C:\\Users\\name\\a.xlsx · name@example.com · absPath", method: 0))
+        let found = try SamplePrivacyLint.findings(ZipSpec(entries).build())
+        #expect(found.contains("docProps/core.xml: creator"))
+        #expect(!found.contains("docProps/core.xml: lastModifiedBy"), "「글쇠」는 중립 값")
+        #expect(found.contains("docProps/app.xml: Company") && !found.contains("docProps/app.xml: Manager"), "빈 Manager는 통과(값 기준)")
+        #expect(found.contains("xl/persons/person.xml: 금지 파트") && found.contains("xl/persons/person.xml: author"))
+        #expect(found.contains("xl/extra.bin: 사용자 경로") && found.contains("xl/extra.bin: 이메일") && found.contains("xl/extra.bin: absPath"))
+        #expect(found.allSatisfy { !$0.contains("작성자") && !$0.contains("회사") }, "값은 담지 않는다")
+    }
+
+    @Test("★ 번들 xlsx 샘플은 그대로 팩이 된다 — 번들 CSV와 같은 판정 · 시트 이름이 팩 이름 기본값이지만 `#이름`이 이긴다 · 파일 출처가 미리 골라진다",
+          arguments: PackSample.Kind.allCases)
+    func importsCleanly(_ kind: PackSample.Kind) throws {
+        guard case .draft(let draft) = try PackImporter.readWorkbook(try bundledXLSXData(kind), sheet: nil) else {
+            Issue.record("시트를 물었다")
+            return
+        }
+        let csv = try Data(contentsOf: try #require(PackCopySet.$previewing.withValue(.csv) { csvFile(kind).bundledURL }))
+        guard case .draft(let fromCSV) = try PackImporter.read(csv) else {
+            Issue.record("구분자를 물었다")
+            return
+        }
+        #expect(PackVerdict(draft) == PackVerdict(fromCSV))
+        #expect(draft.skipped.isEmpty && draft.sheetName == resourceName(kind) && draft.hiddenRowCount == 0 && draft.hiddenColumnCount == 0)
+        let form = PackImportForm(draft: draft)
+        #expect(form.licenseChoice == .fromFile && form.isComplete)
+        let pack = try PackCompiler.compile(draft, form: form.packForm)
+        #expect(pack.name == (kind == .numbered ? "사자성어 예시 팩" : "업무 상용구 예시"))
+        #expect(pack.license == "글쇠 고정 샘플 — 자체 작성 문구(가짜 내용)")
+    }
+}
+
+// 1-e ④ 판별 규칙 — 번들 샘플 폴더의 파일은 **확장자(형식)로 판에 속한다.** 판이 내보내는 형식(`PackCopySet.Lines.sampleFormats`)만
+// `PackSample.File.bundledURL`로 꺼낼 수 있다 → CSV 전용판은 xlsx 샘플이 번들에 있어도 알약·공유 사본에 닿지 않는다(AC-35 — 문구 검사는 `PackCopyLintTests`)
+@Suite("외부 채움글 1-e ④ — 샘플은 판이 내보내는 형식만 꺼낸다 (AC-35 판별 규칙)")
+struct PackSampleEditionTests {
+
+    @Test("★ CSV 전용판 — xlsx 샘플은 번들에 있어도 꺼내지 못한다(URL 없음·공유 사본 실패), 알약은 CSV뿐", arguments: PackSample.Kind.allCases)
+    func csvEditionHidesWorkbookSamples(_ kind: PackSample.Kind) throws {
+        #expect(try !bundledXLSXData(kind).isEmpty, "번들에는 있다")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("PackSampleEditionTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        PackCopySet.$previewing.withValue(.csv) {
+            #expect(PackSample.files(kind).map(\.format) == [.csv])
+            #expect(xlsxFile(kind).bundledURL == nil)
+            #expect(csvFile(kind).bundledURL != nil)
+            #expect(throws: CocoaError.self) { _ = try PackSample.exportCopy(xlsxFile(kind), into: directory) }
+        }
+    }
+
+    @Test("★ xlsx 중심판 — 알약 [엑셀][CSV], xlsx 샘플을 꺼내고 공유 사본은 「번호형 샘플.xlsx」로 바이트 그대로", arguments: PackSample.Kind.allCases)
+    func xlsxEditionSharesWorkbookSamples(_ kind: PackSample.Kind) throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("PackSampleEditionTests-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try PackCopySet.$previewing.withValue(.xlsx) {
+            #expect(PackSample.files(kind) == [xlsxFile(kind), csvFile(kind)])
+            let url = try #require(xlsxFile(kind).bundledURL)
+            #expect(try Data(contentsOf: url) == (try bundledXLSXData(kind)))
+            let copy = try PackSample.exportCopy(xlsxFile(kind), into: directory)
+            #expect(copy.lastPathComponent == "\(PackImportCopy.sampleTitle(kind)).xlsx")
+            #expect(try Data(contentsOf: copy) == (try bundledXLSXData(kind)))
+        }
+    }
+}
+
 @Suite("외부 채움글 1-c 6단계 ⑤ — 샘플 받기(3-C 공유 시트)")
 struct PackSampleShareTests {
 
@@ -144,12 +360,12 @@ struct PackSampleShareTests {
         }
     }
 
-    @Test("공유 준비(메인 밖) — 번들에 있는 파일만 준비된다. xlsx 샘플은 아직 번들에 없다(1-e)")
+    @Test("공유 준비(메인 밖) — 판이 꺼낼 수 있는 파일만 준비된다. 지금 판(CSV 전용판)은 번들의 xlsx 샘플을 꺼내지 않는다(1-e ④)")
     func prepareForSharing() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("PackSampleShareTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let xlsx = PackSample.File(kind: .numbered, format: .xlsx)
-        #expect(xlsx.bundledURL == nil)
+        #expect(PackCopySet.selected == .csv && xlsx.bundledURL == nil)
         let prepared = await PackSample.prepareForSharing([csvFile(.numbered), csvFile(.phrases), xlsx], into: directory)
         #expect(Set(prepared.keys) == [csvFile(.numbered), csvFile(.phrases)])
         #expect(prepared[csvFile(.phrases)]?.lastPathComponent == "문구형 샘플.csv")

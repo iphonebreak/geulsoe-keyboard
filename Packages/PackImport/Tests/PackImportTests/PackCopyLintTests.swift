@@ -108,8 +108,13 @@ private var metaExamples: [String] {
         + [PackFormCopy.templatePlaceholder] + [TemplatePatternSpec.Failure.prefixTooShort, .reservedDateSuffix].compactMap(PackFormCopy.templateFailureExample)
 }
 
-/// 번들 샘플 파일의 셀 전부(정보 줄·머리글 포함) — 앱이 읽는 그대로(BOM·인코딩은 디코더, 셀은 CSV 파서)
+/// 번들 샘플 파일의 셀 전부(정보 줄·머리글 포함) — 앱이 읽는 그대로(CSV: BOM·인코딩은 디코더, 셀은 CSV 파서 / xlsx: 워크북 독자의 표 칸 +
+/// 공유 문자열 항목 전부 — `workbookSampleTexts`)
 func sampleCells(_ url: URL) throws -> [String] {
+    if url.pathExtension == "xlsx" {
+        let texts = try workbookSampleTexts(Data(contentsOf: url))
+        return texts.cells + texts.sharedStrings
+    }
     let text = try PackTextDecoder.decode(Data(contentsOf: url)).text
     return try CSVRecordParser.parse(text, delimiter: .comma).records.flatMap(\.cells)
 }
@@ -261,20 +266,42 @@ struct PackCopyLintTests {
         for text in texts { #expect(PackCopyLint.xlsxMentions(in: text).isEmpty, "\(PackCopyLint.xlsxMentions(in: text)): \(text)") }
     }
 
-    @Test("★ AC-35 — CSV 전용판의 번들 리소스: 샘플 폴더에는 CSV뿐이고, 셀·파일 이름·알약에 xlsx 언급 0")
+    /// **판별 규칙(1-e ④)** — 번들 샘플 폴더의 파일은 확장자(형식)로 판에 속한다. 판의 검사 대상은 **판이 내보내는 형식**(`sampleFormats`)의 파일이고,
+    /// 그 밖의 형식 파일(CSV 전용판의 xlsx 샘플 — xlsx판 「샘플 받기」 몫)은 ① 알려진 이름뿐이고 ② 판이 꺼내지 못해야(`bundledURL` nil) 한다.
+    /// 화면에 닿지 않는 파일이라 「샘플 리소스」 검색 대상이 아니다 — 대신 꺼내지 못함을 검사한다(`PackSampleEditionTests`)
+    @Test("★ AC-35 — CSV 전용판의 번들 리소스: 판이 내보내는 샘플은 CSV뿐이고 셀·파일 이름·알약에 xlsx 언급 0, 번들의 xlsx 샘플은 판이 꺼내지 못한다")
     func csvBundleHasNoXLSX() throws {
         let files = try bundledSampleFiles()
-        #expect(files.map(\.lastPathComponent) == ["sample-numbered.csv", "sample-phrases.csv"])
-        for url in files {
-            #expect(url.pathExtension == "csv")
-            for cell in try sampleCells(url) { #expect(PackCopyLint.xlsxMentions(in: cell).isEmpty, "\(url.lastPathComponent): \(cell)") }
-        }
-        PackCopySet.$previewing.withValue(.csv) {
+        #expect(files.map(\.lastPathComponent) == ["sample-numbered.csv", "sample-numbered.xlsx", "sample-phrases.csv", "sample-phrases.xlsx"])
+        try PackCopySet.$previewing.withValue(.csv) {
+            let shipped = PackCopySet.current.lines.sampleFormats.map(\.fileExtension)
+            #expect(shipped == ["csv"])
+            for url in files where shipped.contains(url.pathExtension) {
+                for cell in try sampleCells(url) { #expect(PackCopyLint.xlsxMentions(in: cell).isEmpty, "\(url.lastPathComponent): \(cell)") }
+            }
+            let withheld = files.filter { !shipped.contains($0.pathExtension) }
+            #expect(withheld.map(\.lastPathComponent) == ["sample-numbered.xlsx", "sample-phrases.xlsx"])
+            for kind in PackSample.Kind.allCases {
+                #expect(PackSample.File(kind: kind, format: .xlsx).bundledURL == nil, "CSV 전용판은 xlsx 샘플을 꺼내지 못한다")
+            }
             for file in PackSample.Kind.allCases.flatMap({ PackSample.files($0) }) {
-                #expect(file.format == .csv)
+                #expect(file.format == .csv && file.bundledURL != nil)
                 for text in [file.displayName, PackImportCopy.sampleFormatLabel(file.format), PackImportCopy.sampleShareLabel(file)] {
                     #expect(PackCopyLint.xlsxMentions(in: text).isEmpty, "\(text)")
                 }
+            }
+        }
+    }
+
+    @Test("판별 규칙 — xlsx 중심판은 번들 샘플 넷을 모두 내보낸다(빠진 형식 없음), 샘플 칸에도 xlsx를 말하는 글은 없다(내용은 두 형식이 같다)")
+    func xlsxEditionShipsAllSamples() throws {
+        let files = try bundledSampleFiles()
+        try PackCopySet.$previewing.withValue(.xlsx) {
+            let shipped = PackCopySet.current.lines.sampleFormats.map(\.fileExtension)
+            #expect(files.allSatisfy { shipped.contains($0.pathExtension) })
+            #expect(PackSample.Kind.allCases.flatMap { PackSample.files($0) }.allSatisfy { $0.bundledURL != nil })
+            for url in files {
+                for cell in try sampleCells(url) { #expect(PackCopyLint.xlsxMentions(in: cell).isEmpty, "\(url.lastPathComponent): \(cell)") }
             }
         }
     }
