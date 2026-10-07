@@ -65,6 +65,14 @@ public final class KeyboardViewState {
     /// 패널에 그릴 결과 행들 (랭킹 순). 조립 지점이 본문을 읽어 미리보기까지 만들어 넣는다.
     public var bibleSearchRows: [BibleSearchRow]
 
+    // MARK: - 채움글 후보 고르기 (U7 — 칩 길게 누르기)
+
+    /// 자판 대신 겹치는 후보 패널을 보여줄지 — 다른 패널과 동시에 켜지 않는다(조립 지점이 닫고 연다).
+    public var showsSnippetCandidatesPanel: Bool
+    /// 패널 행 — 조립 지점이 **열 때 한 번** `SnippetMatcher.candidates(...)`로 만들어 넣고, 닫으면 비운다
+    /// (칩은 개수만 들고 본문은 들지 않는다 — 10-6 ① · ⑧ 메모리). 첫 행 = 칩 후보(순서 계약).
+    public var snippetCandidates: [SnippetCandidate]
+
     public init(
         layout: LayoutDefinition,
         isShifted: Bool = false,
@@ -87,7 +95,9 @@ public final class KeyboardViewState {
         bibleMatchCount: Int? = nil,
         showsBibleSearchPanel: Bool = false,
         bibleSearchQuery: String = "",
-        bibleSearchRows: [BibleSearchRow] = []
+        bibleSearchRows: [BibleSearchRow] = [],
+        showsSnippetCandidatesPanel: Bool = false,
+        snippetCandidates: [SnippetCandidate] = []
     ) {
         self.layout = layout
         self.isShifted = isShifted
@@ -111,6 +121,8 @@ public final class KeyboardViewState {
         self.showsBibleSearchPanel = showsBibleSearchPanel
         self.bibleSearchQuery = bibleSearchQuery
         self.bibleSearchRows = bibleSearchRows
+        self.showsSnippetCandidatesPanel = showsSnippetCandidatesPanel
+        self.snippetCandidates = snippetCandidates
     }
 }
 

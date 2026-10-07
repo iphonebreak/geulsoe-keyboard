@@ -21,6 +21,12 @@ public enum KeyboardMetrics {
     /// 자판 아래 여백.
     public static let bottomPadding: CGFloat = 4
 
+    // MARK: - 길게 누르기
+
+    /// 길게 누르기가 무장되기까지 누르고 있어야 하는 시간 — **키 대체 입력(문장부호 키 등)과 채움글 칩(U7)이 이 값 하나를 본다.**
+    /// 둘로 갈리면 손 감각이 둘이 된다(PDR `external-snippet-packs.md` 10-6 ⑤ · AC-43). 스페이스 트랙패드 진입(400ms)은 다른 동작이라 별도다.
+    static let longPressDelay: Duration = .milliseconds(450)
+
     // MARK: - 목표 종횡비
 
     /// 아이폰 기준 행 높이 — 216pt / 4행에서 나온 값(행 간격 제외). "아이폰에서 이 자판이 어떤

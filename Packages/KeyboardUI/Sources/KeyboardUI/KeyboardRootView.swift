@@ -38,6 +38,10 @@ public struct KeyboardRootView: View {
     private let onDismissSuggestions: (() -> Void)?
     private let onBibleBadgeTap: (() -> Void)?
     private let onBibleRowTap: ((BibleSearchRow) -> Void)?
+    private let onSnippetArm: ((SnippetSuggestion) -> Bool)?
+    private let onSnippetCandidatesOpen: ((SnippetSuggestion) -> Void)?
+    private let onSnippetCandidateTap: ((SnippetCandidate) -> Void)?
+    private let onSnippetCandidatesClose: (() -> Void)?
     private let inputModeSwitchButton: AnyView?
 
     /// **상자를 전부 채우고 내용은 하단 정렬한다** (14차 H1, 기본 `false` = 기존 동작).
@@ -74,6 +78,12 @@ public struct KeyboardRootView: View {
     ///   - onDismissSuggestions: 후보 행 맨 오른쪽 ✕ — 후보를 내리고 도구 행으로 돌아간다.
     ///   - onBibleBadgeTap: 툴바 성경 배지 — 검색 패널(화면 2)을 연다.
     ///   - onBibleRowTap: 검색 패널의 구절 행 — 기존 채움글 삽입 경로로 넣는다.
+    ///   - onSnippetArm: 채움글 칩을 450ms 눌렀을 때 — 무장해도 되나(U7). 넘어온 값은 **누른 칩**이다(퇴장 중 옛 칩일 수 있다).
+    ///     조립 지점은 그 칩의 trigger가 지금 칩과 같은지 + `SnippetCandidateGate.canArm(chip: 지금 칩, tail:)`로 대답한다.
+    ///     true면 칩이 점선을 켜고 `onKeyPress`로 피드백 1회를 낸다(조립 지점이 따로 내지 않는다). nil이면 길게 누르기 없음.
+    ///   - onSnippetCandidatesOpen: 무장한 칩에서 손을 뗐을 때·VoiceOver 「다른 후보 보기」 — 후보 패널을 연다(조립 지점이 다시 판정).
+    ///   - onSnippetCandidateTap: 후보 패널의 행 — 조립 지점이 꼬리 정합 뒤 `insertSnippet`으로 넣는다(③).
+    ///   - onSnippetCandidatesClose: 후보 패널 「돌아가기」 — 패널만 닫는다.
     ///   - onCursorMove: 커서 이동 도구(◀ -1 / ▶ +1).
     ///   - onEmojiTap: 이모지 그리드에서 이모지를 골랐을 때.
     ///   - onKeyPress: 자판 키 터치다운(백스페이스 반복 포함) — 클릭음·진동 재생 시점.
@@ -97,6 +107,10 @@ public struct KeyboardRootView: View {
         onDismissSuggestions: (() -> Void)? = nil,
         onBibleBadgeTap: (() -> Void)? = nil,
         onBibleRowTap: ((BibleSearchRow) -> Void)? = nil,
+        onSnippetArm: ((SnippetSuggestion) -> Bool)? = nil,
+        onSnippetCandidatesOpen: ((SnippetSuggestion) -> Void)? = nil,
+        onSnippetCandidateTap: ((SnippetCandidate) -> Void)? = nil,
+        onSnippetCandidatesClose: (() -> Void)? = nil,
         fillsContainer: Bool = false,
         transparentAbove: Bool = false
     ) {
@@ -117,6 +131,10 @@ public struct KeyboardRootView: View {
         self.onDismissSuggestions = onDismissSuggestions
         self.onBibleBadgeTap = onBibleBadgeTap
         self.onBibleRowTap = onBibleRowTap
+        self.onSnippetArm = onSnippetArm
+        self.onSnippetCandidatesOpen = onSnippetCandidatesOpen
+        self.onSnippetCandidateTap = onSnippetCandidateTap
+        self.onSnippetCandidatesClose = onSnippetCandidatesClose
         self.fillsContainer = fillsContainer
         self.transparentAbove = transparentAbove
     }
@@ -160,14 +178,29 @@ public struct KeyboardRootView: View {
                 onToolTap: onToolTap,
                 onCursorMove: onCursorMove,
                 onDismissSuggestions: onDismissSuggestions,
-                onBibleBadgeTap: onBibleBadgeTap
+                onBibleBadgeTap: onBibleBadgeTap,
+                onSnippetArm: onSnippetArm,
+                onSnippetCandidatesOpen: onSnippetCandidatesOpen,
+                onKeyPress: onKeyPress
             )
             // 툴바도 자판과 같은 폭 안에 둔다. 자판만 좁히면 도구 아이콘 4개가 여전히 전폭에
             // 균등 분배돼 **자판 밖으로 삐져나온다.** 가로 아이패드에서는 커서 ◀▶ 사이가
             // 306pt(약 8cm)까지 벌어져 한 글자 고치는 데 손이 화면을 가로질렀다
             // (검증자 실측 REQ-4).
             .frame(maxWidth: areaMaxWidth)
-            if state.showsBibleSearchPanel, let onBibleRowTap, let onBibleBadgeTap {
+            // 패널은 한 번에 하나 — 조립 지점이 다른 패널을 `false`로 닫고 연다. 후보 패널(U7)을 맨 앞에 둔다(지시서 2절 ②-5)
+            if state.showsSnippetCandidatesPanel, let onSnippetCandidateTap, let onSnippetCandidatesClose {
+                SnippetCandidatesPanelView(
+                    candidates: state.snippetCandidates,
+                    theme: theme,
+                    onRowTap: onSnippetCandidateTap,
+                    onClose: onSnippetCandidatesClose
+                )
+                .frame(height: state.keyboardHeight)
+                .padding(.horizontal, 3)
+                .padding(.bottom, 4)
+                .frame(maxWidth: areaMaxWidth)
+            } else if state.showsBibleSearchPanel, let onBibleRowTap, let onBibleBadgeTap {
                 BibleSearchPanelView(
                     query: state.bibleSearchQuery,
                     rows: state.bibleSearchRows,
@@ -243,6 +276,10 @@ private struct SuggestionToolbar: View {
     let onCursorMove: ((Int) -> Void)?
     let onDismissSuggestions: (() -> Void)?
     let onBibleBadgeTap: (() -> Void)?
+    let onSnippetArm: ((SnippetSuggestion) -> Bool)?
+    let onSnippetCandidatesOpen: ((SnippetSuggestion) -> Void)?
+    /// 칩 무장 피드백 — 키 터치다운과 같은 콜백
+    let onKeyPress: (() -> Void)?
 
     var body: some View {
         // D18·D19 — 붙여넣기 칩이 있으면 `[칩][✕]`만: 채움글 칩·추천단어·이모지 칩·배지를 같은 줄에 그리지 않는다
@@ -283,9 +320,16 @@ private struct SuggestionToolbar: View {
                 PasteChip(suggestion: paste, theme: theme, action: onPasteboardCodeTap)
             }
             if let snippet, let onSnippetTap {
-                SnippetChip(suggestion: snippet, theme: theme) {
-                    onSnippetTap(snippet)
-                }
+                // U7 — 길게 눌러 무장(조립 지점이 허락할 때만)·손 떼면 후보 패널. 배선이 없으면 U7 전 칩과 같다.
+                // 콜백은 **이 칩의 값**을 함께 넘긴다 — 퇴장 중인 옛 칩을 눌렀을 때 조립 지점이 지금 칩과 구별한다(R3)
+                SnippetChip(
+                    suggestion: snippet,
+                    theme: theme,
+                    onTap: { onSnippetTap(snippet) },
+                    onArm: onSnippetArm.map { arm in { arm(snippet) } },
+                    onOpenCandidates: onSnippetCandidatesOpen.map { open in { open(snippet) } },
+                    onPress: onKeyPress
+                )
                 // 붙여넣기 가능 상태로의 전환을 눈에 띄게 — 칩이 아래에서 떠오르며 커진다
                 .transition(.move(edge: .bottom).combined(with: .scale(scale: 0.85)).combined(with: .opacity))
                 .id(snippet.title)  // 다른 절로 바뀌면 새 칩으로 다시 애니메이션
@@ -671,43 +715,7 @@ private struct PasteChip: View {
     }
 }
 
-/// 채움글 후보 칩 — 제목 + 본문 첫 줄 미리보기. 탭하면 단축어가 전문으로 바뀐다.
-private struct SnippetChip: View {
-
-    let suggestion: SnippetSuggestion
-    let theme: ResolvedTheme
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 6) {
-                // 제목은 "[고린도전서 12:3]" 꼴, 본문 글자색 굵게 — accent(파랑)는 배경과
-                // 대비가 약해 안 보인다는 피드백 (2026-09-03)
-                Text("[\(suggestion.title)]")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(theme.keyText)
-                    .lineLimit(1)
-                    .fixedSize()
-                Text(previewLine)
-                    .font(.system(size: 14))
-                    .foregroundStyle(theme.keyText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(theme.characterKey, in: Capsule())
-        }
-        .buttonStyle(.plain)
-        // 문구·성경은 「채움글 <제목> 붙여넣기」 그대로, 날짜 칩은 넣을 값까지 읽는다(`SnippetSuggestion.accessibilityLabel`)
-        .accessibilityLabel(suggestion.accessibilityLabel)
-    }
-
-    private var previewLine: String {
-        suggestion.body.split(separator: "\n", omittingEmptySubsequences: true)
-            .first.map(String.init) ?? ""
-    }
-}
+// 채움글 칩(`SnippetChip`)은 `SnippetChip.swift` — U7 길게 누르기·「+n」·누름 상태기계와 함께 있다.
 
 /// 자판 그리드. LayoutDefinition을 그리기만 한다.
 struct KeyboardLayoutView: View {
