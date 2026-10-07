@@ -197,19 +197,21 @@ private struct PackSampleRow: View {
 // MARK: - 3-B 만드는 법
 
 /// 팩 만드는 법 — 글 중심 한 화면(시안 3-B). 시트 그림은 샘플과 같은 가짜 내용(U6). 제목·3절·4절 저장 방법은 판이 바꾼다 —
-/// CSV 전용판의 3절은 PDR 6-7 안내(R20 — 바뀐 값은 파서가 모르므로 안내만)
+/// CSV 전용판의 3절은 PDR 6-7 안내(R20 — 바뀐 값은 파서가 모르므로 안내만). 칸의 글은 **문장마다 한 줄, 앞에 「·」**(R30 — 문구 표가 문장 배열)
 struct PackImportGuideView: View {
     /// 문단 안 줄 간격 — 글 중심 화면인데 기본 행간이 좁아 보였다(사장님 실기 2026-10-07). 본문 크기에 맞춰 늘어 큰 글자에서도 비율이 같다
     @ScaledMetric(relativeTo: .body) private var lineGap: CGFloat = 4
     /// 항목(행) 위아래 여백 — 같은 이유. 3절처럼 한 절에 줄이 여럿이면 줄 사이가 이만큼씩 더 벌어진다
     @ScaledMetric(relativeTo: .body) private var rowGap: CGFloat = 4
+    /// 문장(「·」 줄) 사이 — 한 문장이 줄바꿈된 행간(`lineGap`)보다 조금 넓게 둬 문장 경계가 보이게
+    @ScaledMetric(relativeTo: .body) private var sentenceGap: CGFloat = 6
 
     var body: some View {
         Form {
             Section {
                 VStack(alignment: .leading, spacing: 12) {
                     sheetGrid
-                    Text(PackImportCopy.guideColumns)
+                    GuideSentences(sentences: PackImportCopy.guideColumns, spacing: sentenceGap)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -219,15 +221,15 @@ struct PackImportGuideView: View {
             }
 
             Section {
-                Text(PackImportCopy.guideMeta)
+                GuideSentences(sentences: PackImportCopy.guideMeta, spacing: sentenceGap)
                     .padding(.vertical, rowGap)
             } header: {
                 Text(numbered(2, PackImportCopy.guideMetaSection))
             }
 
             Section {
-                ForEach(PackImportCopy.guideCells, id: \.self) { line in
-                    Text(line)
+                ForEach(PackImportCopy.guideCells, id: \.self) { cell in
+                    GuideSentences(sentences: cell, spacing: sentenceGap)
                         .padding(.vertical, rowGap)
                 }
             } header: {
@@ -237,7 +239,7 @@ struct PackImportGuideView: View {
             }
 
             Section {
-                Text(PackImportCopy.guideSave)
+                GuideSentences(sentences: PackImportCopy.guideSave, spacing: sentenceGap)
                     .padding(.vertical, rowGap)
             } header: {
                 Text(numbered(4, PackImportCopy.guideSaveSection))
@@ -275,6 +277,27 @@ struct PackImportGuideView: View {
             }
         }
         .font(.caption)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 만드는 법 한 칸 — 문장마다 한 줄, 앞에 「·」(R30). 머리점과 글을 **따로 놓아**(HStack) 문장이 줄바꿈돼도 둘째 줄이 글 첫 글자에 맞춰
+/// 들어간다 — 「·」를 글자에 붙이면 큰 글자에서 둘째 줄이 머리점 밑으로 파고든다. 머리점은 VoiceOver가 읽지 않고, 칸 전체를 한 번에 읽는다
+private struct GuideSentences: View {
+    let sentences: [String]
+    let spacing: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: spacing) {
+            ForEach(Array(sentences.enumerated()), id: \.offset) { _, sentence in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(verbatim: "·")
+                        .accessibilityHidden(true)
+                    Text(sentence)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
         .accessibilityElement(children: .combine)
     }
 }

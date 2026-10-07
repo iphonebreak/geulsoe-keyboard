@@ -28,10 +28,13 @@ struct SnippetSettingsView: View {
     @State private var showsCleanup = false
     @State private var showsRecovery = false
 
-    // 1-c 3단계 — 「외부 채움글」 절(2-B·2-C)의 목록과 순서 화면(2-D·2-G)
+    // 1-c 3단계 — 「외부 채움글」 절(2-B·2-C)의 목록. 순서는 그 자리에서 길게 눌러 끌어 바꾼다(R30 — 순서 시트 2-D·2-G 없음)
     @State private var packSummaries: [PackSummary] = []
     @State private var packOrder: [SnippetSourceSlot] = SnippetSourceSlot.defaultOrder
-    @State private var showsOrder = false
+    /// 목록을 읽을 때의 revision — 끌어 놓은 순서를 저장할 때 넘겨 그 사이 바뀌었는지 안다(AC-3)
+    @State private var packRevision: Int?
+    /// 끌어 놓은 순서를 저장하는 동안 — 또 끌지 못하게(저장은 한 번에 하나, 결과로 되돌릴 기준이 흔들리지 않게)
+    @State private var isReorderingPacks = false
 
     // 1-c 5단계 — 가져오기 첫 화면(3-A)과 완료 뒤 새 팩 행 강조(U5)
     @State private var showsImport = false
@@ -75,10 +78,10 @@ struct SnippetSettingsView: View {
             }
             .disabled(!settings.snippetsEnabled)
 
-            // 외부 채움글 — 내장 팩 바로 아래(U5). 순서 목록·팩 상세·우선순위 바꾸기(머리글 버튼)는 `ExternalPackViews.swift`
+            // 외부 채움글 — 내장 팩 바로 아래(U5). 순서 목록(길게 눌러 끌기, R30)·팩 상세는 `ExternalPackViews.swift`
             ExternalSnippetSection(summaries: packSummaries, order: packOrder, libraryStatus: libraryStatus,
                                    highlightedPackID: highlightedPackID,
-                                   onReorder: { showsOrder = true }, onAdd: { showsImport = true },
+                                   onReorder: packReorderAction, onAdd: { showsImport = true },
                                    onChange: { Task { await reloadSafetyNet() } })
                 .disabled(!settings.snippetsEnabled)
 
@@ -137,13 +140,6 @@ struct SnippetSettingsView: View {
         .packLibraryRecovery(isPresented: $showsRecovery) {
             Task { await reloadSafetyNet() }
         }
-        // 순서 화면 — 닫힌 뒤 알림(거부·그 사이 바뀐 결과만, 결정 ⓑ)을 띄우고 목록을 다시 읽는다
-        .sheet(isPresented: $showsOrder, onDismiss: {
-            showPendingNotice()
-            Task { await reloadSafetyNet() }
-        }) {
-            PackOrderView { pendingNotice = $0 }
-        }
         .sheet(isPresented: $showsEditor, onDismiss: showPendingNotice) {
             SnippetEditorView(editing: nil, onSave: save)
         }
@@ -187,6 +183,7 @@ struct SnippetSettingsView: View {
         let summaries = await client.summaries()
         packSummaries = summaries
         packOrder = await client.order()
+        packRevision = await client.revision()
         unavailablePackNames = summaries.filter { $0.status == .unavailable }.map { $0.name ?? PackNoticeCopy.unnamedPack }
     }
 
@@ -203,13 +200,36 @@ struct SnippetSettingsView: View {
         }
     }
 
-    /// 알림 버튼 — 정리하기는 정리 화면, 목록 복구는 확인 시트(2단계), 팩 우선순위 바꾸기는 순서 화면(3단계)
+    /// 알림 버튼 — 정리하기는 정리 화면, 목록 복구는 확인 시트(2단계)
     private func perform(_ action: PackChangeNotice.Action) {
         switch action {
         case .organize: showsCleanup = true
         case .recoverLibrary: showsRecovery = true
-        case .reorderPacks: showsOrder = true
         default: break
+        }
+    }
+
+    /// 끌어 놓을 때 부를 것 — 앞 저장을 기다리는 동안은 nil(끌리지 않는다)
+    private var packReorderAction: (@MainActor (_ original: [SnippetSourceSlot], _ proposed: [SnippetSourceSlot]) -> Void)? {
+        guard !isReorderingPacks else { return nil }
+        return { original, proposed in reorderPacks(from: original, to: proposed) }
+    }
+
+    /// 「외부 채움글」 목록에서 끌어 놓았다(R30) — 놓은 자리에 바로 보이고 **놓는 순간 저장**한다(`PackListReorder` → `PackStoreClient.reorder`,
+    /// 메인 밖 직렬 경로·커밋 게이트 그대로). 거부되면 끌기 전 자리로 되돌리고 사유별로 알린다. 받았는데 팩이 쉬게 되면 G1·G2로 알린다 —
+    /// 미리 알려 주는 단계(G3)는 없앴다. 되돌리려면 다시 끌면 된다
+    private func reorderPacks(from original: [SnippetSourceSlot], to proposed: [SnippetSourceSlot]) {
+        guard !isReorderingPacks, proposed != original else { return }
+        packOrder = proposed
+        isReorderingPacks = true
+        Task {
+            let settled = await PackListReorder.commit(proposed, from: original, expectedRevision: packRevision, client: .live)
+            if settled.order != packOrder {
+                withAnimation { packOrder = settled.order }
+            }
+            if settled.committed { await reloadSafetyNet() }   // 쉬는 중 표시·revision을 저장본에서 다시
+            isReorderingPacks = false
+            if let shown = settled.notice { notice = shown }
         }
     }
 

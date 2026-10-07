@@ -30,7 +30,7 @@ struct SnippetNoticeBanner: View {
 
 extension View {
     /// 채움글 변경 알림 — 사유별 제목·문구(`PackChangeNotice`, 계획서 4-2절). 동작 버튼은 **띄우는 자리가 연결한 것만** 그린다
-    /// (`PackChangeNotice.Presenter` — 패키지 시험이 자리별 버튼을 고정한다). `onAction`이 정리 화면·복구 시트·순서 화면·삭제 확인·
+    /// (`PackChangeNotice.Presenter` — 패키지 시험이 자리별 버튼을 고정한다). `onAction`이 정리 화면·복구 시트·삭제 확인·
     /// 꺼 둔 채로 가져오기로 보낸다. `onDismiss`는 닫는 버튼(「확인」·「닫기」)을 눌렀을 때 — 닫힘 바인딩이 상태를 옮기지 않는 자리
     /// (가져오기 폼, 화면 확인 N-1)가 이것으로 닫는다
     func packChangeNoticeAlert(

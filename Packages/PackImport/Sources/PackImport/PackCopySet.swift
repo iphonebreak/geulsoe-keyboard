@@ -57,20 +57,22 @@ public enum PackCopySet: String, CaseIterable, Sendable {
         let unsupportedFiles: String?
         /// 3-A 샘플 알약 — 종류마다 이 순서로(시안 3-A [엑셀][CSV]). xlsx 샘플 파일은 1-e 번들 리소스다
         let sampleFormats: [PackSample.Format]
-        /// 3-B 3절 — 제목 · 줄 · 풋터
+        /// 3-B 3절 — 제목 · 칸(칸마다 문장 배열, R30) · 풋터
         let guideCellsSection: String
-        let guideCells: [String]
+        let guideCells: [[String]]
         let guideCellsFooter: String
-        /// 3-B 4절 저장 방법(뒤의 「옮긴 뒤 …를 눌러요」는 공유)
-        let guideSaveSteps: String
+        /// 3-B 4절 저장 방법 — 문장 배열(뒤의 「옮긴 뒤 …를 눌러요」 문장은 공유)
+        let guideSaveSteps: [String]
     }
 }
 
 extension PackCopySet.Lines {
 
     /// 두 판이 함께 쓰는 「모양이 바뀌기 쉬운 칸」 줄 — 엑셀 붙여넣기에서 작은따옴표가 글자로 남는다(PDR 6-7 T13)
-    private static let leadingSymbolCell =
-        "= + - @로 시작하는 글 → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요. 앞에 작은따옴표(')를 붙이면 붙여넣을 때 글자로 남을 수 있어요."
+    private static let leadingSymbolCell = [
+        "= + - @로 시작하는 글 → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요.",
+        "앞에 작은따옴표(')를 붙이면 붙여넣을 때 글자로 남을 수 있어요."
+    ]
 
     /// CSV 전용판 — 시안 6-B·3-A·3-B의 CSV 열, 3-B 3절은 PDR 6-7의 CSV 전용판 안내(R20 「가 — 안내 문구만」)
     static let csv = PackCopySet.Lines(
@@ -84,12 +86,16 @@ extension PackCopySet.Lines {
         sampleFormats: [.csv],
         guideCellsSection: "모양이 바뀌기 쉬운 칸",
         guideCells: [
-            "숫자·날짜처럼 보이는 글(예: 007, 1-2) → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요. 그렇지 않으면 CSV에 바뀐 모양으로 저장돼요.",
+            ["숫자·날짜처럼 보이는 글(예: 007, 1-2) → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요.",
+             "그렇지 않으면 CSV에 바뀐 모양으로 저장돼요."],
             leadingSymbolCell
         ],
         guideCellsFooter: "가져오기 미리보기에서 처음 몇 개를 확인해 주세요.",
-        guideSaveSteps: "파일 ▸ 다른 이름으로 저장 ▸ 「CSV UTF-8」이 든 항목(예: CSV UTF-8(쉼표로 분리))을 골라요. "
-            + "「쉼표로 구분된 값」처럼 UTF-8이 없는 항목도 가져올 수 있지만 일부 기호가 바뀔 수 있어요. 쉼표·세미콜론·탭 모두 알아서 읽어요."
+        guideSaveSteps: [
+            "파일 ▸ 다른 이름으로 저장 ▸ 「CSV UTF-8」이 든 항목(예: CSV UTF-8(쉼표로 분리))을 골라요.",
+            "「쉼표로 구분된 값」처럼 UTF-8이 없는 항목도 가져올 수 있지만 일부 기호가 바뀔 수 있어요.",
+            "쉼표·세미콜론·탭 모두 알아서 읽어요."
+        ]
     )
 
     /// xlsx 중심판 — 시안 6-A·3-A·3-B의 xlsx 열 그대로, 3-B 3절 풋터는 PDR 6-7의 xlsx 중심판 문구. **1-e가 출시 전에 다시 검토한다**
@@ -105,12 +111,12 @@ extension PackCopySet.Lines {
         sampleFormats: [.xlsx, .csv],
         guideCellsSection: "이런 칸은 건너뛰어요",
         guideCells: [
-            "수식 → 「값만 붙여넣기」로 바꿔 주세요",
-            "날짜로 바뀐 칸(1/2 → 1월 2일) → 그 열 서식을 「텍스트」로",
-            "병합한 칸 → 병합을 풀어 주세요. 숨긴 시트는 목록에 안 나와요",
+            ["수식 → 「값만 붙여넣기」로 바꿔 주세요"],
+            ["날짜로 바뀐 칸(1/2 → 1월 2일) → 그 열 서식을 「텍스트」로"],
+            ["병합한 칸 → 병합을 풀어 주세요.", "숨긴 시트는 목록에 안 나와요"],
             leadingSymbolCell
         ],
         guideCellsFooter: "엑셀에서 만들었다면 xlsx로 저장해서 가져오면 숫자·날짜로 바뀐 칸을 알려 드려요. CSV로 저장하면 바뀐 값이 그대로 들어올 수 있어요.",
-        guideSaveSteps: "파일 ▸ 다른 이름으로 저장 ▸ Excel 통합 문서(.xlsx)."
+        guideSaveSteps: ["파일 ▸ 다른 이름으로 저장 ▸ Excel 통합 문서(.xlsx)."]
     )
 }

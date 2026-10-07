@@ -59,6 +59,9 @@ public enum PackImportCopy {
     }
 
     // MARK: - 3-B 만드는 법 — 절 제목의 번호(1.~4.)는 화면이 붙인다
+    //
+    // 칸의 글은 **문장 하나에 한 줄**이다(R30 — 한 칸에 문장이 이어져 읽기 어려웠다). 화면이 줄마다 앞에 「·」를 붙인다(VoiceOver는 읽지 않는다).
+    // 배열 원소가 곧 문장이다 — 문장 글자는 나누기 전과 같다(`PackGuideSentenceTests`)
 
     public static var guideTitle: String { lines.guideTitle }
     public static let guideHeaderSection = "첫 줄은 머리글"
@@ -73,15 +76,23 @@ public enum PackImportCopy {
     ]
     /// 시트 그림에서 정보 줄(`#…`) 다음의 머리글 행 — 굵게 보인다
     public static let guideSheetHeaderRow = 3
-    public static let guideColumns = "번호형은 번호 · 제목 · 본문, 문구형은 단축어 · 제목 · 본문. 열 순서는 상관없고 영어 이름(number·trigger·title·body)도 돼요. 제목은 비워도 돼요."
+    public static let guideColumns = [
+        "번호형은 번호 · 제목 · 본문, 문구형은 단축어 · 제목 · 본문.",
+        "열 순서는 상관없고 영어 이름(number·trigger·title·body)도 돼요.",
+        "제목은 비워도 돼요."
+    ]
     public static let guideMetaSection = "팩 정보 줄(선택)"
-    public static let guideMeta = "머리글 위에 #이름 · #틀 · #출처 줄을 두면 가져올 때 미리 채워져요. 정렬하다 아래로 내려가지 않게 해 주세요."
-    /// CSV에는 셀 타입이 없어 바뀐 값을 파서가 알 수 없다 — 안내로만 다룬다(PDR 6-7, R20 「가 — 안내 문구만」). 판마다 다르다
+    public static let guideMeta = [
+        "머리글 위에 #이름 · #틀 · #출처 줄을 두면 가져올 때 미리 채워져요.",
+        "정렬하다 아래로 내려가지 않게 해 주세요."
+    ]
+    /// CSV에는 셀 타입이 없어 바뀐 값을 파서가 알 수 없다 — 안내로만 다룬다(PDR 6-7, R20 「가 — 안내 문구만」). 판마다 다르다.
+    /// `guideCells`는 칸(행)마다 문장 배열이다
     public static var guideCellsSection: String { lines.guideCellsSection }
-    public static var guideCells: [String] { lines.guideCells }
+    public static var guideCells: [[String]] { lines.guideCells }
     public static var guideCellsFooter: String { lines.guideCellsFooter }
     public static let guideSaveSection = "저장하고 옮기기"
-    public static var guideSave: String { lines.guideSaveSteps + " 파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「\(pickFile)」를 눌러요." }
+    public static var guideSave: [String] { lines.guideSaveSteps + ["파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「\(pickFile)」를 눌러요."] }
 
     // MARK: - 3-E 붙여넣기
 
@@ -350,9 +361,9 @@ public enum PackImportCopy {
         if let user = overlap.userSnippets {
             lines.append(OverlapLine(
                 message: "내 채움글과 같은 단축어 \(PackNoticeCopy.number(user.triggers.count))개 — 목록에서 위에 있는 쪽이 먼저 떠요",
-                // 가리키는 버튼은 채움글 화면 「외부 채움글」 머리글의 그것 — 가져오기가 끝나면 그 화면으로 돌아간다
+                // 가리키는 곳은 채움글 화면의 「외부 채움글」 목록 — 가져오기가 끝나면 그 화면으로 돌아간다. 순서는 길게 눌러 끌어 바꾼다(R30)
                 details: ["\(listed(user.triggers)) — 새 팩은 맨 아래에 붙어서 지금은 「내 채움글」이 떠요. "
-                          + "이 팩 문구를 먼저 띄우려면 「\(PackNoticeCopy.reorderHeaderButton)」에서 위로 올려요."],
+                          + "이 팩 문구를 먼저 띄우려면 「외부 채움글」 목록에서 길게 눌러 위로 올려요."],
                 isWarning: true))
         }
         if !overlap.packs.isEmpty {

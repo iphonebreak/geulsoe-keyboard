@@ -216,7 +216,8 @@ struct PackImportCopyMappingTests {
     @Test("★ R27 — 만드는 법 시트 그림·정보 줄 안내의 키는 `#출처`")
     func guideUsesSourceKey() {
         #expect(PackImportCopy.guideSheet[2] == ["#출처", "제작자 자체 작성", ""])
-        #expect(PackImportCopy.guideMeta == "머리글 위에 #이름 · #틀 · #출처 줄을 두면 가져올 때 미리 채워져요. 정렬하다 아래로 내려가지 않게 해 주세요.")
+        #expect(PackImportCopy.guideMeta == ["머리글 위에 #이름 · #틀 · #출처 줄을 두면 가져올 때 미리 채워져요.",
+                                             "정렬하다 아래로 내려가지 않게 해 주세요."])
     }
 
     @Test("★ 4-B·4-C CSV 실물 반영(계획서 11절 F-1·F-2) — CP949 안내 줄은 **한국어(CP949)로 읽은 경우에만**, 풋터 둘째 문장")
@@ -282,7 +283,7 @@ struct PackImportCopyMappingTests {
         let lines = PackImportCopy.overlapLines(overlap, summary: { summaries[$0] })
         #expect(lines == [
             .init(message: "내 채움글과 같은 단축어 2개 — 목록에서 위에 있는 쪽이 먼저 떠요",
-                  details: ["주소, 새해인사 — 새 팩은 맨 아래에 붙어서 지금은 「내 채움글」이 떠요. 이 팩 문구를 먼저 띄우려면 「우선순위 변경」에서 위로 올려요."],
+                  details: ["주소, 새해인사 — 새 팩은 맨 아래에 붙어서 지금은 「내 채움글」이 떠요. 이 팩 문구를 먼저 띄우려면 「외부 채움글」 목록에서 길게 눌러 위로 올려요."],
                   isWarning: true),
             .init(message: "다른 팩과 같은 단축어 3개 — 위에 있는 팩이 먼저 떠요",
                   details: ["추석인사 — 「인사말 예시」 팩(꺼짐)", "회의실 — 「우리 회사 상용구」 팩", "추석인사, 인사 — 「상용 영어」 팩(쉬는 중)"],
@@ -347,8 +348,8 @@ var stage4Copy: [String] {
     var texts = [
         PackImportCopy.heroTitle, PackImportCopy.heroMessage, PackImportCopy.pickFile, PackImportCopy.firstTimeHeader,
         PackImportCopy.guideTitle, PackImportCopy.otherWaysHeader, PackImportCopy.pasteTitle, PackImportCopy.pasteRowDetail,
-        PackImportCopy.guideHeaderSection, PackImportCopy.guideColumns, PackImportCopy.guideMetaSection, PackImportCopy.guideMeta,
-        PackImportCopy.guideCellsSection, PackImportCopy.guideCellsFooter, PackImportCopy.guideSaveSection, PackImportCopy.guideSave,
+        PackImportCopy.guideHeaderSection, PackImportCopy.guideMetaSection,
+        PackImportCopy.guideCellsSection, PackImportCopy.guideCellsFooter, PackImportCopy.guideSaveSection,
         PackImportCopy.pasteHeader, PackImportCopy.pasteFooter, PackImportCopy.pastePrivacy, PackImportCopy.readButton,
         PackImportCopy.clearButton, PackImportCopy.pasteSummary(lines: 37, delimiter: .tab),
         PackImportCopy.flowTitle, PackImportCopy.readingTitle(.file), PackImportCopy.readingTitle(.paste),
@@ -373,7 +374,7 @@ var stage4Copy: [String] {
         PackImportCopy.pickAnotherFile, PackImportCopy.backToPaste
     ]
     texts += PackImportCopy.headerExamples
-    texts += PackImportCopy.guideCells
+    texts += PackImportCopy.guideColumns + PackImportCopy.guideMeta + PackImportCopy.guideCells.flatMap { $0 } + PackImportCopy.guideSave
     if let footer = PackImportCopy.startFooter { texts.append(footer) }   // 3-A 바닥 — xlsx판만(CSV판은 풋터 없음, 2026-10-07)
     texts += [PackEncodingReview.Encoding.utf8, .cp949].map(PackImportCopy.encodingName)
     texts += CSVDelimiter.allCases.map(PackImportCopy.delimiterName)

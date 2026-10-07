@@ -77,8 +77,9 @@ private let table: [NoticeTableRow] = [
     NoticeTableRow(id: "C1 외부 팩 켜기 — 다른 팩이 밀림", operation: .enablePack,
         result: rejected(.gate(.displacesPacks(["p2"]))), reason: .enableDisplacesPacks,
         title: "켤 수 없어요",
-        message: "켜면 이 팩보다 아래에 있는 「회사 상용구」가 한도 밖으로 밀려요. 먼저 다른 팩을 끄거나 순서를 바꿔 주세요.",
-        buttons: ["팩 우선순위 바꾸기", "확인"]),
+        message: "켜면 이 팩보다 아래에 있는 「회사 상용구」가 한도 밖으로 밀려요. "
+            + "먼저 다른 팩을 끄거나, 「외부 채움글」 목록에서 팩을 길게 눌러 순서를 바꿔 주세요.",
+        buttons: ["확인"]),   // 「팩 우선순위 바꾸기」 버튼은 갈 곳이 없어 뺐다 — 순서는 목록 길게 눌러 끌기(R30)
     NoticeTableRow(id: "C2 외부 팩 켜기 — 자기 자신이 한도 밖", operation: .enablePack,
         result: rejected(.gate(.packExcluded(id: "p1", dimensions: [.needleChars]))), reason: .enableExceedsLimit,
         title: "켤 수 없어요",
@@ -312,14 +313,6 @@ struct PackChangeNoticeTableTests {
         make(.saveUserSnippet, accepted(["p1", "p2", "p3"]))
         #expect(nameReads == 2, "G2는 첫 이름만 쓴다")
     }
-
-    @Test("G3 — 순서 변경 전 사전 안내 줄(트리거는 3단계 PackImpact)")
-    func reorderWarning() {
-        #expect(PackNoticeCopy.reorderWarning(names: ["회사 상용구"])
-                == "이렇게 바꾸면 「회사 상용구」가 한도 밖으로 밀려서 쉬어요.")
-        #expect(PackNoticeCopy.reorderWarning(names: ["사자성어 예시 팩", "상용 영어"])
-                == "이렇게 바꾸면 「사자성어 예시 팩」 외 1개가 한도 밖으로 밀려서 쉬어요.")
-    }
 }
 
 /// 모든 거부 사유 — `PackStore.Rejection`에 사유가 늘면 아래 `switch`가 컴파일되지 않아 이 목록과 4-2절 표를 함께 고치게 된다
@@ -357,8 +350,7 @@ var stage1To3Copy: [String] {
         return [plain, again].compactMap { $0 }.flatMap { [$0.title, $0.message] + buttons($0) }
     }
     texts += PackChangeNotice.Action.allCases.map(\.label)
-    texts += [PackNoticeCopy.reorderWarning(names: ["회사 상용구"]), PackNoticeCopy.reorderWarning(names: ["회사 상용구", "상용 영어"]),
-              PackNoticeCopy.recheckedLine, PackNoticeCopy.unnamedPack]
+    texts += [PackNoticeCopy.recheckedLine, PackNoticeCopy.unnamedPack]
     // 2단계 — 상태 표시(4-3절)·배너 셋·정리 화면·복구 시트. 개수는 표시 값이라 `countSentinels`로 넣는다
     texts += [PackSummary.Status.on, .off, .restingOverLimit, .restingForUserSnippets, .unavailable]
         .compactMap(PackNoticeCopy.statusLine)
@@ -371,7 +363,7 @@ var stage1To3Copy: [String] {
               PackNoticeCopy.recoveredTitle, PackNoticeCopy.recoveredMessage(packCount: 41), PackNoticeCopy.recoveredMessage(packCount: 0),
               PackNoticeCopy.recoveryFailedTitle, PackNoticeCopy.recoveryFailedMessage]
     texts += [PackLibraryStatus.unreadable, .corrupt, .unknownSchema].compactMap(PackNoticeCopy.libraryBanner)
-    // 3단계 — 외부 채움글 절·순서 화면·팩 상세·삭제 확인(`PackImpactCopyTests.swift`)
+    // 3단계 — 외부 채움글 절·팩 상세·삭제 확인(`PackImpactCopyTests.swift`)
     texts += stage3Copy
     return texts
 }

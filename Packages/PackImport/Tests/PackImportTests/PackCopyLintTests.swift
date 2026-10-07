@@ -323,7 +323,8 @@ struct PackCopyLintTests {
     func xlsxSetIsCaught() {
         PackCopySet.$previewing.withValue(.xlsx) {
             for text in [PackImportCopy.heroTitle, PackImportCopy.heroMessage, PackImportCopy.pickFile, PackImportCopy.guideTitle,
-                         PackImportCopy.startFooter ?? "", PackImportCopy.guideSave, PackImportCopy.guideCellsFooter, PackNoticeCopy.emptyListFooter,
+                         PackImportCopy.startFooter ?? "", PackImportCopy.guideSave.joined(separator: " "), PackImportCopy.guideCellsFooter,
+                         PackNoticeCopy.emptyListFooter,
                          PackImportCopy.sampleFormatLabel(.xlsx), PackSample.File(kind: .numbered, format: .xlsx).displayName] {
                 #expect(!PackCopyLint.xlsxMentions(in: text).isEmpty, "\(text)")
             }

@@ -12,11 +12,6 @@ public enum PackNoticeCopy {
     /// 이름을 모르는 팩(표시 칸도 변환본도 없는 옛 목록·그 사이 지워진 팩)
     public static let unnamedPack = "이름 없는 팩"
 
-    /// G3 — 순서 변경 화면 아래 줄(완료는 막지 않는다). `PackImpact.restingPacks`가 비지 않을 때(`impactLines`의 첫 줄)
-    public static func reorderWarning(names: [String]) -> String {
-        "이렇게 바꾸면 \(subject(names.first ?? unnamedPack, count: max(names.count, 1))) 한도 밖으로 밀려서 쉬어요."
-    }
-
     static func title(_ reason: PackChangeNotice.Reason) -> String {
         switch reason {
         case .userSaveTooMany, .userSaveTooLong, .userSaveWhileOverLimit, .writeFailed, .internalError: "저장하지 못했어요"
@@ -48,8 +43,9 @@ public enum PackNoticeCopy {
             "내 채움글이 한도를 넘어서 지금은 내장 팩을 켤 수 없어요. 먼저 내 채움글을 정리해 주세요."
         case .builtInDisplacesPacks:    // B2
             "켜면 \(subject(firstName, count: count)) 한도 밖으로 밀려요. 외부 채움글 팩을 먼저 끄거나 지운 뒤 켜 주세요."
-        case .enableDisplacesPacks:     // C1
-            "켜면 이 팩보다 아래에 있는 \(subject(firstName, count: count)) 한도 밖으로 밀려요. 먼저 다른 팩을 끄거나 순서를 바꿔 주세요."
+        case .enableDisplacesPacks:     // C1 — 「팩 우선순위 바꾸기」 버튼 대신 끄는 길을 문장으로(R30)
+            "켜면 이 팩보다 아래에 있는 \(subject(firstName, count: count)) 한도 밖으로 밀려요. "
+                + "먼저 다른 팩을 끄거나, 「외부 채움글」 목록에서 팩을 길게 눌러 순서를 바꿔 주세요."
         case .enableExceedsLimit:       // C2
             "켜면 한도를 넘어요. 다른 팩을 먼저 꺼 주세요."
         case .enableWhileUserOverLimit:    // C2b (2단계 추가)
@@ -168,17 +164,18 @@ public enum PackNoticeCopy {
     public static let unreadableListFooter = "외부 채움글 목록을 읽을 수 없어요. 위에서 목록을 복구해 주세요."
 
     /// 「외부 채움글」 절 풋터 — 목록을 못 읽으면 손상 한 줄, 팩이 없으면 2-B 빈 상태, 있으면 **없다**(nil). 2-C 「위에 있는 줄이 먼저 떠요 …」
-    /// 풋터는 뺐다(사장님 실기 2026-10-07) — 순서가 곧 우선순위라는 것은 머리글 버튼 「우선순위 변경」과 「내 채움글 (우선순위)」 줄이 말한다
+    /// 풋터는 뺐다(사장님 실기 2026-10-07) — 순서가 곧 우선순위라는 것은 「내 채움글 (우선순위)」 줄이 말한다
     public static func externalSectionFooter(isEmpty: Bool, libraryStatus: PackLibraryStatus) -> String? {
         if libraryStatus.needsRecovery { return unreadableListFooter }
         return isEmpty ? emptyListFooter : nil
     }
-    /// 「외부 채움글」 절 머리글 오른쪽 끝 버튼 — 순서 화면(2-D)을 연다. 팩이 있을 때만(예전 목록 끝 「팩 순서 바꾸기」 줄과 같은 조건 —
-    /// 그 줄은 이 버튼으로 대신했다, 사장님 실기 2026-10-07). 알림·팩 상세의 버튼은 `label(.reorderPacks)` 「팩 우선순위 바꾸기」
-    public static let reorderHeaderButton = "우선순위 변경"
     /// 순서 목록의 「내 채움글」 줄(U1) — 아래 「내 채움글」 절과 헷갈리지 않게 「(우선순위)」(2026-10-07 「순서」 → 「우선순위」 용어 통일)
     public static let userSlotTitle = "내 채움글 (우선순위)"
-    public static let userSlotDetail = "우선순위 표시 전용 · 눌리지 않아요 · 문구는 아래 「내 채움글」 절에서"
+    /// 머리글 버튼·풋터가 없어 「길게 눌러 끈다」를 이 줄이 알린다(R30, 코디네이터 결정 2026-10-07)
+    public static let userSlotDetail = "길게 눌러 끌면 우선순위가 바뀌어요 · 문구는 아래 「내 채움글」 절에서"
+    /// 목록 줄의 VoiceOver 동작 — 길게 눌러 끌기 대신 한 칸씩 옮긴다(R30, 놓는 것과 같은 길로 저장)
+    public static let moveUpAction = "위로 옮기기"
+    public static let moveDownAction = "아래로 옮기기"
     /// 행 값 — 사용자가 켰나(쉬는 중이어도 켬, 쉬는 이유는 `statusLine`)
     public static let enabledValue = "켬"
     public static let disabledValue = "끔"
@@ -196,78 +193,8 @@ public enum PackNoticeCopy {
         return kind + " · " + format
     }
 
-    // MARK: 순서 화면 (2-D·2-G)
-
-    /// 순서 시트 제목 — 「팩 순서」 → 「팩 우선순위」(사장님 실기 2026-10-07)
-    public static let orderTitle = "팩 우선순위"
-    public static let orderDone = "완료"
-    public static let cancel = "취소"
-    /// 이 화면엔 아래 「내 채움글」 절이 없어 「(우선순위)」를 붙이지 않는다(시안 2-D)
-    public static let orderUserTitle = "내 채움글"
-
-    public static func orderUserDetail(count: Int) -> String {
-        "내가 만든 문구 \(number(count))개 · 지울 수 없어요"
-    }
-
-    /// 순서 행 보조줄 — 2-C 행과 같고, 순서와 무관하게 변하지 않는 상태(꺼짐·읽을 수 없음)만 덧붙인다(쉬는 중은 순서에 따라 바뀌어 아래 안내가 맡는다)
-    public static func orderPackDetail(_ summary: PackSummary) -> String? {
-        let state: String? = summary.status == .unavailable ? "읽을 수 없어요" : (summary.isEnabled ? nil : "꺼짐")
-        let parts = [packRowDetail(summary), state].compactMap { $0 }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
-    public static let orderFooter = "끌어서 순서를 바꿔요. 위에 있는 줄이 먼저 떠요 — 「내 채움글」도 끌 수 있어요. 한도는 외부 팩만 위에서부터 채워요."
-
-    /// 완료 전 안내 한 줄(주황) — 본문 + 작은 둘째 줄
-    public struct ImpactLine: Equatable, Sendable {
-        public let message: String
-        public let detail: String?
-
-        public init(message: String, detail: String?) {
-            self.message = message
-            self.detail = detail
-        }
-    }
-
-    /// 2-D·2-G 완료 전 안내(G3) — ① 쉬게 될 팩(㉤ — 가장 큰 변화라 먼저) ② 틀 주인 변화(10-4 ③) ③ 단축어 주인 변화(U1). 영향이 없으면 빈 배열.
-    /// 「완료」는 막지 않는다(거부가 아니라 안내)
-    public static func impactLines(_ impact: PackImpact, in library: PackImpact.Library) -> [ImpactLine] {
-        var lines: [ImpactLine] = []
-        if !impact.restingPacks.isEmpty {
-            lines.append(ImpactLine(message: reorderWarning(names: impact.restingPacks.map(library.name(of:))), detail: nil))
-        }
-        for group in impact.templateOwnerGroups {
-            let shown = group.patterns.map { library.display($0) }
-            let last = shown.last ?? ""
-            let to = library.name(of: group.to)
-            lines.append(ImpactLine(
-                message: "이렇게 바꾸면 \(shown.map { "「\($0)」" }.joined(separator: "·"))\(objectParticle(after: last)) "
-                    + "「\(library.name(of: group.from))」 대신 「\(to)」\(subjectParticle(after: to)) 가져요.",
-                detail: shown.count == 1 ? "「\(last)」\(objectParticle(after: last)) 치면 지금과 다른 팩의 글이 떠요."
-                    : "이 틀을 치면 지금과 다른 팩의 글이 떠요."))
-        }
-        for group in impact.triggerOwnerGroups {
-            let from = sourceName(group.from, name: library.name(of:))
-            let to = sourceName(group.to, name: library.name(of:))
-            let listed = group.triggers.prefix(shownTriggerCount).joined(separator: ", ")
-                + (group.triggers.count > shownTriggerCount ? " 외 \(number(group.triggers.count - shownTriggerCount))개" : "")
-            lines.append(ImpactLine(message: "이렇게 바꾸면 단축어 \(number(group.triggers.count))개가 \(from) 대신 \(to)의 문구로 떠요.",
-                                    detail: "\(listed) — \(from)의 같은 단축어는 안 떠요."))
-        }
-        return lines
-    }
-
-    /// 안내 둘째 줄에 이름을 다 보일 단축어 수 — 넘으면 「외 n개」
+    /// 안내 둘째 줄에 이름을 다 보일 단축어 수 — 넘으면 「외 n개」(가져오기 겹침 안내 4-I)
     static let shownTriggerCount = 5
-
-    /// 단축어 주인 이름 — 내 채움글·「팩 이름」·내장 팩(시안 2-G는 「내 채움글」을 괄호 없이 쓴다)
-    private static func sourceName(_ source: PackImpact.Source, name: (String) -> String) -> String {
-        switch source {
-        case .userSnippets: "내 채움글"
-        case .pack(let id): "「\(name(id))」"
-        case .builtIn: "내장 팩"
-        }
-    }
 
     // MARK: 팩 상세 (2-E·U1)
 
@@ -361,11 +288,11 @@ public enum PackNoticeCopy {
         return "위에 있는 \(shown)\(subjectParticle(after: shown)) 먼저 떠요"
     }
 
-    /// 위 줄이 하나면 그 이름 위로, 여럿이면 「더 위로」
+    /// 위 줄이 하나면 그 이름 위로, 여럿이면 「더 위로」. 올리는 곳은 「외부 채움글」 목록 — 길게 눌러 끈다(R30, 「팩 우선순위 바꾸기」 버튼은 없앴다)
     public static func hiddenTriggersFooter(owners: [PackImpact.Source], name: (String) -> String) -> String {
         let distinct = owners.reduce(into: [PackImpact.Source]()) { if !$0.contains($1) { $0.append($1) } }
-        let target = distinct.count == 1 ? "이 팩을 \(rowName(distinct[0], name: name)) 위로" : "이 팩을 더 위로"
-        return "목록에서 위에 있는 쪽이 먼저 떠요. 이 팩 문구를 쓰려면 \(target) 올려 주세요."
+        let target = distinct.count == 1 ? "\(rowName(distinct[0], name: name)) 위로" : "더 위로"
+        return "목록에서 위에 있는 쪽이 먼저 떠요. 이 팩 문구를 쓰려면 「외부 채움글」 목록에서 이 팩을 길게 눌러 \(target) 올려 주세요."
     }
 
     /// 목록 줄 이름 — 「내 채움글」·「팩 이름」(U1 컷은 내 채움글에도 괄호를 쓴다)
@@ -387,6 +314,8 @@ public enum PackNoticeCopy {
 
     // MARK: 삭제 확인 (2-F)
 
+    public static let cancel = "취소"
+
     public static func deleteTitle(name: String) -> String { "「\(name)」\(objectParticle(after: name)) 지울까요?" }
 
     /// 항목 수를 모르면(읽을 수 없는 팩을 복구해 stats가 0) 숫자 없이
@@ -401,7 +330,6 @@ public enum PackNoticeCopy {
         case .close: "닫기"
         case .organize: "정리하기"
         case .importDisabled: "꺼 둔 채로 가져오기"
-        case .reorderPacks: "팩 우선순위 바꾸기"
         case .recoverLibrary: "목록 복구"
         case .deletePack: "지우기"
         }

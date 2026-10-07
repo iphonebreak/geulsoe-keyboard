@@ -16,7 +16,7 @@ public struct PackChangeNotice: Equatable, Sendable {
         case enablePack, disablePack, replacePack, deletePack, reorderPacks
     }
 
-    /// 4-2절 표의 줄 — G3(순서 변경 전 사전 안내)는 알림이 아니라 화면 줄이라 `PackNoticeCopy.reorderWarning`
+    /// 4-2절 표의 줄 — G3(순서 변경 전 사전 안내)는 순서 시트와 함께 없앴다(R30 — 목록에서 끌어 놓는 순간 저장하고, 쉬게 되면 G1·G2)
     public enum Reason: CaseIterable, Sendable {
         /// A1 내 채움글 저장 — 한도(개수 쪽: 항목·단축어 수)
         case userSaveTooMany
@@ -30,7 +30,7 @@ public struct PackChangeNotice: Equatable, Sendable {
         case builtInWhileUserOverLimit
         /// B2 내장 팩 켜기 — 외부 팩이 밀림(순서 바꾸기로는 안 풀린다 — 내장이 먼저다)
         case builtInDisplacesPacks
-        /// C1 외부 팩 켜기 — 다른 팩이 밀림(R15)
+        /// C1 외부 팩 켜기 — 다른 팩이 밀림(R15). 순서를 바꾸는 길은 목록 끌기라(R30) 버튼이 없다
         case enableDisplacesPacks
         /// C2 외부 팩 켜기 — 자기 자신이 한도 밖
         case enableExceedsLimit
@@ -73,15 +73,14 @@ public struct PackChangeNotice: Equatable, Sendable {
         }
     }
 
-    /// 알림 버튼 — 닫는 버튼(`confirm`·`close`)과 그 밖의 동작. 동작이 가는 화면(정리·복구·순서·가져오기)은 다음 단계들이 붙인다
+    /// 알림 버튼 — 닫는 버튼(`confirm`·`close`)과 그 밖의 동작. 동작이 가는 화면(정리·복구·가져오기·삭제 확인)은 다음 단계들이 붙인다.
+    /// 「팩 우선순위 바꾸기」는 없다 — 순서는 「외부 채움글」 목록에서 길게 눌러 끌어 바꾼다(R30, 갈 화면이 없다)
     public enum Action: CaseIterable, Sendable {
         case confirm, close
         /// 내 채움글 정리 — 2단계 정리 화면(`SnippetCleanupView`)
         case organize
         /// 꺼 둔 채로 가져오기(U2) — 4·5단계
         case importDisabled
-        /// 팩 순서 바꾸기(U4) — 3단계
-        case reorderPacks
         /// 목록 복구(R24) — 2단계 복구 확인 시트
         case recoverLibrary
         /// 팩 지우기 — 3단계
@@ -179,7 +178,6 @@ public struct PackChangeNotice: Equatable, Sendable {
         switch reason {
         case .userSaveWhileOverLimit, .builtInWhileUserOverLimit, .enableWhileUserOverLimit, .replaceWhileUserOverLimit:
             ([.organize], .confirm)
-        case .enableDisplacesPacks: ([.reorderPacks], .confirm)
         case .importExceedsLimit: ([.importDisabled], .close)
         case .importWhileUserOverLimit: ([.organize, .importDisabled], .close)
         case .libraryUnreadable: ([.recoverLibrary], .confirm)
@@ -195,7 +193,7 @@ extension PackChangeNotice {
 
     /// 알림을 띄우는 자리 — 자리마다 **누를 곳이 있는** 동작만 버튼으로 그린다(갈 곳 없는 버튼을 보이지 않는다)
     public enum Presenter: Sendable, CaseIterable {
-        /// 채움글 화면·팩 상세·내장 팩 상세·정리 화면 — 정리 화면·복구 시트·순서 화면·삭제 확인으로 보낼 수 있다
+        /// 채움글 화면·팩 상세·내장 팩 상세·정리 화면 — 정리 화면·복구 시트·삭제 확인으로 보낼 수 있다
         case settings
         /// 내 채움글 편집 시트 — 동작 버튼을 누르면 시트가 닫혀 **친 내용이 사라진다**(화면 확인 O-4). 「확인」만 두고 입력을 지킨다 —
         /// 정리·복구는 채움글 화면의 배너(㉠·㉡)가 같은 길을 준다
@@ -205,7 +203,7 @@ extension PackChangeNotice {
 
         var wired: Set<Action> {
             switch self {
-            case .settings: [.organize, .recoverLibrary, .reorderPacks, .deletePack]
+            case .settings: [.organize, .recoverLibrary, .deletePack]
             case .editorSheet: []
             case .importFlow: [.organize, .recoverLibrary, .importDisabled]
             }
