@@ -25,9 +25,9 @@ public enum PackImportCopy {
     public static var otherFileRow: PackCopySet.Row? { lines.otherFileRow }
     public static let pasteTitle = "붙여넣기로 가져오기"
     public static let pasteRowDetail = "표를 복사해 그대로 붙여 넣어요"
-    public static var startFooter: String {
-        lines.unsupportedFiles + "\n\n가져온 팩은 이 기기에만 저장되고, 파일 내용은 어디에도 보내지 않아요."
-    }
+    /// 3-A 바닥 — 받지 않는 파일(판에 있을 때만 — CSV 전용판은 nil이라 풋터가 없다). 「엑셀에서는 …」과 뒤의 개인정보 한 줄(「가져온 팩은 이 기기에만
+    /// 저장되고 …」)을 함께 뺐다 — 같은 뜻은 처리방침에 있다(사장님 실기 2026-10-07)
+    public static var startFooter: String? { lines.unsupportedFiles }
 
     // MARK: 3-A 「처음이라면」 샘플 · 3-C 샘플 받기(공유 시트)
 
@@ -57,8 +57,6 @@ public enum PackImportCopy {
     public static func sampleShareLabel(_ file: PackSample.File) -> String {
         "\(sampleTitle(file.kind)) \(sampleFormatLabel(file.format)) 받기"
     }
-
-    public static let samplesFooter = "샘플은 가짜 내용이에요. 열어서 내용만 바꿔 저장하면 팩이 돼요."
 
     // MARK: - 3-B 만드는 법 — 절 제목의 번호(1.~4.)는 화면이 붙인다
 
@@ -352,8 +350,9 @@ public enum PackImportCopy {
         if let user = overlap.userSnippets {
             lines.append(OverlapLine(
                 message: "내 채움글과 같은 단축어 \(PackNoticeCopy.number(user.triggers.count))개 — 목록에서 위에 있는 쪽이 먼저 떠요",
+                // 가리키는 버튼은 채움글 화면 「외부 채움글」 머리글의 그것 — 가져오기가 끝나면 그 화면으로 돌아간다
                 details: ["\(listed(user.triggers)) — 새 팩은 맨 아래에 붙어서 지금은 「내 채움글」이 떠요. "
-                          + "이 팩 문구를 먼저 띄우려면 「\(PackNoticeCopy.label(.reorderPacks))」에서 위로 올려요."],
+                          + "이 팩 문구를 먼저 띄우려면 「\(PackNoticeCopy.reorderHeaderButton)」에서 위로 올려요."],
                 isWarning: true))
         }
         if !overlap.packs.isEmpty {

@@ -32,17 +32,16 @@ private let manyTriggers = (0..<37).map { String(UnicodeScalar(0xAC00 + $0 * 28)
 @Suite("외부 채움글 1-c 3단계 — 문구 (2-B~2-G · U1)")
 struct PackImpactCopyTests {
 
-    @Test("★ 2-B·2-C — 절 제목·추가 줄·빈 상태 풋터(CSV판)·목록 풋터·「내 채움글 (순서)」 줄")
+    @Test("★ 2-B·2-C — 절 제목·추가 줄·빈 상태 풋터(CSV판)·머리글 「우선순위 변경」·「내 채움글 (우선순위)」 줄(목록 풋터는 없다)")
     func sectionCopy() {
         #expect(PackNoticeCopy.externalSectionTitle == "외부 채움글")
         #expect(PackNoticeCopy.addPack == "외부 채움글 추가")
         #expect(PackNoticeCopy.emptyListFooter
                 == "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
-        #expect(PackNoticeCopy.listFooter
-                == "위에 있는 줄이 먼저 떠요 — 같은 문구 단축어는 위 줄이, 같은 단축어 틀은 위 팩이 가져요. 「내 채움글」도 이 순서에 들어가요.\n"
-                + "한도는 외부 팩만 위에서부터 채워요(내 채움글은 늘 써요). 가져온 팩은 이 기기에만 저장돼요.")
-        #expect(PackNoticeCopy.userSlotTitle == "내 채움글 (순서)")
-        #expect(PackNoticeCopy.userSlotDetail == "순서 표시 전용 · 눌리지 않아요 · 문구는 아래 「내 채움글」 절에서")
+        // 2-C 목록 풋터(「위에 있는 줄이 먼저 떠요 …」)는 뺐다 — 팩이 있으면 풋터가 없다(사장님 실기 2026-10-07, `ExternalSectionFooterTests`)
+        #expect(PackNoticeCopy.reorderHeaderButton == "우선순위 변경")
+        #expect(PackNoticeCopy.userSlotTitle == "내 채움글 (우선순위)")
+        #expect(PackNoticeCopy.userSlotDetail == "우선순위 표시 전용 · 눌리지 않아요 · 문구는 아래 「내 채움글」 절에서")
         #expect(PackNoticeCopy.enabledValue == "켬" && PackNoticeCopy.disabledValue == "끔")
     }
 
@@ -56,7 +55,8 @@ struct PackImpactCopyTests {
 
     @Test("★ 2-D·2-G — 순서 화면: 제목·버튼·「내 채움글」 줄·꺼진 팩·풋터")
     func orderCopy() {
-        #expect(PackNoticeCopy.orderTitle == "팩 순서")
+        #expect(PackNoticeCopy.orderTitle == "팩 우선순위")
+        #expect(PackChangeNotice.Action.reorderPacks.label == "팩 우선순위 바꾸기")
         #expect(PackNoticeCopy.orderDone == "완료" && PackNoticeCopy.cancel == "취소")
         #expect(PackNoticeCopy.orderUserTitle == "내 채움글")
         #expect(PackNoticeCopy.orderUserDetail(count: 37) == "내가 만든 문구 37개 · 지울 수 없어요")
@@ -210,7 +210,7 @@ struct PackImpactCopyTests {
 var stage3Copy: [String] {
     let lib = library([sajaseongeo, examplePack, company])
     var texts = [
-        PackNoticeCopy.externalSectionTitle, PackNoticeCopy.addPack, PackNoticeCopy.emptyListFooter, PackNoticeCopy.listFooter,
+        PackNoticeCopy.externalSectionTitle, PackNoticeCopy.addPack, PackNoticeCopy.emptyListFooter, PackNoticeCopy.reorderHeaderButton,
         PackNoticeCopy.userSlotTitle, PackNoticeCopy.userSlotDetail, PackNoticeCopy.enabledValue, PackNoticeCopy.disabledValue,
         PackNoticeCopy.orderTitle, PackNoticeCopy.orderDone, PackNoticeCopy.cancel, PackNoticeCopy.orderUserTitle,
         PackNoticeCopy.orderUserDetail(count: 37), PackNoticeCopy.orderFooter,

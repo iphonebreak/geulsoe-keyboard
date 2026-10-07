@@ -18,7 +18,7 @@ let packImportContentTypes: [UTType] = [.commaSeparatedText, .tabSeparatedText, 
 
 // MARK: - 3-A 첫 화면
 
-/// 「외부 채움글 추가」 — 주 버튼 하나(CSV 파일 고르기) · 처음이라면(만드는 법 · 샘플 받기) · 그 밖의 방법(붙여넣기) · 받지 않는 파일 안내
+/// 「외부 채움글 추가」 — 주 버튼 하나(CSV 파일 가져오기) · 처음이라면(만드는 법 · 샘플 받기) · 그 밖의 방법(붙여넣기)
 struct PackImportStartView: View {
     /// 가져오기를 마쳤다(4-M) — 채움글 화면으로 돌아가 그 팩 행을 강조한다(U5). 가져오기 시트가 **닫힌 뒤** 부른다
     let onFinished: @MainActor (_ packID: String) -> Void
@@ -79,9 +79,8 @@ struct PackImportStartView: View {
                 }
             } header: {
                 Text(PackImportCopy.firstTimeHeader)
-            } footer: {
-                Text(PackImportCopy.samplesFooter)
             }
+            // 풋터(「샘플은 가짜 내용이에요 …」)는 뺐다(사장님 실기 2026-10-07)
 
             Section {
                 // xlsx 중심판에만 — 주 버튼이 엑셀이라 CSV를 따로 둔다(CSV 전용판은 nil)
@@ -118,7 +117,10 @@ struct PackImportStartView: View {
             } header: {
                 Text(PackImportCopy.otherWaysHeader)
             } footer: {
-                Text(PackImportCopy.startFooter)
+                // CSV 전용판은 풋터가 없다(「엑셀에서는 …」 통째로 뺐다, 사장님 실기 2026-10-07). xlsx 중심판만 받지 않는 파일 안내
+                if let footer = PackImportCopy.startFooter {
+                    Text(footer)
+                }
             }
         }
         .settingsFormWidth()
@@ -197,22 +199,28 @@ private struct PackSampleRow: View {
 /// 팩 만드는 법 — 글 중심 한 화면(시안 3-B). 시트 그림은 샘플과 같은 가짜 내용(U6). 제목·3절·4절 저장 방법은 판이 바꾼다 —
 /// CSV 전용판의 3절은 PDR 6-7 안내(R20 — 바뀐 값은 파서가 모르므로 안내만)
 struct PackImportGuideView: View {
+    /// 문단 안 줄 간격 — 글 중심 화면인데 기본 행간이 좁아 보였다(사장님 실기 2026-10-07). 본문 크기에 맞춰 늘어 큰 글자에서도 비율이 같다
+    @ScaledMetric(relativeTo: .body) private var lineGap: CGFloat = 4
+    /// 항목(행) 위아래 여백 — 같은 이유. 3절처럼 한 절에 줄이 여럿이면 줄 사이가 이만큼씩 더 벌어진다
+    @ScaledMetric(relativeTo: .body) private var rowGap: CGFloat = 4
+
     var body: some View {
         Form {
             Section {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
                     sheetGrid
                     Text(PackImportCopy.guideColumns)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, rowGap)
             } header: {
                 Text(numbered(1, PackImportCopy.guideHeaderSection))
             }
 
             Section {
                 Text(PackImportCopy.guideMeta)
+                    .padding(.vertical, rowGap)
             } header: {
                 Text(numbered(2, PackImportCopy.guideMetaSection))
             }
@@ -220,6 +228,7 @@ struct PackImportGuideView: View {
             Section {
                 ForEach(PackImportCopy.guideCells, id: \.self) { line in
                     Text(line)
+                        .padding(.vertical, rowGap)
                 }
             } header: {
                 Text(numbered(3, PackImportCopy.guideCellsSection))
@@ -229,10 +238,13 @@ struct PackImportGuideView: View {
 
             Section {
                 Text(PackImportCopy.guideSave)
+                    .padding(.vertical, rowGap)
             } header: {
                 Text(numbered(4, PackImportCopy.guideSaveSection))
             }
         }
+        // 화면 전체(행·머리·풋터)의 여러 줄 글에 — 한 줄짜리(시트 그림 칸)에는 영향이 없다
+        .lineSpacing(lineGap)
         .settingsFormWidth()
         .navigationTitle(PackImportCopy.guideTitle)
         .navigationBarTitleDisplayMode(.inline)
@@ -242,7 +254,7 @@ struct PackImportGuideView: View {
 
     /// 스프레드시트 모양 — 열 머리(A·B·C)와 행 번호, 정보 줄(#…)은 파랑, 머리글 행은 굵게
     private var sheetGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 4) {
+        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
             GridRow {
                 Text(verbatim: "")
                 ForEach(["A", "B", "C"], id: \.self) { column in

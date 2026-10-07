@@ -12,8 +12,8 @@ import TadakDomain
 
 // MARK: - 채움글 화면의 절 (2-B · 2-C)
 
-/// 「외부 채움글」 절 — 내장 팩 바로 아래(U5). 팩이 없으면 추가 줄과 설명만(2-B), 있으면 순서 목록(「내 채움글 (순서)」 줄 포함, U1) ·
-/// 팩 순서 바꾸기 · 추가 줄(2-C). 목록 순서가 곧 우선순위다
+/// 「외부 채움글」 절 — 내장 팩 바로 아래(U5). 팩이 없으면 추가 줄과 설명만(2-B), 있으면 순서 목록(「내 채움글 (우선순위)」 줄 포함, U1) ·
+/// 추가 줄(2-C) + 머리글 오른쪽 끝 「우선순위 변경」. 목록 순서가 곧 우선순위다
 struct ExternalSnippetSection: View {
     let summaries: [PackSummary]
     let order: [SnippetSourceSlot]
@@ -48,7 +48,6 @@ struct ExternalSnippetSection: View {
                         }
                     }
                 }
-                Button(PackChangeNotice.Action.reorderPacks.label, action: onReorder)
             }
             // 가져오기(4·5단계) — 3-A 첫 화면. 끝나면 새 팩이 목록 맨 아래에 강조된다.
             // 색을 직접 준다 — `Label` 버튼은 꺼져도 글자가 검정·아이콘이 파랑으로 남아 켜진 줄처럼 보였다(화면 확인 N-4, S-2 잔여).
@@ -58,10 +57,40 @@ struct ExternalSnippetSection: View {
                     .foregroundStyle(isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
             }
         } header: {
-            Text(PackNoticeCopy.externalSectionTitle)
+            header
         } footer: {
-            Text(PackNoticeCopy.externalSectionFooter(isEmpty: summaries.isEmpty, libraryStatus: libraryStatus))
+            // 팩이 있으면 풋터가 없다(2-C 「위에 있는 줄이 먼저 떠요 …」를 뺐다, 사장님 실기 2026-10-07)
+            if let footer = PackNoticeCopy.externalSectionFooter(isEmpty: summaries.isEmpty, libraryStatus: libraryStatus) {
+                Text(footer)
+            }
         }
+    }
+
+    /// 절 제목 + 오른쪽 끝 「우선순위 변경」(순서 화면) — 예전 목록 끝 「팩 순서 바꾸기」 줄을 대신한다(사장님 실기 2026-10-07, 같은 동작은 한 곳).
+    /// 표시 조건은 그 줄 그대로(팩이 하나라도 있으면 — 「내 채움글」과 순서를 다툰다). 「채움글 사용」을 끄면 절과 함께 흐려진다.
+    /// 큰 글자에서 한 줄에 안 들어가면 버튼을 제목 아래로 내린다(제목이 「외부 / 채움글」로 쪼개지지 않게)
+    @ViewBuilder
+    private var header: some View {
+        if summaries.isEmpty {
+            Text(PackNoticeCopy.externalSectionTitle)
+        } else {
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(PackNoticeCopy.externalSectionTitle)
+                    Spacer(minLength: 8)
+                    reorderButton
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(PackNoticeCopy.externalSectionTitle)
+                    reorderButton
+                }
+            }
+        }
+    }
+
+    private var reorderButton: some View {
+        Button(PackNoticeCopy.reorderHeaderButton, action: onReorder)
+            .buttonStyle(.borderless)
     }
 
     /// 순서 목록 그대로 — 목록에 없는 팩이 있으면(있을 수 없지만) 끝에 붙여 사라지지 않게
@@ -70,7 +99,7 @@ struct ExternalSnippetSection: View {
         return order + summaries.filter { !listed.contains($0.id) }.map { .pack($0.id) }
     }
 
-    /// 「내 채움글 (순서)」 — 눌리지 않는 줄(chevron 없음). 순서는 「팩 순서 바꾸기」에서만, 문구는 아래 「내 채움글」 절에서 고친다.
+    /// 「내 채움글 (우선순위)」 — 눌리지 않는 줄(chevron 없음). 순서는 머리글 「우선순위 변경」에서만, 문구는 아래 「내 채움글」 절에서 고친다.
     /// 끌기 손잡이 모양(`line.3.horizontal`)은 두지 않는다 — 끌리는 줄로 오해했다(실기 지적 2026-10-07). 실제 손잡이는 순서 화면에만
     private var userSlotRow: some View {
         HStack(spacing: 12) {
@@ -287,7 +316,7 @@ struct ExternalPackDetailView: View {
     private func name(_ detail: PackDetail) -> String { detail.summary.name ?? PackNoticeCopy.unnamedPack }
 
     /// 켬/끔 — 내장 팩 스위치와 같은 길(`PackStoreClient` → `PackStore` 커밋 게이트, AC-6). 받으면 다시 읽고, 거부되면 스위치는 제자리로
-    /// 돌아가고 사유별로 알린다(C1 「팩 순서 바꾸기」 · C2 · C2b 「정리하기」 · E2 「지우기」). 저장하는 동안 다시 누르면 무시한다
+    /// 돌아가고 사유별로 알린다(C1 「팩 우선순위 바꾸기」 · C2 · C2b 「정리하기」 · E2 「지우기」). 저장하는 동안 다시 누르면 무시한다
     private func enabledBinding(_ detail: PackDetail) -> Binding<Bool> {
         Binding(
             get: { pendingEnabled ?? detail.summary.isEnabled },
@@ -326,7 +355,7 @@ struct ExternalPackDetailView: View {
         }
     }
 
-    /// 알림 버튼 — 팩 순서 바꾸기(C1) · 지우기(E2 — 2-F 확인을 한 번 더 받는다) · 정리하기(C2b) · 목록 복구(E1)
+    /// 알림 버튼 — 팩 우선순위 바꾸기(C1) · 지우기(E2 — 2-F 확인을 한 번 더 받는다) · 정리하기(C2b) · 목록 복구(E1)
     private func perform(_ action: PackChangeNotice.Action) {
         switch action {
         case .reorderPacks: showsOrder = true
@@ -351,7 +380,7 @@ struct ExternalPackDetailView: View {
 
 // MARK: - 순서 화면 (2-D · 2-G)
 
-/// 팩 순서 바꾸기(U4) — 끌어서 바꾸고, 「내 채움글」 줄도 끈다(U1). 완료 전에 바꾸면 무엇이 달라지는지(G3 `PackImpact`)를 주황 줄로 보인다 —
+/// 팩 우선순위 바꾸기(U4, 시트 제목 「팩 우선순위」) — 끌어서 바꾸고, 「내 채움글」 줄도 끈다(U1). 완료 전에 바꾸면 무엇이 달라지는지(G3 `PackImpact`)를 주황 줄로 보인다 —
 /// 쉬게 될 팩(㉤) · 틀 주인(10-4 ③) · 단축어 주인(2-G). **완료는 막지 않는다**(한도 감소 방향이라 거부가 없다, 9-1).
 /// 삭제는 이 화면에 두지 않는다 — 팩 상세 한 길(2-F 확인)
 struct PackOrderView: View {

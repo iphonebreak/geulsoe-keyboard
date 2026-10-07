@@ -124,7 +124,6 @@ struct PackSampleShareTests {
         #expect(PackImportCopy.sampleTitle(.numbered) == "번호형 샘플" && PackImportCopy.sampleTitle(.phrases) == "문구형 샘플")
         #expect(PackImportCopy.sampleDetail(.numbered) == "사자성어·상용 영어처럼 번호로 고르는 자료")
         #expect(PackImportCopy.sampleDetail(.phrases) == "단축어를 치면 문구가 떠요")
-        #expect(PackImportCopy.samplesFooter == "샘플은 가짜 내용이에요. 열어서 내용만 바꿔 저장하면 팩이 돼요.")
         #expect(PackImportCopy.sampleFormatLabel(.csv) == "CSV" && PackImportCopy.sampleFormatLabel(.xlsx) == "엑셀")
         #expect(PackImportCopy.sampleShareLabel(csvFile(.numbered)) == "번호형 샘플 CSV 받기")
     }

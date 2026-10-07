@@ -159,14 +159,14 @@ struct UsageExampleTests {
 @Suite("화면 확인 O-2 — 목록 손상 동안 「외부 채움글」 절은 빈 상태가 아니라 손상 한 줄")
 struct ExternalSectionFooterTests {
 
-    @Test("읽히지 않는 세 상태 → 손상 한 줄(팩 유무와 무관) · 읽히면 2-B/2-C", arguments: [
-        (true, PackLibraryStatus.readable, PackNoticeCopy.emptyListFooter),
-        (false, .readable, PackNoticeCopy.listFooter),
+    @Test("읽히지 않는 세 상태 → 손상 한 줄(팩 유무와 무관) · 읽히면 2-B 빈 상태 / 2-C는 풋터 없음(사장님 실기 2026-10-07)", arguments: [
+        (true, PackLibraryStatus.readable, PackNoticeCopy.emptyListFooter as String?),
+        (false, .readable, nil),
         (true, .unreadable, PackNoticeCopy.unreadableListFooter),
         (true, .corrupt, PackNoticeCopy.unreadableListFooter),
         (false, .unknownSchema, PackNoticeCopy.unreadableListFooter)
     ])
-    func footer(isEmpty: Bool, status: PackLibraryStatus, expected: String) {
+    func footer(isEmpty: Bool, status: PackLibraryStatus, expected: String?) {
         #expect(PackNoticeCopy.externalSectionFooter(isEmpty: isEmpty, libraryStatus: status) == expected)
     }
 

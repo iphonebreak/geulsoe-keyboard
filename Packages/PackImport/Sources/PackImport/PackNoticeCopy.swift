@@ -164,20 +164,21 @@ public enum PackNoticeCopy {
     public static var emptyListFooter: String {
         PackCopySet.current.lines.listIntro + " 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요."
     }
-    /// 2-C 팩이 있을 때
-    public static let listFooter = "위에 있는 줄이 먼저 떠요 — 같은 문구 단축어는 위 줄이, 같은 단축어 틀은 위 팩이 가져요. 「내 채움글」도 이 순서에 들어가요.\n"
-        + "한도는 외부 팩만 위에서부터 채워요(내 채움글은 늘 써요). 가져온 팩은 이 기기에만 저장돼요."
     /// 목록이 손상된 동안 — 빈 상태(2-B) 문구는 「팩이 없다」로 읽혀 헷갈린다(화면 확인 O-2). 위 배너(㉡)가 복구 길을 준다
     public static let unreadableListFooter = "외부 채움글 목록을 읽을 수 없어요. 위에서 목록을 복구해 주세요."
 
-    /// 「외부 채움글」 절 풋터 — 목록을 못 읽으면 손상 한 줄, 팩이 없으면 2-B 빈 상태, 있으면 2-C
-    public static func externalSectionFooter(isEmpty: Bool, libraryStatus: PackLibraryStatus) -> String {
+    /// 「외부 채움글」 절 풋터 — 목록을 못 읽으면 손상 한 줄, 팩이 없으면 2-B 빈 상태, 있으면 **없다**(nil). 2-C 「위에 있는 줄이 먼저 떠요 …」
+    /// 풋터는 뺐다(사장님 실기 2026-10-07) — 순서가 곧 우선순위라는 것은 머리글 버튼 「우선순위 변경」과 「내 채움글 (우선순위)」 줄이 말한다
+    public static func externalSectionFooter(isEmpty: Bool, libraryStatus: PackLibraryStatus) -> String? {
         if libraryStatus.needsRecovery { return unreadableListFooter }
-        return isEmpty ? emptyListFooter : listFooter
+        return isEmpty ? emptyListFooter : nil
     }
-    /// 순서 목록의 「내 채움글」 줄(U1) — 아래 「내 채움글」 절과 헷갈리지 않게 「(순서)」
-    public static let userSlotTitle = "내 채움글 (순서)"
-    public static let userSlotDetail = "순서 표시 전용 · 눌리지 않아요 · 문구는 아래 「내 채움글」 절에서"
+    /// 「외부 채움글」 절 머리글 오른쪽 끝 버튼 — 순서 화면(2-D)을 연다. 팩이 있을 때만(예전 목록 끝 「팩 순서 바꾸기」 줄과 같은 조건 —
+    /// 그 줄은 이 버튼으로 대신했다, 사장님 실기 2026-10-07). 알림·팩 상세의 버튼은 `label(.reorderPacks)` 「팩 우선순위 바꾸기」
+    public static let reorderHeaderButton = "우선순위 변경"
+    /// 순서 목록의 「내 채움글」 줄(U1) — 아래 「내 채움글」 절과 헷갈리지 않게 「(우선순위)」(2026-10-07 「순서」 → 「우선순위」 용어 통일)
+    public static let userSlotTitle = "내 채움글 (우선순위)"
+    public static let userSlotDetail = "우선순위 표시 전용 · 눌리지 않아요 · 문구는 아래 「내 채움글」 절에서"
     /// 행 값 — 사용자가 켰나(쉬는 중이어도 켬, 쉬는 이유는 `statusLine`)
     public static let enabledValue = "켬"
     public static let disabledValue = "끔"
@@ -197,10 +198,11 @@ public enum PackNoticeCopy {
 
     // MARK: 순서 화면 (2-D·2-G)
 
-    public static let orderTitle = "팩 순서"
+    /// 순서 시트 제목 — 「팩 순서」 → 「팩 우선순위」(사장님 실기 2026-10-07)
+    public static let orderTitle = "팩 우선순위"
     public static let orderDone = "완료"
     public static let cancel = "취소"
-    /// 이 화면엔 아래 「내 채움글」 절이 없어 「(순서)」를 붙이지 않는다(시안 2-D)
+    /// 이 화면엔 아래 「내 채움글」 절이 없어 「(우선순위)」를 붙이지 않는다(시안 2-D)
     public static let orderUserTitle = "내 채움글"
 
     public static func orderUserDetail(count: Int) -> String {
@@ -399,7 +401,7 @@ public enum PackNoticeCopy {
         case .close: "닫기"
         case .organize: "정리하기"
         case .importDisabled: "꺼 둔 채로 가져오기"
-        case .reorderPacks: "팩 순서 바꾸기"
+        case .reorderPacks: "팩 우선순위 바꾸기"
         case .recoverLibrary: "목록 복구"
         case .deletePack: "지우기"
         }

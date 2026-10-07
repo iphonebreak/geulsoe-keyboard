@@ -75,7 +75,7 @@ struct SnippetSettingsView: View {
             }
             .disabled(!settings.snippetsEnabled)
 
-            // 외부 채움글 — 내장 팩 바로 아래(U5). 순서 목록·팩 상세·순서 바꾸기는 `ExternalPackViews.swift`
+            // 외부 채움글 — 내장 팩 바로 아래(U5). 순서 목록·팩 상세·우선순위 바꾸기(머리글 버튼)는 `ExternalPackViews.swift`
             ExternalSnippetSection(summaries: packSummaries, order: packOrder, libraryStatus: libraryStatus,
                                    highlightedPackID: highlightedPackID,
                                    onReorder: { showsOrder = true }, onAdd: { showsImport = true },
@@ -203,7 +203,7 @@ struct SnippetSettingsView: View {
         }
     }
 
-    /// 알림 버튼 — 정리하기는 정리 화면, 목록 복구는 확인 시트(2단계), 팩 순서 바꾸기는 순서 화면(3단계)
+    /// 알림 버튼 — 정리하기는 정리 화면, 목록 복구는 확인 시트(2단계), 팩 우선순위 바꾸기는 순서 화면(3단계)
     private func perform(_ action: PackChangeNotice.Action) {
         switch action {
         case .organize: showsCleanup = true

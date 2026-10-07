@@ -78,7 +78,7 @@ private let table: [NoticeTableRow] = [
         result: rejected(.gate(.displacesPacks(["p2"]))), reason: .enableDisplacesPacks,
         title: "켤 수 없어요",
         message: "켜면 이 팩보다 아래에 있는 「회사 상용구」가 한도 밖으로 밀려요. 먼저 다른 팩을 끄거나 순서를 바꿔 주세요.",
-        buttons: ["팩 순서 바꾸기", "확인"]),
+        buttons: ["팩 우선순위 바꾸기", "확인"]),
     NoticeTableRow(id: "C2 외부 팩 켜기 — 자기 자신이 한도 밖", operation: .enablePack,
         result: rejected(.gate(.packExcluded(id: "p1", dimensions: [.needleChars]))), reason: .enableExceedsLimit,
         title: "켤 수 없어요",

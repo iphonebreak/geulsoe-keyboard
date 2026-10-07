@@ -29,6 +29,7 @@ struct ToolbarTab: View {
             Form {
                 toolsSection
                 suggestionSection   // 추천단어·채움글이 클립보드보다 자주 손대는 설정 (사용자 요청 2026-09-08)
+                snippetSection      // 「추천과 채움글」 한 절을 둘로 나눴다 — 순서는 그대로 (사장님 실기 2026-10-07)
                 clipboardSection    // 전체 접근 안내를 이 절로 **합쳤다** (사용자 요청 2026-09-15)
             }
             .settingsFormWidth()
@@ -376,19 +377,26 @@ struct ToolbarTab: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // 「복사한 인증번호 제안」 토글은 **클립보드 절로 옮겼다** (2026-09-15).
+            // 여기 있던 푸터가 **사라진 「전체 접근」 헤더를 가리키고 있었고**(반론자 R-1),
+            // 그 토글은 클립보드 기록과 **같은 권한 하나**에 묶여 있어 같은 절이 맞다.
+        } header: {
+            Text("추천")
+        } footer: {
+            Text("학습은 기기 안에서만 해요.")
+        }
+    }
 
+    /// 채움글 — 예전 「추천과 채움글」 절의 마지막 줄을 따로 뗐다(사장님 실기 2026-10-07). 풋터 「학습은 …」은 추천 절 몫이라 여기엔 없다
+    private var snippetSection: some View {
+        Section {
             NavigationLink {
                 SnippetSettingsView(settings: $settings)
             } label: {
                 LabeledContent("채움글", value: settings.snippetsEnabled ? "켬" : "끔")
             }
-            // 「복사한 인증번호 제안」 토글은 **클립보드 절로 옮겼다** (2026-09-15).
-            // 여기 있던 푸터가 **사라진 「전체 접근」 헤더를 가리키고 있었고**(반론자 R-1),
-            // 그 토글은 클립보드 기록과 **같은 권한 하나**에 묶여 있어 같은 절이 맞다.
         } header: {
-            Text("추천과 채움글")
-        } footer: {
-            Text("학습은 기기 안에서만 해요.")
+            Text("채움글")
         }
     }
 

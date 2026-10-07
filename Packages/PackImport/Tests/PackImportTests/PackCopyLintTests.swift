@@ -78,7 +78,7 @@ enum PackCopyLint {
 
 /// 6단계 문구 — 3-A 「처음이라면」 샘플 줄·3-C 공유 파일 이름 · xlsx판의 「그 밖의 방법」 파일 줄(지금 판으로)
 var stage6Copy: [String] {
-    var texts = [PackImportCopy.samplesFooter]
+    var texts: [String] = []   // 「처음이라면」 풋터(샘플 안내)는 뺐다(사장님 실기 2026-10-07)
     for kind in PackSample.Kind.allCases {
         texts += [PackImportCopy.sampleTitle(kind), PackImportCopy.sampleDetail(kind)]
         texts += PackSample.files(kind).flatMap { [PackImportCopy.sampleFormatLabel($0.format), PackImportCopy.sampleShareLabel($0), $0.displayName] }
@@ -323,7 +323,7 @@ struct PackCopyLintTests {
     func xlsxSetIsCaught() {
         PackCopySet.$previewing.withValue(.xlsx) {
             for text in [PackImportCopy.heroTitle, PackImportCopy.heroMessage, PackImportCopy.pickFile, PackImportCopy.guideTitle,
-                         PackImportCopy.startFooter, PackImportCopy.guideSave, PackImportCopy.guideCellsFooter, PackNoticeCopy.emptyListFooter,
+                         PackImportCopy.startFooter ?? "", PackImportCopy.guideSave, PackImportCopy.guideCellsFooter, PackNoticeCopy.emptyListFooter,
                          PackImportCopy.sampleFormatLabel(.xlsx), PackSample.File(kind: .numbered, format: .xlsx).displayName] {
                 #expect(!PackCopyLint.xlsxMentions(in: text).isEmpty, "\(text)")
             }

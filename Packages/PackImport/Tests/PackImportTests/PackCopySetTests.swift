@@ -13,10 +13,10 @@ var setDependentCopy: [String] {
         PackNoticeCopy.emptyListFooter,                                   // 2-B 절 설명
         PackImportCopy.heroTitle, PackImportCopy.heroMessage, PackImportCopy.pickFile,   // 3-A 주 버튼
         PackImportCopy.guideTitle,                                        // 3-A·3-B·4-G 만드는 법
-        PackImportCopy.startFooter,                                       // 3-A 받지 않는 형식
         PackImportCopy.guideCellsSection, PackImportCopy.guideCellsFooter, PackImportCopy.guideSave   // 3-B 3·4절
     ]
     texts += PackImportCopy.guideCells
+    if let footer = PackImportCopy.startFooter { texts.append(footer) }   // 3-A 받지 않는 형식(xlsx판만 — CSV판은 풋터 없음)
     if let row = PackImportCopy.otherFileRow { texts += [row.title, row.detail] }   // 3-A 그 밖의 방법(xlsx판만)
     for kind in PackSample.Kind.allCases {                                // 3-A·3-C 샘플(판마다 형식)
         texts += PackSample.files(kind).flatMap { [PackImportCopy.sampleFormatLabel($0.format), PackImportCopy.sampleShareLabel($0), $0.displayName] }
@@ -52,12 +52,11 @@ struct PackCopySetTests {
                     == "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
             #expect(PackImportCopy.heroTitle == "CSV 파일 가져오기")
             #expect(PackImportCopy.heroMessage == "첫 줄에 머리글이 있는 CSV 파일을 골라요. UTF-8을 권해요.\n번호형(사자성어 12번처럼)·문구형(단축어 → 문구) 둘 다 돼요.")
-            #expect(PackImportCopy.pickFile == "CSV 파일 고르기")
+            #expect(PackImportCopy.pickFile == "CSV 파일 가져오기")   // 「고르기」 → 「가져오기」(사장님 실기 2026-10-07)
             #expect(PackImportCopy.guideTitle == "CSV로 팩 만드는 법")
             #expect(PackImportCopy.otherFileRow == nil)
-            #expect(PackImportCopy.startFooter
-                    == "엑셀에서는 「CSV UTF-8」로 저장하고, Numbers·구글 시트는 CSV로 내보낸 뒤 가져와요. CSV가 아닌 파일(Numbers 파일, .json 등)은 받지 않아요."
-                    + "\n\n가져온 팩은 이 기기에만 저장되고, 파일 내용은 어디에도 보내지 않아요.")
+            // 「엑셀에서는 …」 풋터를 개인정보 한 줄까지 통째로 뺐다(사장님 실기 2026-10-07)
+            #expect(PackImportCopy.startFooter == nil)
             #expect(PackImportCopy.guideCellsSection == "모양이 바뀌기 쉬운 칸")
             #expect(PackImportCopy.guideCells == [
                 "숫자·날짜처럼 보이는 글(예: 007, 1-2) → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요. 그렇지 않으면 CSV에 바뀐 모양으로 저장돼요.",
@@ -66,7 +65,7 @@ struct PackCopySetTests {
             #expect(PackImportCopy.guideCellsFooter == "가져오기 미리보기에서 처음 몇 개를 확인해 주세요.")
             #expect(PackImportCopy.guideSave == "파일 ▸ 다른 이름으로 저장 ▸ 「CSV UTF-8」이 든 항목(예: CSV UTF-8(쉼표로 분리))을 골라요. "
                     + "「쉼표로 구분된 값」처럼 UTF-8이 없는 항목도 가져올 수 있지만 일부 기호가 바뀔 수 있어요. 쉼표·세미콜론·탭 모두 알아서 읽어요. "
-                    + "파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「CSV 파일 고르기」를 눌러요.")
+                    + "파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「CSV 파일 가져오기」를 눌러요.")
             #expect(PackSample.files(.numbered).map(\.format) == [.csv])
             #expect(PackSample.files(.phrases).map(\.format) == [.csv])
         }
@@ -84,8 +83,7 @@ struct PackCopySetTests {
             #expect(PackImportCopy.otherFileRow == PackCopySet.Row(title: "CSV 파일 가져오기", detail: "구글 시트·Numbers·메모장에서 만든 CSV도 돼요"))
             #expect(PackImportCopy.startFooter
                     == "받지 않는 파일: Numbers 파일(.numbers), 옛 엑셀(.xls), 매크로가 든 엑셀(.xlsm·.xlsb), 비밀번호가 걸린 엑셀, .json — "
-                    + "엑셀에서 「Excel 통합 문서(.xlsx)」나 「CSV UTF-8」로 다시 저장해 주세요."
-                    + "\n\n가져온 팩은 이 기기에만 저장되고, 파일 내용은 어디에도 보내지 않아요.")
+                    + "엑셀에서 「Excel 통합 문서(.xlsx)」나 「CSV UTF-8」로 다시 저장해 주세요.")   // 뒤 개인정보 한 줄은 뺐다(2026-10-07)
             #expect(PackImportCopy.guideCellsSection == "이런 칸은 건너뛰어요")
             #expect(PackImportCopy.guideCells == [
                 "수식 → 「값만 붙여넣기」로 바꿔 주세요",

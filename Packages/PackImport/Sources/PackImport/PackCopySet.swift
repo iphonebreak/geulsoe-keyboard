@@ -52,8 +52,9 @@ public enum PackCopySet: String, CaseIterable, Sendable {
         let guideTitle: String
         /// 3-A 「그 밖의 방법」의 파일 줄 — 주 버튼이 엑셀인 xlsx판에만 있다(CSV를 숨기지 않는다, 3-1)
         let otherFileRow: Row?
-        /// 3-A 바닥 — 받지 않는 파일(뒤의 「이 기기에만 저장」 문단은 공유)
-        let unsupportedFiles: String
+        /// 3-A 바닥 — 받지 않는 파일. CSV 전용판은 없다 — 「붙여넣기로 가져오기」 아래 「엑셀에서는 …」 풋터를 통째로 뺐다
+        /// (사장님 실기 2026-10-07). 저장 방법은 3-B 4절이 말한다
+        let unsupportedFiles: String?
         /// 3-A 샘플 알약 — 종류마다 이 순서로(시안 3-A [엑셀][CSV]). xlsx 샘플 파일은 1-e 번들 리소스다
         let sampleFormats: [PackSample.Format]
         /// 3-B 3절 — 제목 · 줄 · 풋터
@@ -76,10 +77,10 @@ extension PackCopySet.Lines {
         listIntro: "CSV 파일로 만든 채움글 묶음(팩)을 가져와요.",
         heroTitle: "CSV 파일 가져오기",
         heroLead: "첫 줄에 머리글이 있는 CSV 파일을 골라요. UTF-8을 권해요.",
-        pickFile: "CSV 파일 고르기",
+        pickFile: "CSV 파일 가져오기",
         guideTitle: "CSV로 팩 만드는 법",
         otherFileRow: nil,
-        unsupportedFiles: "엑셀에서는 「CSV UTF-8」로 저장하고, Numbers·구글 시트는 CSV로 내보낸 뒤 가져와요. CSV가 아닌 파일(Numbers 파일, .json 등)은 받지 않아요.",
+        unsupportedFiles: nil,
         sampleFormats: [.csv],
         guideCellsSection: "모양이 바뀌기 쉬운 칸",
         guideCells: [
