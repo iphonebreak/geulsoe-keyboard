@@ -388,7 +388,8 @@ struct ToolbarTab: View {
         }
     }
 
-    /// 채움글 — 예전 「추천과 채움글」 절의 마지막 줄을 따로 뗐다(사장님 실기 2026-10-07). 풋터 「학습은 …」은 추천 절 몫이라 여기엔 없다
+    /// 채움글 — 예전 「추천과 채움글」 절의 마지막 줄을 따로 뗐다(사장님 실기 2026-10-07). 풋터 「학습은 …」은 추천 절 몫이라 여기엔 없다.
+    /// 머리는 두지 않는다 — 줄 이름이 이미 「채움글」이라 머리까지 두면 같은 말이 두 번 보인다(검증 O3). 영역은 절 경계로 나뉜다
     private var snippetSection: some View {
         Section {
             NavigationLink {
@@ -396,8 +397,8 @@ struct ToolbarTab: View {
             } label: {
                 LabeledContent("채움글", value: settings.snippetsEnabled ? "켬" : "끔")
             }
-        } header: {
-            Text("채움글")
+            // UI 하네스(`GlassThemeDeviceTests.testSnippetIntroCard`)가 이 줄을 집는 이름 — 라벨로 찾으면 다른 「채움글…」 요소가 먼저 잡힐 수 있다(검증 L3)
+            .accessibilityIdentifier("toolbar.snippetsRow")
         }
     }
 

@@ -1847,5 +1847,12 @@ struct PackImpactStoreTests {
         try removePackFiles(h, of: unreadable)
         #expect(h.store.packEntries(unreadable) == nil)
         #expect(h.store.packEntries("없는 팩") == nil)
+
+        // 파일은 디코드되지만 내용 검사(G6)에 걸린 변환본 — 변환본을 여는 것만으로는 nil이 되지 않아 「읽을 수 없는 팩」 검사가 따로 막는다(검증 M21)
+        let broken = try h.importedID(h.store.importPack(pack("상용 영어", chars: 10), source: .csv))
+        try overwritePackFile(h, of: broken, with: BrokenContent.overFieldLimit.data(id: broken))
+        h.store.maintain()
+        #expect(h.store.packDetail(broken)?.summary.status == .unavailable, "준비 — 앱 실행 검사가 읽을 수 없는 팩으로 남겼다")
+        #expect(h.store.packEntries(broken) == nil)
     }
 }

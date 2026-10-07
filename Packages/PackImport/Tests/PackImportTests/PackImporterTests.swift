@@ -147,13 +147,15 @@ struct HeaderMetaTests {
         #expect(draft.meta.issues.isEmpty)
     }
 
-    /// 둘 다 있으면 **같은 칸이 두 번** — 중복 메타 규칙(5-3 「뒤 값이 표시를 바꿔치기하지 못하게」) 그대로 전체 거부. 위치는 두 번째 줄
+    /// 둘 다 있으면 **같은 칸이 두 번** — 중복 메타 규칙(5-3 「뒤 값이 표시를 바꿔치기하지 못하게」) 그대로 전체 거부. 위치는 두 번째 줄.
+    /// 키가 다르면(`#출처`+`#권리`) 사유가 따로다 — 문구가 두 키를 함께 말해야 사용자가 「두 번」을 찾는다(검증 O1)
     @Test("★ R27 — `#출처`와 `#권리`가 함께 있으면 같은 칸이 두 번(중복 메타) → 전체 거부, 순서와 상관없다", arguments: [
-        ("#출처", "#권리"), ("#권리", "#출처"), ("#출처", "#출처"), ("#권리", "#권리")
+        ("#출처", "#권리", true), ("#권리", "#출처", true), ("#출처", "#출처", false), ("#권리", "#권리", false)
     ])
-    func sourceAndLegacyTogetherIsDuplicate(first: String, second: String) {
+    func sourceAndLegacyTogetherIsDuplicate(first: String, second: String, mixedKeys: Bool) {
         let text = "#이름,예시 팩\r\n\(first),가\r\n\(second),나\r\n단축어,본문\r\n인사,안녕하세요"
-        #expect(throws: PackImportFailure.duplicateMeta(record: 3, line: 3)) { try PackImporter.read(text: text) }
+        let expected: PackImportFailure = mixedKeys ? .duplicateSourceMeta(record: 3, line: 3) : .duplicateMeta(record: 3, line: 3)
+        #expect(throws: expected) { try PackImporter.read(text: text) }
     }
 
     @Test("R27 — `#출처`도 값 하나, 상한(120자)을 넘으면 거부하지 않고 미리 채우지 않는다(5-4 ⑧)")

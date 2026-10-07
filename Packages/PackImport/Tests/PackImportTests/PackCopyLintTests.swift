@@ -11,7 +11,8 @@ import TadakDomain
 // - **U6**(PDR E표): 화면 문구·샘플·`#` 예시에 교회·성경 소재 0. 예외는 `PackCopyLint.churchExceptions`에 **정확한 문자열로만** 둔다
 // - 금칙어: 「트리거」(용어는 「단축어」) · 「잠시 뒤」(틀린 안내, 계획서 4-2절)
 // - **R27**(PDR 결정 표, 2026-10-07): 외부 채움글 화면·샘플에 「권리」 0 — 보이는 이름은 「출처」다(코드 식별자 `license`는 그대로).
-//   앱 전체에는 「권리 표기」 0(처리방침의 가져온 팩 문장 포함). 옛 `#권리`는 **읽기만** 받는다(파서 별칭 — 안내·샘플에 쓰지 않는다)
+//   앱 전체에는 「권리 표기」 0(처리방침의 가져온 팩 문장 포함). 옛 `#권리`는 **읽기만** 받는다(파서 별칭 — 안내·샘플에 쓰지 않는다).
+//   예외는 `PackCopyLint.retiredExceptions`에 **정확한 문자열로만** 둔다 — `#출처`와 `#권리`가 함께 있을 때의 거부 이유 하나(검증 O1)
 // 숫자 검사(예산 한도 숫자 0)는 단계마다 허용 목록이 달라 각 단계 시험에 남아 있다.
 
 // MARK: - 규칙
@@ -39,7 +40,14 @@ enum PackCopyLint {
     /// R27 — 앱 전체(처리방침 포함)에서 물러난 말
     static let retiredAppPhrases = ["권리 표기"]
 
-    static func retiredWords(in text: String) -> [String] { retiredWords.filter(text.contains) }
+    /// R27 예외 — **정확히 이 문자열만**. 파일에 `#출처`와 옛 `#권리`가 함께 있을 때의 거부 이유라, 파일에 실제로 쓰인 옛 키를 말해야
+    /// 사용자가 무엇이 두 번인지 찾는다(검증 O1). 안내·샘플에서 옛 키를 권하는 문구가 아니다
+    static var retiredExceptions: [String] { [PackImportCopy.failureMessage(.structural(.duplicateSourceMeta(record: 1, line: 1)), source: .file)] }
+
+    static func retiredWords(in text: String) -> [String] {
+        guard !retiredExceptions.contains(text) else { return [] }
+        return retiredWords.filter(text.contains)
+    }
 
     /// AC-35 — xlsx **형식** 이름(확장자 xls·xlsx·xlsm·xlsb — 점이 없어도·「통합 문서」·Excel·workbook·워크북)과, 엑셀을 **가져오는 대상**으로
     /// 가리키는 말(「엑셀 파일」·「엑셀로」·알약 「엑셀」·「엑셀·CSV 파일」). 엑셀은 **CSV를 만드는 곳**으로만 허용한다 — 「엑셀」(또는
@@ -359,6 +367,18 @@ struct PackCopyLintTests {
         let texts = PackCopySet.$previewing.withValue(set, operation: { allScreenCopy })
         #expect(texts.contains { $0.contains("출처") }, "검사가 실제 출처 문구를 돈다")
         for text in texts { #expect(PackCopyLint.retiredWords(in: text).isEmpty, "\(text)") }
+    }
+
+    @Test("R27 예외는 그 문자열 하나뿐이고 낡지 않았다 — 실제로 화면에 나가고(파일·붙여넣기 둘 다), 「권리」를 품고 있어 예외가 아니면 걸린다")
+    func retiredExceptionIsLive() {
+        #expect(PackCopyLint.retiredExceptions == ["「#출처」와 「#권리」는 같은 정보 줄이에요. 하나만 남겨 주세요."])
+        for exception in PackCopyLint.retiredExceptions {
+            #expect(allScreenCopy.contains(exception))
+            #expect(PackImportCopy.failureMessage(.structural(.duplicateSourceMeta(record: 1, line: 1)), source: .paste) == exception)
+            #expect(PackCopyLint.retiredWords.contains(where: exception.contains))
+            #expect(PackCopyLint.retiredWords(in: exception).isEmpty)
+            #expect(PackCopyLint.retiredWords(in: exception + " 「#권리」") == ["권리"], "같은 낱말이 다른 문장에 들면 걸린다")
+        }
     }
 
     @Test("★ R27 — 앱 소스: 외부 채움글 화면 파일 리터럴에 「권리」 0, 앱 전체(처리방침 포함)에 「권리 표기」 0")

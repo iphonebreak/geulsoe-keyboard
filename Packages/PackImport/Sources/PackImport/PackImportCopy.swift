@@ -463,6 +463,9 @@ public enum PackImportCopy {
             "「#이름」 같은 정보 줄은 머리글 위에 있어야 해요. 정렬하다 아래로 내려갔는지 확인해 주세요."
         case .duplicateMeta:
             "같은 정보 줄(#이름·#틀·#출처)이 두 번 있어요. 하나만 남겨 주세요."
+        case .duplicateSourceMeta:
+            // 옛 키 이름을 말하는 유일한 문구 — 파일에 실제로 쓰인 글자라야 찾는다(R27 lint 예외, `PackCopyLint.retiredExceptions`)
+            "「#출처」와 「#권리」는 같은 정보 줄이에요. 하나만 남겨 주세요."
         case .unknownMeta:
             "모르는 정보 줄(#…)이 있어요. 정보 줄은 「#이름」·「#틀」·「#출처」만 쓸 수 있어요."
         case .unsupportedEscapeMeta:
@@ -498,7 +501,7 @@ public enum PackImportCopy {
         guard case .structural(let failure) = problem else { return false }
         switch failure {
         case .quote, .columnCountMismatch, .headerNotRecognized, .duplicateHeader, .duplicateHeaderAlias, .mixedModeHeader,
-             .missingRequiredColumn, .tooManyColumns, .metaAfterHeader, .duplicateMeta, .unknownMeta, .unsupportedEscapeMeta,
+             .missingRequiredColumn, .tooManyColumns, .metaAfterHeader, .duplicateMeta, .duplicateSourceMeta, .unknownMeta, .unsupportedEscapeMeta,
              .metaValueCount, .metaTooManyCells, .templateInPhrasesMode:
             return true
         case .fileTooLarge, .emptyFile, .unsupportedEncoding, .invalidUTF8AfterBOM, .invalidUTF16, .encodingDoesNotMatchBOM,

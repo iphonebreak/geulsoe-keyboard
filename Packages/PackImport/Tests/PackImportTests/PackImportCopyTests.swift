@@ -15,7 +15,7 @@ private func exhaustive(_ failure: PackImportFailure) {
     switch failure {
     case .fileTooLarge, .emptyFile, .unsupportedEncoding, .invalidUTF8AfterBOM, .invalidUTF16, .encodingDoesNotMatchBOM, .undecodable,
          .quote, .tooManyLines, .tooManyRecords, .headerNotRecognized, .columnCountMismatch, .duplicateHeader, .duplicateHeaderAlias,
-         .mixedModeHeader, .missingRequiredColumn, .tooManyColumns, .metaAfterHeader, .duplicateMeta, .unknownMeta,
+         .mixedModeHeader, .missingRequiredColumn, .tooManyColumns, .metaAfterHeader, .duplicateMeta, .duplicateSourceMeta, .unknownMeta,
          .unsupportedEscapeMeta, .metaValueCount, .metaTooManyCells, .templateInPhrasesMode:
         break
     }
@@ -53,6 +53,7 @@ private let failureTable: [(PackImportFailure, String)] = [
     (.tooManyColumns, "칸이 너무 많아요. 필요한 칸만 남겨 주세요."),
     (.metaAfterHeader(record: 12, line: 40), "「#이름」 같은 정보 줄은 머리글 위에 있어야 해요. 정렬하다 아래로 내려갔는지 확인해 주세요."),
     (.duplicateMeta(record: 12, line: 40), "같은 정보 줄(#이름·#틀·#출처)이 두 번 있어요. 하나만 남겨 주세요."),
+    (.duplicateSourceMeta(record: 12, line: 40), "「#출처」와 「#권리」는 같은 정보 줄이에요. 하나만 남겨 주세요."),
     (.unknownMeta(record: 12, line: 40), "모르는 정보 줄(#…)이 있어요. 정보 줄은 「#이름」·「#틀」·「#출처」만 쓸 수 있어요."),
     (.unsupportedEscapeMeta(record: 12, line: 40), "「#escape」 줄은 아직 쓸 수 없어요. 그 줄을 지우고 다시 가져와 주세요."),
     (.metaValueCount(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~8개예요."),

@@ -52,7 +52,8 @@ public enum MetaIssue: Equatable, Sendable {
 }
 
 /// 머리글 위 정보 줄(`#` 메타, 5-3)의 칸 — 키 글자는 `field(forKey:)` **한 곳**에서 읽는다(파서·글자 확인 표본이 같이 쓴다).
-/// 출처 칸의 키는 `#출처`이고 옛 `#권리`도 같은 칸이다(R27 — 이미 받은 샘플·옛 파일 호환). 둘이 함께 있으면 같은 칸이 두 번이라 중복 메타다.
+/// 출처 칸의 키는 `#출처`이고 옛 `#권리`도 같은 칸이다(R27 — 이미 받은 샘플·옛 파일 호환). 둘이 함께 있으면 같은 칸이 두 번이라 중복 메타다
+/// (`duplicateSourceMeta` — 문구가 두 키를 함께 말한다).
 /// 코드 식별자는 `license` 그대로다(보이는 글자만 「출처」 — 글쇠·단축어 원칙과 같다)
 public enum PackMetaField: Hashable, Sendable, CaseIterable {
     /// `#이름`
@@ -356,7 +357,7 @@ enum PackRecordReader {
     /// 본 판정 — 구조 오류는 throw, 행 오류는 건너뜀
     static func read(_ records: [CSVRecord], delimiter: CSVDelimiter) throws(PackImportFailure) -> PackDraft {
         var meta = PackMetaPrefill(name: nil, license: nil, templateSpecs: [], issues: [])
-        var seenMeta = Set<PackMetaField>()
+        var seenMeta: [PackMetaField: String] = [:]
         var header: Header?
         var rows = RowCollector()
 
@@ -398,15 +399,19 @@ enum PackRecordReader {
     }
 
     /// 5-3 — 메타는 머리글 앞에서만. 중복(같은 **칸** — `#출처`와 옛 `#권리`는 한 칸)·알 수 없는 키·`#escape`(후속)·셀 cap·
-    /// 값 개수(trailing 빈 셀만 허용)
+    /// 값 개수(trailing 빈 셀만 허용). `seen`은 칸마다 처음 쓴 키 — 키가 다른 중복(`#출처`+`#권리`)은 문구가 따로다(검증 O1)
     private static func readMeta(
-        _ record: CSVRecord, key: String, number: Int, seen: inout Set<PackMetaField>, into meta: inout PackMetaPrefill
+        _ record: CSVRecord, key: String, number: Int, seen: inout [PackMetaField: String], into meta: inout PackMetaPrefill
     ) throws(PackImportFailure) {
         guard let field = PackMetaField.field(forKey: key) else {
             if key == metaEscape { throw .unsupportedEscapeMeta(record: number, line: record.line) }
             throw .unknownMeta(record: number, line: record.line)
         }
-        guard seen.insert(field).inserted else { throw .duplicateMeta(record: number, line: record.line) }
+        if let first = seen[field] {
+            // 키가 둘인 칸은 출처뿐이다 — 키가 다르면 `#출처`와 `#권리`가 함께 있는 것
+            throw first == key ? .duplicateMeta(record: number, line: record.line) : .duplicateSourceMeta(record: number, line: record.line)
+        }
+        seen[field] = key
         let effective = effectiveCount(record.cells)
         guard effective <= PackLimits.metaCells else { throw .metaTooManyCells(record: number, line: record.line) }
         let values = Array(record.cells[1..<max(1, effective)])

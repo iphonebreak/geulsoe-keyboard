@@ -84,6 +84,9 @@ struct PackImpactCopyTests {
         #expect(PackNoticeCopy.usageResult(body: thirty) == "→ " + thirty, "딱 맞으면 자르지 않는다")
         #expect(PackNoticeCopy.usageResult(body: thirty + "나") == "→ " + thirty + "…")
         #expect(PackNoticeCopy.usageResult(body: String(thirty.dropLast()) + " 나다") == "→ " + String(thirty.dropLast()) + "…", "자른 끝의 공백은 뗀다")
+        // 경계는 상수가 아니라 글자로 고정한다 — 위 줄들은 길이를 상수에서 내 상수를 바꾸면 함께 따라간다(검증 N03). 30·31번째 모두 공백이 아니다
+        #expect(PackNoticeCopy.usageResult(body: "123456789가123456789나123456789다") == "→ 123456789가123456789나123456789다", "30자는 자르지 않는다")
+        #expect(PackNoticeCopy.usageResult(body: "123456789가123456789나123456789다라마") == "→ 123456789가123456789나123456789다…", "31자부터 30자로 자른다")
         #expect(PackNoticeCopy.deletePackButton == "팩 삭제")
     }
 

@@ -42,8 +42,10 @@ public enum PackImportFailure: Error, Equatable, Sendable {
     case tooManyColumns
     /// 예약 메타 키(`#이름`·`#틀`·`#출처`(옛 `#권리`)·`#escape`)가 머리글 **뒤**에 있다 — 엑셀 정렬 사고(5-3)
     case metaAfterHeader(record: Int, line: Int)
-    /// 같은 메타 칸이 두 번 — `#출처`와 옛 `#권리`는 한 칸이라 함께 있어도 여기다(R27)
+    /// 같은 메타 키가 두 번(`#이름`·`#이름` 등)
     case duplicateMeta(record: Int, line: Int)
+    /// `#출처`와 옛 `#권리`가 함께 있다 — 한 칸이라 중복 메타지만 키가 달라 「두 번」을 찾지 못하므로 문구가 두 키를 함께 말한다(R27, 검증 O1)
+    case duplicateSourceMeta(record: Int, line: Int)
     /// 알 수 없는 `#` 키
     case unknownMeta(record: Int, line: Int)
     /// `#escape` — 가역 escape(R6·13-2)는 내보내기·왕복 단계(후속)라 아직 받지 않는다
