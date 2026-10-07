@@ -70,7 +70,8 @@ struct ExternalSnippetSection: View {
         return order + summaries.filter { !listed.contains($0.id) }.map { .pack($0.id) }
     }
 
-    /// 「내 채움글 (순서)」 — 눌리지 않는 줄(chevron 없음). 순서는 「팩 순서 바꾸기」에서만, 문구는 아래 「내 채움글」 절에서 고친다
+    /// 「내 채움글 (순서)」 — 눌리지 않는 줄(chevron 없음). 순서는 「팩 순서 바꾸기」에서만, 문구는 아래 「내 채움글」 절에서 고친다.
+    /// 끌기 손잡이 모양(`line.3.horizontal`)은 두지 않는다 — 끌리는 줄로 오해했다(실기 지적 2026-10-07). 실제 손잡이는 순서 화면에만
     private var userSlotRow: some View {
         HStack(spacing: 12) {
             Image(systemName: "person.fill")
@@ -83,9 +84,6 @@ struct ExternalSnippetSection: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.tertiary)
-                .accessibilityHidden(true)
         }
         .accessibilityElement(children: .combine)
     }
