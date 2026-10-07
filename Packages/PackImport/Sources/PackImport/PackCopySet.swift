@@ -79,7 +79,7 @@ extension PackCopySet.Lines {
         pickFile: "CSV 파일 고르기",
         guideTitle: "CSV로 팩 만드는 법",
         otherFileRow: nil,
-        unsupportedFiles: "엑셀·Numbers·구글 시트에서는 「CSV UTF-8」로 저장한 뒤 가져와요. CSV가 아닌 파일(Numbers 파일, .json 등)은 받지 않아요.",
+        unsupportedFiles: "엑셀에서는 「CSV UTF-8」로 저장하고, Numbers·구글 시트는 CSV로 내보낸 뒤 가져와요. CSV가 아닌 파일(Numbers 파일, .json 등)은 받지 않아요.",
         sampleFormats: [.csv],
         guideCellsSection: "모양이 바뀌기 쉬운 칸",
         guideCells: [
@@ -87,7 +87,8 @@ extension PackCopySet.Lines {
             leadingSymbolCell
         ],
         guideCellsFooter: "가져오기 미리보기에서 처음 몇 개를 확인해 주세요.",
-        guideSaveSteps: "파일 ▸ 다른 이름으로 저장 ▸ CSV UTF-8(쉼표로 분리). 쉼표·세미콜론·탭 모두 알아서 읽어요."
+        guideSaveSteps: "파일 ▸ 다른 이름으로 저장 ▸ 「CSV UTF-8」이 든 항목(예: CSV UTF-8(쉼표로 분리))을 골라요. "
+            + "「쉼표로 구분된 값」처럼 UTF-8이 없는 항목도 가져올 수 있지만 일부 기호가 바뀔 수 있어요. 쉼표·세미콜론·탭 모두 알아서 읽어요."
     )
 
     /// xlsx 중심판 — 시안 6-A·3-A·3-B의 xlsx 열 그대로, 3-B 3절 풋터는 PDR 6-7의 xlsx 중심판 문구. **1-e가 출시 전에 다시 검토한다**

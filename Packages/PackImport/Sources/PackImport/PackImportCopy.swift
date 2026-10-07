@@ -122,8 +122,9 @@ public enum PackImportCopy {
     public static let multilineLabel = "여러 줄 본문"
     public static let failedLabel = "읽기 실패"
     public static let alternativeFooter = "같은 파일이라도 고르는 방식에 따라 다른 글자로 읽혀요."
+    /// 둘째 문장 — Numbers·구글 시트는 BOM을 못 넣어 이 화면이 매번 뜬다(계획서 11절 F-2, `verify-csv-real-mac.md`)
     public static let encodingFooter = "글자가 깨져 보이면 위에서 다른 쪽을 골라 보세요. 고르면 파일을 처음부터 다시 읽어요.\n"
-        + "다음부터는 엑셀에서 「CSV UTF-8」로 저장하면 이 화면이 안 나와요."
+        + "엑셀에서는 「CSV UTF-8」로 저장하면 이 화면이 안 나와요. Numbers·구글 시트의 CSV는 이 화면이 늘 떠요 — 표본이 맞게 보이면 「다음」을 누르세요."
     /// 미리보기에서 글자 확인으로 돌아가는 줄
     public static let reviewEncodingAgain = "글자 방식 다시 고르기"
     /// 표본 자리를 그 방식으로 못 읽을 때
@@ -143,6 +144,13 @@ public enum PackImportCopy {
             return "\(encodingName(review.selected))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(selected.failedLines))행). 다른 쪽을 골라 주세요."
         }
         return "\(encodingName(review.other))로는 읽을 수 없어요(깨진 글자 \(PackNoticeCopy.number(review.reading(review.other).failedLines))행)."
+    }
+
+    /// 상태 줄 아래 한 줄 — **고른 방식이 한국어(CP949)이고 읽힐 때만**(계획서 11절 F-1). 엑셀 「쉼표로 구분된 값」(CP949)은 `—` 같은 기호를
+    /// 저장할 때 이미 바꾸는데 표본에는 그 글자가 안 나와 알아챌 수 없다(`verify-csv-real-mac.md`). UTF-8로 읽은 파일·BOM 파일(확인 화면 없음)에는 없다
+    public static func cp949Caution(_ review: PackEncodingReview) -> String? {
+        guard review.selected == .cp949, review.cp949.isReadable else { return nil }
+        return "한국어(CP949)로 저장한 파일은 일부 기호(예: —)가 저장할 때 이미 바뀌었을 수 있어요. 엑셀에서 「CSV UTF-8」로 다시 저장하면 바뀌지 않아요."
     }
 
     public static func samplesHeader(_ review: PackEncodingReview) -> String {

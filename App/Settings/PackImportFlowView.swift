@@ -179,7 +179,12 @@ struct PackImportFlowView: View {
         } header: {
             Text(PackImportCopy.encodingQuestion)
         } footer: {
-            Text(PackImportCopy.encodingStatus(review))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(PackImportCopy.encodingStatus(review))
+                if let caution = PackImportCopy.cp949Caution(review) {
+                    Text(caution)
+                }
+            }
         }
 
         let selected = review.reading(review.selected)

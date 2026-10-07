@@ -56,7 +56,7 @@ struct PackCopySetTests {
             #expect(PackImportCopy.guideTitle == "CSV로 팩 만드는 법")
             #expect(PackImportCopy.otherFileRow == nil)
             #expect(PackImportCopy.startFooter
-                    == "엑셀·Numbers·구글 시트에서는 「CSV UTF-8」로 저장한 뒤 가져와요. CSV가 아닌 파일(Numbers 파일, .json 등)은 받지 않아요."
+                    == "엑셀에서는 「CSV UTF-8」로 저장하고, Numbers·구글 시트는 CSV로 내보낸 뒤 가져와요. CSV가 아닌 파일(Numbers 파일, .json 등)은 받지 않아요."
                     + "\n\n가져온 팩은 이 기기에만 저장되고, 파일 내용은 어디에도 보내지 않아요.")
             #expect(PackImportCopy.guideCellsSection == "모양이 바뀌기 쉬운 칸")
             #expect(PackImportCopy.guideCells == [
@@ -64,7 +64,8 @@ struct PackCopySetTests {
                 "= + - @로 시작하는 글 → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요. 앞에 작은따옴표(')를 붙이면 붙여넣을 때 글자로 남을 수 있어요."
             ])
             #expect(PackImportCopy.guideCellsFooter == "가져오기 미리보기에서 처음 몇 개를 확인해 주세요.")
-            #expect(PackImportCopy.guideSave == "파일 ▸ 다른 이름으로 저장 ▸ CSV UTF-8(쉼표로 분리). 쉼표·세미콜론·탭 모두 알아서 읽어요. "
+            #expect(PackImportCopy.guideSave == "파일 ▸ 다른 이름으로 저장 ▸ 「CSV UTF-8」이 든 항목(예: CSV UTF-8(쉼표로 분리))을 골라요. "
+                    + "「쉼표로 구분된 값」처럼 UTF-8이 없는 항목도 가져올 수 있지만 일부 기호가 바뀔 수 있어요. 쉼표·세미콜론·탭 모두 알아서 읽어요. "
                     + "파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「CSV 파일 고르기」를 눌러요.")
             #expect(PackSample.files(.numbered).map(\.format) == [.csv])
             #expect(PackSample.files(.phrases).map(\.format) == [.csv])

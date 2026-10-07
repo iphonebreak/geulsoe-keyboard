@@ -185,6 +185,30 @@ struct PackImportCopyMappingTests {
         #expect(PackImportCopy.encodingName(.cp949) == "한국어(CP949)")
     }
 
+    @Test("★ 4-B·4-C CSV 실물 반영(계획서 11절 F-1·F-2) — CP949 안내 줄은 **한국어(CP949)로 읽은 경우에만**, 풋터 둘째 문장")
+    func cp949CautionOnlyWhenReadAsCP949() throws {
+        let caution = "한국어(CP949)로 저장한 파일은 일부 기호(예: —)가 저장할 때 이미 바뀌었을 수 있어요. 엑셀에서 「CSV UTF-8」로 다시 저장하면 바뀌지 않아요."
+        #expect(PackImportCopy.cp949Caution(review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)) == caution)
+        #expect(PackImportCopy.cp949Caution(review(selected: .cp949, utf8Failed: 0, cp949Failed: 0)) == caution)   // 4-C 둘 다 읽힘
+        #expect(PackImportCopy.cp949Caution(review(selected: .utf8, utf8Failed: 0, cp949Failed: 0)) == nil)
+        #expect(PackImportCopy.cp949Caution(review(selected: .utf8, utf8Failed: 0, cp949Failed: 37)) == nil)
+        #expect(PackImportCopy.cp949Caution(review(selected: .cp949, utf8Failed: 0, cp949Failed: 37)) == nil, "고른 쪽이 깨지면 상태 줄만")
+
+        // 원본 바이트에서 — CP949 파일(자동 = CP949) · BOM 없는 UTF-8(자동 = UTF-8) · BOM UTF-8(확인 화면 자체가 없다)
+        let csv = "trigger,body\n새해인사,새해 복 많이 받으세요\n"
+        let cp949Data = try #require(csv.data(using: PackTextDecoder.cp949))
+        let cp949File = try #require(PackEncodingReview.probe(cp949Data, choice: .automatic))
+        #expect(cp949File.selected == .cp949)
+        #expect(PackImportCopy.cp949Caution(cp949File) == caution)
+        let utf8File = try #require(PackEncodingReview.probe(Data(csv.utf8), choice: .automatic))
+        #expect(utf8File.selected == .utf8)
+        #expect(PackImportCopy.cp949Caution(utf8File) == nil)
+        #expect(PackEncodingReview.probe(Data([0xEF, 0xBB, 0xBF]) + Data(csv.utf8), choice: .automatic) == nil)
+
+        #expect(PackImportCopy.encodingFooter == "글자가 깨져 보이면 위에서 다른 쪽을 골라 보세요. 고르면 파일을 처음부터 다시 읽어요.\n"
+                + "엑셀에서는 「CSV UTF-8」로 저장하면 이 화면이 안 나와요. Numbers·구글 시트의 CSV는 이 화면이 늘 떠요 — 표본이 맞게 보이면 「다음」을 누르세요.")
+    }
+
     @Test("4-E 미리보기 줄 — 파일에 적힌 틀(외 n개)·모르는 열·처음 n개·같은 번호/단축어·정리·따옴표")
     func previewLines() {
         #expect(PackImportCopy.fileTemplate(["사자성어 {n}번", "성어 {n}번"]) == "사자성어 {n}번 외 1개")
@@ -323,6 +347,7 @@ var stage4Copy: [String] {
         for failed in [(0, 0), (37, 0), (0, 37)] {
             let shown = review(selected: selected, utf8Failed: failed.0, cp949Failed: failed.1)
             texts += [PackImportCopy.encodingStatus(shown), PackImportCopy.samplesHeader(shown), PackImportCopy.alternativeHeader(shown)]
+            texts += [PackImportCopy.cp949Caution(shown)].compactMap { $0 }
         }
     }
     for kind in [PackImportSource.Kind.file, .paste] {
