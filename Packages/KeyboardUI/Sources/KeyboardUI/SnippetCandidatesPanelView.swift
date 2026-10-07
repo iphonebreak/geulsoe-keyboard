@@ -1,3 +1,4 @@
+import Accessibility
 import SwiftUI
 import KeyboardCore
 import TadakDomain
@@ -20,6 +21,8 @@ import TadakDomain
 ///   (R32 (나) — 시안의 진한 파랑 고정색은 하지 않는다, 「키 표면은 테마 색 단색」). 그림에는 `ResolvedTheme` 색만 쓴다.
 /// - 행 탭은 조립 지점으로 보낼 뿐이다 — 꼬리 정합·삽입·패널 닫기는 조립 지점(③)이 기존 `insertSnippet` 경로로 한다.
 /// - 출처 이름(팩 이름)·본문은 **사용자 유래**다 — 화면에 그리기만 하고 어디에도 기록하지 않는다(10-6 ⑧, 보안 규칙).
+/// - VoiceOver(시안 8-I · U7 ③-6): 열리면 화면 변경을 알리고 **첫 행**으로 포커스를 옮긴다. 「돌아가기」는 목록(스크롤) 밖 맨 아래라
+///   행을 넘기면 항상 닿고, 두 손가락 문지르기(escape)로도 닫힌다. 성경·클립보드 패널에는 이 선례가 없다 — 이 패널이 처음이다.
 struct SnippetCandidatesPanelView: View {
 
     let candidates: [SnippetCandidate]
@@ -27,6 +30,9 @@ struct SnippetCandidatesPanelView: View {
     let onRowTap: (SnippetCandidate) -> Void
     /// 「돌아가기」 — 패널만 닫는다(칩은 그대로)
     let onClose: () -> Void
+
+    /// VoiceOver 포커스가 있는 행(몇 번째) — 열릴 때 0(첫 행 = 칩 후보)으로 옮긴다. VoiceOver가 꺼져 있으면 아무 일도 없다
+    @AccessibilityFocusState private var focusedRow: Int?
 
     /// 머리줄 「「X」 후보 n개」 — X는 사용자가 친 꼬리 원문(후보는 모두 같은 trigger, 10-6 ①). 후보가 없으면 빈 글자
     nonisolated static func header(for candidates: [SnippetCandidate]) -> String {
@@ -70,10 +76,11 @@ struct SnippetCandidatesPanelView: View {
             // 행은 최대 8개라 지연 생성이 필요 없다 — 목록만 스크롤된다(시안 8-D)
             ScrollView {
                 VStack(spacing: 4) {
-                    ForEach(Array(Self.visibleRows(candidates).enumerated()), id: \.offset) { _, candidate in
+                    ForEach(Array(Self.visibleRows(candidates).enumerated()), id: \.offset) { index, candidate in
                         SnippetCandidateRow(candidate: candidate, theme: theme, minHeight: rowMinHeight) {
                             onRowTap(candidate)
                         }
+                        .accessibilityFocused($focusedRow, equals: index)
                     }
                 }
             }
@@ -83,6 +90,14 @@ struct SnippetCandidatesPanelView: View {
             }
         }
         .padding(.horizontal, 4)
+        // VoiceOver escape(두 손가락 Z) — 「돌아가기」와 같은 닫기
+        .accessibilityAction(.escape, onClose)
+        .onAppear {
+            // 자판 → 패널: 화면 변경 알림(VoiceOver가 맨 앞 요소로 간다) 뒤, 한 차례 미뤄 첫 행으로 옮긴다 —
+            // 나타나는 그 순간에는 행이 아직 접근성 트리에 없어 바로 주면 무시될 수 있다. 순서·체감은 실기 확인 항목
+            AccessibilityNotification.ScreenChanged().post()
+            Task { @MainActor in focusedRow = 0 }
+        }
     }
 }
 

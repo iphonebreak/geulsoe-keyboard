@@ -112,6 +112,27 @@ public enum SnippetCandidateGate {
         return isStillValid(trigger: chip.trigger, tail: tail)
     }
 
+    /// **누른 칩**으로 무장·열기를 해도 되나(U7 ③ — 조립 지점의 `onSnippetArm`·`onSnippetCandidatesOpen`이 같은 식을 쓴다).
+    ///
+    /// `pressed`는 누르기 시작한 때의 칩 값이다 — 퇴장 트랜지션(0.28초) 중이면 이미 사라진 옛 칩일 수 있다. 그래서 둘을 가른다:
+    /// **구간은 누른 칩**(지금 칩이 같은 trigger여야 한다), **개수는 지금 칩**(누르는 사이 「+n」이 바뀌었을 수 있다).
+    /// 열기도 이 식을 **다시** 본다 — VoiceOver 「다른 후보 보기」는 450ms 무장을 거치지 않는다
+    public static func canArm(pressed: SnippetSuggestion, current: SnippetSuggestion?, tail: String) -> Bool {
+        keepsPanelOpen(panelTrigger: pressed.trigger, chip: current, tail: tail) && canArm(chip: current, tail: tail)
+    }
+
+    /// 후보 행 탭을 받을까 — 패널이 열려 있고(`panelTrigger` ≠ nil) 그 행이 **지금 목록**의 것이며 꼬리가 아직 그 trigger로 끝날 때만.
+    /// 더블탭의 둘째 탭은 첫 탭이 패널을 닫아(trigger nil·목록 빔) 여기서 걸린다(AC-41). 최종 방어는 `insertSnippet`의 꼬리 정합이다.
+    /// 칩 탭(`viewState.snippetSuggestion == 누른 칩`)과 달리 둘째 이후 행은 칩과 같은 값이 아니므로 패널 상태로 판정한다
+    public static func acceptsRowTap(
+        _ candidate: SnippetCandidate, panelTrigger: String?, panelCandidates: [SnippetCandidate], tail: String
+    ) -> Bool {
+        guard let panelTrigger, candidate.suggestion.trigger == panelTrigger, panelCandidates.contains(candidate) else {
+            return false
+        }
+        return isStillValid(trigger: panelTrigger, tail: tail)
+    }
+
     /// 패널이 열린 채로 둘까 — 지금 칩이 패널을 연 그 구간이고 꼬리도 그대로일 때만. 아니면 즉시 닫는다(10-6 ③ · AC-41).
     /// 호스트 메아리 sync로 꼬리가 흔들려도 **trigger로 끝나는 한** 닫지 않는다(지시서 R5)
     public static func keepsPanelOpen(panelTrigger: String, chip: SnippetSuggestion?, tail: String) -> Bool {
@@ -150,19 +171,20 @@ public enum SnippetCandidateText {
         "「\(trigger)」 후보 \(count)개"
     }
 
-    /// 출처 글자 — 내장 팩 이름은 설정 앱(`SnippetPackInfo`)과 같은 글자다. 성경은 짧게 「성경」(지시서 [판단])
+    /// 출처 글자 — 내장 팩 이름은 설정 앱(`SnippetPackInfo`)과 **같은 상수**(`SnippetPackName`, TadakDomain)다.
+    /// 성경은 짧은 이름 「성경」(설정의 「성경 (개역한글)」과 일부러 다르다)
     public static func originName(_ origin: SnippetOrigin) -> String {
         switch origin {
         case .user: "내 채움글"
         case .pack(let name): name.isEmpty ? "외부 팩" : name
         case .builtIn(let id):
             switch id {
-            case SnippetPack.anthem: "국가 상징문"
-            case SnippetPack.greetings: "인사·상용구"
+            case SnippetPack.anthem: SnippetPackName.anthem
+            case SnippetPack.greetings: SnippetPackName.greetings
             default: "기본 채움글"
             }
-        case .date: "날짜·시간"
-        case .bible: "성경"
+        case .date: SnippetPackName.date
+        case .bible: SnippetPackName.bibleShort
         }
     }
 

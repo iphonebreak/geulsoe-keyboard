@@ -485,6 +485,7 @@ struct SnippetEditorView: View {
 // MARK: - 내장 팩 상세 (설명 · 사용법 · 켜기/끄기, 성경은 머리말 스위치)
 
 /// 내장 팩의 설명·사용법 — 데이터(Snippets.json 등)와 짝을 이루는 안내. 단축어는 팩 JSON과 같게 유지한다.
+/// 이름은 키보드 후보 패널의 출처 이름표와 같은 상수(`SnippetPackName`, TadakDomain)를 쓴다(U7).
 struct SnippetPackInfo {
     let id: String
     let name: String
@@ -494,7 +495,7 @@ struct SnippetPackInfo {
 
     static let all: [SnippetPackInfo] = [
         SnippetPackInfo(
-            id: SnippetPack.bible, name: "성경 (개역한글)",
+            id: SnippetPack.bible, name: SnippetPackName.bible,
             summary: "개역한글판(1961) 성경 66권 전체가 들어 있어요. 책 이름과 장·절을 치면 그 절의 본문이 후보로 떠요. 저작권 보호 기간이 만료된 본문이라 자유롭게 쓸 수 있어요.",
             usage: [
                 ("창세기 1장 1절", "정식 이름 + 장·절"),
@@ -504,7 +505,7 @@ struct SnippetPackInfo {
             ],
             note: "머리말을 켜면 본문 앞에 출처가 함께 들어가요. \"창세기 1장 1절\"이라고 치면 [창세기 1장 1절] 처럼 친 그대로 들어가요."),
         SnippetPackInfo(
-            id: SnippetPack.anthem, name: "국가 상징문",
+            id: SnippetPack.anthem, name: SnippetPackName.anthem,
             summary: "애국가 1~4절, 국기에 대한 맹세, 대한민국 헌법 전문과 제1조부터 제130조까지 전 조문, 기미독립선언서 서두를 담았어요. 공유 저작물과 저작권 보호를 받지 않는 공공 저작물이에요.",
             usage: [
                 ("애국가 1절", "1절부터 4절까지"),
@@ -515,7 +516,7 @@ struct SnippetPackInfo {
             ],
             note: nil),
         SnippetPackInfo(
-            id: SnippetPack.greetings, name: "인사·상용구",
+            id: SnippetPack.greetings, name: SnippetPackName.greetings,
             summary: "인사, 축하, 위로·기원, 감사·사과처럼 자주 보내는 문구 25종이에요. 글쇠가 직접 쓴 일반형 문구라 붙여 넣은 뒤 이름이나 상황에 맞게 고쳐 쓰세요.",
             usage: [
                 ("인사", "새해인사 · 설날인사 · 추석인사 · 명절인사 · 연말인사 · 크리스마스인사 · 첫인사 · 안부인사 · 입사인사 · 퇴사인사 · 어버이날인사 · 스승의날인사"),
@@ -528,7 +529,7 @@ struct SnippetPackInfo {
         //   **예시는 전부 끝말까지 친 완성형이다**(8-1절) — 「오늘」·「3일 후」처럼 끝말을 뺀 예시는
         //   따라 쳐도 칩이 안 뜬다(반론자2). 전체 목록은 상세 화면의 펼침 목록(`DateSnippetCatalog`)에 있다.
         SnippetPackInfo(
-            id: SnippetPack.date, name: "날짜·시간",
+            id: SnippetPack.date, name: SnippetPackName.date,
             summary: "\"오늘 날짜\", \"3일 후 날짜\", \"지금 시간\"처럼 끝에 \"날짜\"나 \"시간\"을 붙여 치면, 치는 그 순간의 날짜·시각을 계산해 후보로 띄워요. 양력 기준이고, 음력 명절은 설날·추석만 찾아 줘요.",
             usage: [
                 ("오늘 날짜", "어제 날짜 · 내일 날짜 · 모레 날짜 · 그저께 날짜 · 글피 날짜도 돼요"),

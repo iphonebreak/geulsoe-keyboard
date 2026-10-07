@@ -78,9 +78,17 @@ public enum BuiltInSnippetEntries {
     public static func enabled(
         disabled: Set<String>, anthem: any SnippetRepository, greetings: any SnippetRepository
     ) -> [SnippetEntry] {
-        var entries: [SnippetEntry] = []
-        if !disabled.contains(SnippetPack.anthem) { entries += anthem.entries() }
-        if !disabled.contains(SnippetPack.greetings) { entries += greetings.entries() }
-        return entries
+        enabledGroups(disabled: disabled, anthem: anthem, greetings: greetings).flatMap(\.entries)
+    }
+
+    /// 같은 결과를 **팩 단위**로 — 키보드 후보 패널(U7)이 항목의 출처(「국가 상징문」·「인사·상용구」)를 알려고 쓴다.
+    /// 이어 붙이면 `enabled`와 같다(순서·꺼짐 판정은 이 함수 한 곳).
+    public static func enabledGroups(
+        disabled: Set<String>, anthem: any SnippetRepository, greetings: any SnippetRepository
+    ) -> [(packID: String, entries: [SnippetEntry])] {
+        var groups: [(packID: String, entries: [SnippetEntry])] = []
+        if !disabled.contains(SnippetPack.anthem) { groups.append((SnippetPack.anthem, anthem.entries())) }
+        if !disabled.contains(SnippetPack.greetings) { groups.append((SnippetPack.greetings, greetings.entries())) }
+        return groups
     }
 }

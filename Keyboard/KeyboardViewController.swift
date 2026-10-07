@@ -360,6 +360,7 @@ final class KeyboardViewController: UIInputViewController {
         // 검색 패널도 같은 줄에 포함한다 (계획서 2-8) — 안 닫으면 앱 전환 뒤
         // 자판 없이 패널만 떠 있는 상태가 남는다
         if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
+        closeSnippetCandidatesPanel()   // U7 후보 패널도 같은 이유(열린 상태·목록을 다음 등장으로 넘기지 않는다)
         dismissedSuggestionWord = nil  // ✕ 억제는 그 표시 세션에서만 (채움글 칩은 예외 — 편집 전까지 유지)
         suppressesWordSuggestionsAfterCursorMove = false
         updateVisibleTools()
@@ -561,6 +562,8 @@ final class KeyboardViewController: UIInputViewController {
         // 예약된 성경 검색은 버린다 — 내려간 키보드를 위해 본문을 훑을 이유가 없고,
         // 다음 등장에서 꼬리가 다시 서면 그때 새로 예약된다.
         bibleSearchScheduler?.cancel()
+        // U7 후보 패널 — 내려갈 때 닫고 목록(채움글 본문)을 놓는다. 등장(`viewWillAppear`)에서도 한 번 더 닫는다
+        closeSnippetCandidatesPanel()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -619,20 +622,25 @@ final class KeyboardViewController: UIInputViewController {
                                     packsGeneration: packGenerations.packsGeneration)
         guard key != snippetMatcherKey else { return }   // 같은 키 — 아무것도 놓지도 만들지도 않는다(AC-9)
         snippetMatcher = nil   // R17 — 키가 바뀌어 실제로 다시 만들 때만 여기 온다. 옛 매처부터 놓는다
+        // U7 — 열린 후보 목록은 옛 매처가 만든 것이다(꺼진 팩·바뀐 순서의 행이 남을 수 있다). 매처를 갈 때만 닫는다(같은 키면 위에서 끝)
+        closeSnippetCandidatesPanel()
         guard settings.snippetsEnabled else {
             snippetMatcherKey = key
             Self.snippetSourcesCache = nil   // 채움글을 끄면 읽어 둔 외부 팩(최대 약 3.5MB)도 놓는다(검증 F6)
             return
         }
         let disabled = settings.disabledSnippetPacks
-        let builtIn = BuiltInSnippetEntries.enabled(
+        // 내장 팩은 **팩 단위**로 받는다 — 후보 목록 행의 출처(「국가 상징문」/「인사·상용구」, U7). 로더에는 지금처럼 이어 붙인 배열
+        let builtInGroups = BuiltInSnippetEntries.enabledGroups(
             disabled: Set(disabled), anthem: bundledSnippetRepository, greetings: greetingsSnippetRepository)
+        let builtIn = builtInGroups.flatMap(\.entries)
         let sources = loadSnippetSources(builtIn: builtIn, disabled: Set(disabled))
         // ★ 키는 **캐시해도 되는(성공) 결과일 때만** 기록한다(검증 C4 · F1과 같은 판정 `Result.isCacheable`). 일시 실패(세대 불일치·
         //   소실)면 키를 비워 두어 다음 알림·등장이 다시 읽는다 — 키를 먼저 기록하면 세대가 바뀔 때까지 같은 VC가 다시 읽지 않았다
         snippetMatcherKey = sources.isCacheable ? key : nil
-        let composed = SnippetSourceComposer.compose(order: sources.order, userEntries: sources.userEntries,
-                                                     packs: sources.packs, builtIn: builtIn)
+        let composed = SnippetSourceComposer.compose(
+            order: sources.order, userEntries: sources.userEntries, packs: sources.packs,
+            builtInGroups: builtInGroups.map { SnippetSourceComposer.BuiltInGroup(packID: $0.packID, entries: $0.entries) })
         snippetMatcher = SnippetMatcher(
             bible: disabled.contains(SnippetPack.bible) ? nil : bibleRepository,
             entries: composed.entries,
@@ -642,7 +650,9 @@ final class KeyboardViewController: UIInputViewController {
             dates: disabled.contains(SnippetPack.date)
                 ? nil
                 : DateSnippetParser(style: settings.dateSnippetStyle, calendar: dateSnippetCalendar),
-            templates: composed.templates
+            templates: composed.templates,
+            // U7 — 후보 목록 행의 출처(줄 구간 표). 칩 판정에는 쓰이지 않는다. 화면 표시 전용 — 로그·분석 금지(10-6 ⑧)
+            origins: composed.origins
         )
     }
 
@@ -765,6 +775,13 @@ final class KeyboardViewController: UIInputViewController {
         //   그대로(`dismissedSnippetTail`). 예전 주석은 「채움글 > 붙여넣기」라 적었지만 실제로는 둘이 한 줄에 함께 떴다.
         let snippet = SnippetChipGate.visibleSnippet(
             matched, isDismissed: Self.dismissedSnippetTail != nil, hasPasteChip: chip != nil)
+        // U7 — 후보 패널은 칩이 그 구간 그대로이고 꼬리가 그 trigger로 끝나는 동안만 연다(AC-41, 8-F). 칩이 사라졌거나(편집·✕·
+        //   붙여넣기 칩) 구간이 바뀌었거나 호스트가 커서·글자를 바꿨으면 즉시 닫는다 — 눌러도 거절되는 목록을 남기지 않는다.
+        //   메아리 sync로 꼬리가 흔들려도 trigger로 끝나는 한 닫지 않는다(지시서 R5)
+        if let panelTrigger = snippetCandidatesPanelTrigger,
+           !SnippetCandidateGate.keepsPanelOpen(panelTrigger: panelTrigger, chip: snippet, tail: inputController.textTail) {
+            closeSnippetCandidatesPanel()
+        }
 
         // MARK: 성경 검색 배지 (계획서 2-1·2-6)
         //
@@ -941,6 +958,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         if viewState.showsEmojiPanel { viewState.showsEmojiPanel = false }
         if viewState.showsClipboardPanel { viewState.showsClipboardPanel = false }
+        closeSnippetCandidatesPanel()   // U7 — 후보 패널이 패널 분기 맨 앞이다
         viewState.showsBibleSearchPanel = true
     }
 
@@ -1018,8 +1036,20 @@ final class KeyboardViewController: UIInputViewController {
         // D18·D19 — 붙여넣기 칩이 있으면 채움글 칩·추천단어는 그려지지 않았다(`KeyboardMetrics.candidateRowSnippet`·
         // `candidateRowWords`) — 이 ✕는 붙여넣기 칩만 물리고, 다시 계산하면 채움글 칩 또는 지금 단어의 후보가 나온다.
         // 안 보인 후보를 숨김 처리하지 않는다.
-        if viewState.pasteSuggestion == nil, viewState.snippetSuggestion != nil {
-            Self.dismissedSnippetTail = inputController.textTail
+        // ★ U7(AC-43) — 후보 패널이 열려 있으면 **패널만** 닫고 끝낸다. 칩·`dismissedSnippetTail`·추천단어 억제·붙여넣기 소비·
+        //   배지는 그대로다(✕를 한 번 더 누르면 그때 지금 규칙대로 내린다). 판정은 `SnippetCandidateGate.dismissEffect`
+        switch SnippetCandidateGate.dismissEffect(
+            isCandidatesPanelOpen: viewState.showsSnippetCandidatesPanel,
+            hasPasteChip: viewState.pasteSuggestion != nil,
+            hasSnippetChip: viewState.snippetSuggestion != nil,
+            tail: inputController.textTail
+        ) {
+        case .closeCandidatesPanel:
+            closeSnippetCandidatesPanel()
+            updateSuggestionBar()
+            return
+        case .dismissSuggestions(let hideSnippetTail):
+            if let hideSnippetTail { Self.dismissedSnippetTail = hideSnippetTail }
         }
         if viewState.pasteSuggestion == nil, !viewState.wordSuggestions.isEmpty, !inputController.currentWord.isEmpty {
             dismissedSuggestionWord = inputController.currentWord
@@ -1046,6 +1076,9 @@ final class KeyboardViewController: UIInputViewController {
     private func handleSnippetTap(_ suggestion: SnippetSuggestion) {
         guard let viewState, viewState.snippetSuggestion == suggestion else { return }
         viewState.snippetSuggestion = nil  // 애니메이션 중 재탭 차단
+        // U7 — 후보 패널이 열린 채 칩을 짧게 탭하면 첫 후보(= 칩)를 넣고 패널을 닫는다. 날짜 칩이 낡아 넣지 않을 때도
+        // 목록이 같은 낡은 값이므로 함께 닫는다
+        closeSnippetCandidatesPanel()
         // ★ 날짜·시간 칩 — 탭하는 순간 **표시 단위(분/일)가 바뀌었으면 넣지 않고 칩을 갱신한다**
         //   (PDR `date-snippet-pack.md` 7-2절). 「보여 준 값 = 넣는 값」을 지키려면 몰래 새 값을 넣지 않고
         //   새 칩을 다시 보여 줘 사용자가 다시 누르게 한다. 문구·성경 칩은 계산 시각이 없어 여기를 지나친다.
@@ -1056,10 +1089,101 @@ final class KeyboardViewController: UIInputViewController {
         playToolbarHaptic()
         let revision = inputController?.documentRevision
         inputController?.insertSnippet(suggestion)
+        finishSnippetInsertion(since: revision)
+    }
+
+    /// 채움글 삽입 뒤 처리 — 칩 탭(`handleSnippetTap`)과 후보 행 탭(`handleSnippetCandidateTap`, U7)이 **같이** 쓴다.
+    /// 둘이 갈리면 한쪽만 자동 대문자·추천단어 재개·이모지 칩 숨김 해제가 어긋난다.
+    private func finishSnippetInsertion(since revision: Int?) {
         refreshLayout()  // 삽입으로 꼬리가 바뀌면 자동 대문자 시프트가 바뀔 수 있다
         suppressesWordSuggestionsAfterCursorMove = false
         releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
+    }
+
+    // MARK: - 겹치는 채움글 후보 패널 (U7 — PDR external-snippet-packs 10-6, 지시서 external-snippet-packs-u7-plan ③)
+    //
+    // 판정은 전부 KeyboardCore `SnippetCandidateGate`에 있다(익스텐션 타깃은 `swift test`가 닿지 않는다) — 여기는 배선만.
+    // 후보 수·출처·본문은 사용자 유래다 — 화면에 싣기만 하고 로그·분석·크래시 키 어디에도 넣지 않는다(10-6 ⑧).
+    // 전체 접근과 무관하다(계산·삽입 모두 권한 없이 동작, 진동만 기존 `playToolbarHaptic`의 FA 게이트).
+
+    /// 패널을 연 구간(꼬리 원문) — 열려 있는 동안만 값이 있다. 패널 유지·행 탭 판정의 기준이다
+    private var snippetCandidatesPanelTrigger: String?
+
+    /// 칩을 450ms 눌렀을 때 무장해도 되나 — 칩이 동기로 묻는다(`onSnippetArm`). **누른 칩**과 **지금 칩**을 함께 넘긴다.
+    /// 무장 피드백(소리·진동)은 칩이 `onKeyPress`로 낸다 — 여기서 따로 내지 않는다(두 번 난다).
+    private func canArmSnippetChip(_ pressed: SnippetSuggestion) -> Bool {
+        guard let viewState, let inputController else { return false }
+        return SnippetCandidateGate.canArm(
+            pressed: pressed, current: viewState.snippetSuggestion, tail: inputController.textTail)
+    }
+
+    /// 무장한 칩에서 손을 뗐을 때·VoiceOver 「다른 후보 보기」 — 후보 목록을 **한 번** 계산해 자판 자리에 연다.
+    /// VoiceOver 동작은 무장을 거치지 않으므로 무장과 같은 판정을 **다시** 본다. 후보가 2개 미만이면 열지 않는다(AC-42).
+    private func openSnippetCandidatesPanel(pressed: SnippetSuggestion) {
+        guard let viewState, let inputController, let snippetMatcher else { return }
+        let tail = inputController.textTail
+        guard SnippetCandidateGate.canArm(pressed: pressed, current: viewState.snippetSuggestion, tail: tail) else { return }
+        let candidates = snippetMatcher.candidates(
+            forTail: tail, isSecureTextEntry: textDocumentProxy.isSecureTextEntry == true)
+        guard SnippetCandidateGate.canOpen(candidateCount: candidates.count), let first = candidates.first else { return }
+        // 패널은 한 번에 하나 — 다른 패널을 닫고 연다(`openBibleSearchPanel` 선례)
+        if viewState.showsEmojiPanel { viewState.showsEmojiPanel = false }
+        if viewState.showsClipboardPanel { viewState.showsClipboardPanel = false }
+        if viewState.showsBibleSearchPanel { closeBibleSearchPanel() }
+        snippetCandidatesPanelTrigger = first.suggestion.trigger
+        // 열린 채 칩을 다시 길게 누를 수 있다(칩은 툴바에 그대로) — 같은 값 대입도 통지되므로 바뀐 것만 싣는다
+        if viewState.snippetCandidates != candidates { viewState.snippetCandidates = candidates }
+        if !viewState.showsSnippetCandidatesPanel { viewState.showsSnippetCandidatesPanel = true }
+        updateSuggestionBar()
+    }
+
+    /// 후보 패널을 닫고 목록을 버린다 — 정리 지점 어디서 불러도 된다(이미 닫혀 있으면 아무 통지도 내지 않는다)
+    private func closeSnippetCandidatesPanel() {
+        snippetCandidatesPanelTrigger = nil
+        guard let viewState else { return }
+        if viewState.showsSnippetCandidatesPanel { viewState.showsSnippetCandidatesPanel = false }
+        if !viewState.snippetCandidates.isEmpty { viewState.snippetCandidates = [] }
+    }
+
+    /// 패널 「돌아가기」 — 패널만 닫는다(칩은 그대로). 다른 패널의 닫기 막대와 같이 진동 1회
+    private func handleSnippetCandidatesClose() {
+        playToolbarHaptic()
+        closeSnippetCandidatesPanel()
+        updateSuggestionBar()
+    }
+
+    /// 후보 행 탭 — **기존 채움글 삽입 경로**(`insertSnippet`) 그대로. 가드는 패널 상태(열림 + 패널 trigger + 지금 목록 + 꼬리 정합) —
+    /// 둘째 이후 행은 칩과 같은 값이 아니라서 칩 탭의 동일성 가드를 쓸 수 없다. 더블탭 둘째 탭은 첫 탭이 패널을 닫아 걸린다(AC-41).
+    private func handleSnippetCandidateTap(_ candidate: SnippetCandidate) {
+        // 닫힌 패널에 늦게 온 탭(더블탭 둘째 탭) — 아무것도 하지 않는다
+        guard let viewState, let inputController, viewState.showsSnippetCandidatesPanel else { return }
+        guard SnippetCandidateGate.acceptsRowTap(
+            candidate, panelTrigger: snippetCandidatesPanelTrigger,
+            panelCandidates: viewState.snippetCandidates, tail: inputController.textTail
+        ) else {
+            // 열려 있는데 꼬리가 어긋났다(호스트가 알림 없이 문서를 바꿈) — 문서는 건드리지 않고, 눌러도 안 되는 목록을 남기지 않는다
+            closeSnippetCandidatesPanel()
+            updateSuggestionBar()
+            return
+        }
+        let suggestion = candidate.suggestion
+        // 날짜·시간 후보 — 칩 탭과 같은 규칙: 표시 단위가 바뀌었으면 넣지 않고 패널을 닫고 칩을 갱신한다
+        if suggestion.isStale(at: Date(), calendar: dateSnippetCalendar) {
+            closeSnippetCandidatesPanel()
+            updateSuggestionBar()
+            return
+        }
+        playToolbarHaptic()
+        let revision = inputController.documentRevision
+        let inserted = inputController.insertSnippet(suggestion)
+        closeSnippetCandidatesPanel()
+        // 꼬리 정합 실패(AC-41) — 문서는 그대로다. 패널만 닫고 후보를 다시 낸다(사용자 편집이 아니므로 억제·숨김을 풀지 않는다)
+        guard inserted else {
+            updateSuggestionBar()
+            return
+        }
+        finishSnippetInsertion(since: revision)
     }
 
     // MARK: - 클립보드 읽기 (PDR verification-code-paste · clipboard-history)
@@ -1272,8 +1396,9 @@ final class KeyboardViewController: UIInputViewController {
         case .clipboard:
             inputController?.commitComposition()
             // 성경 패널이 열려 있으면 먼저 닫는다 — 패널 분기에서 성경이 앞에 있어
-            // 그냥 두면 클립보드를 켜도 성경 패널이 계속 보인다
+            // 그냥 두면 클립보드를 켜도 성경 패널이 계속 보인다. U7 후보 패널은 그보다도 앞이라 같은 이유로 닫는다
             if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
+            closeSnippetCandidatesPanel()
             if viewState?.showsClipboardPanel == true {
                 viewState?.showsClipboardPanel = false
             } else {
@@ -1284,6 +1409,7 @@ final class KeyboardViewController: UIInputViewController {
             // 도구 사용 = 조합 확정 (천지인 연타·pending 상태가 패널을 관통하지 않게)
             inputController?.commitComposition()
             if viewState?.showsBibleSearchPanel == true { closeBibleSearchPanel() }
+            closeSnippetCandidatesPanel()   // U7 — 패널 분기 맨 앞이라 안 닫으면 이모지 판이 가려진다
             if viewState?.showsClipboardPanel == true { viewState?.showsClipboardPanel = false }
             viewState?.showsEmojiPanel.toggle()
             updateSuggestionBar()
@@ -1637,6 +1763,17 @@ final class KeyboardViewController: UIInputViewController {
             },
             onBibleRowTap: { [weak self] row in
                 DispatchQueue.main.async { self?.handleBibleRowTap(row) }
+            },
+            // U7 — 칩 450ms 무장 허락은 칩이 **동기로** 묻는다(대답이 곧 점선·피드백 여부). 나머지는 다른 탭처럼 한 박자 미룬다
+            onSnippetArm: { [weak self] pressed in self?.canArmSnippetChip(pressed) ?? false },
+            onSnippetCandidatesOpen: { [weak self] pressed in
+                DispatchQueue.main.async { self?.openSnippetCandidatesPanel(pressed: pressed) }
+            },
+            onSnippetCandidateTap: { [weak self] candidate in
+                DispatchQueue.main.async { self?.handleSnippetCandidateTap(candidate) }
+            },
+            onSnippetCandidatesClose: { [weak self] in
+                DispatchQueue.main.async { self?.handleSnippetCandidatesClose() }
             },
             fillsContainer: Self.fillInputViewWithHost,   // 14차 H1 — 상자 전체 채움 + 하단 정렬
             transparentAbove: Self.transparentAboveContent  // 16차 — 자판 사각형 뒤에만 칠한다

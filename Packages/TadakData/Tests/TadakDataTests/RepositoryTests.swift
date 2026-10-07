@@ -215,6 +215,22 @@ struct SnippetRepositoryTests {
         #expect(BundledSnippetRepository(bundle: .main).entries().isEmpty)
     }
 
+    /// U7 — 키보드는 팩 단위로 받아 출처를 안다. 이어 붙인 결과가 앱 baseline(`enabled`)과 어긋나면 키보드와 앱의 문구 순서가 갈린다
+    @Test("켜진 내장 팩 — 팩 단위 결과를 이어 붙이면 enabled와 같다(국가 상징문 → 인사·상용구, 끈 팩은 빠짐)", arguments: [
+        ([], [SnippetPack.anthem, SnippetPack.greetings]),
+        ([SnippetPack.anthem], [SnippetPack.greetings]),
+        ([SnippetPack.greetings], [SnippetPack.anthem]),
+        ([SnippetPack.anthem, SnippetPack.greetings], [])
+    ] as [(Set<String>, [String])])
+    func builtInGroups(disabled: Set<String>, ids: [String]) {
+        let anthem = BundledSnippetRepository()
+        let greetings = BundledSnippetRepository(resourceName: "Greetings")
+        let groups = BuiltInSnippetEntries.enabledGroups(disabled: disabled, anthem: anthem, greetings: greetings)
+        #expect(groups.map(\.packID) == ids)
+        #expect(groups.flatMap(\.entries) == BuiltInSnippetEntries.enabled(disabled: disabled, anthem: anthem, greetings: greetings))
+        #expect(groups.allSatisfy { !$0.entries.isEmpty })
+    }
+
     // 「사용자 문구 저장·읽기가 왕복한다」는 쓰기가 앱 전용 모듈로 옮겨 가며 PackImportTests(`SnippetRepositoryTests`)로 옮겼다
 }
 

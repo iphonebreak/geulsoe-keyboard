@@ -434,6 +434,56 @@ struct SnippetCandidateGateTests {
                 "칩의 구간이 바뀌면(매처 재구성 등) 목록이 낡았다")
     }
 
+    /// (누른 칩, 지금 칩, 꼬리) → 무장·열기 허락. 구간은 누른 칩, 개수는 지금 칩(③ 배선 — 조립 지점은 이 식만 부른다)
+    @Test("★ AC-43 — 누른 칩으로 무장·열기: 구간은 누른 칩, 개수는 지금 칩", arguments: [
+        // 누른 칩 = 지금 칩, 후보 3개, 꼬리 정합
+        ("새해인사", 2, "새해인사", 2, "팀장님 새해인사", true),
+        // 누르는 사이 「+n」이 바뀜(2 → 1) — 지금 칩 기준이라 무장한다
+        ("새해인사", 2, "새해인사", 1, "팀장님 새해인사", true),
+        // 누르는 사이 다른 후보가 사라짐(2 → 0) — 지금 칩 기준으로 무장하지 않는다
+        ("새해인사", 2, "새해인사", 0, "팀장님 새해인사", false),
+        // 누른 때엔 1개였지만 지금 칩은 2개 이상 — 지금 칩 기준이라 무장한다
+        ("새해인사", 0, "새해인사", 1, "팀장님 새해인사", true),
+        // 퇴장 중 옛 칩 — 지금 칩이 다른 구간(이어 친 글자로 더 긴 단축어가 맞음)
+        ("새해인사", 2, "팀장님새해인사", 2, "팀장님새해인사", false),
+        // 퇴장 중 옛 칩 — 지금 칩이 없음
+        ("새해인사", 2, nil, 0, "팀장님 새해인사 드려요", false),
+        // 칩은 같은데 꼬리가 어긋남(호스트가 문서를 바꿈)
+        ("새해인사", 2, "새해인사", 2, "팀장님", false)
+    ] as [(String, Int, String?, Int, String, Bool)])
+    func canArmPressed(pressedTrigger: String, pressedCount: Int, currentTrigger: String?, currentCount: Int,
+                       tail: String, expected: Bool) {
+        let pressed = SnippetSuggestion(trigger: pressedTrigger, title: "t", body: "b", alternativeCount: pressedCount)
+        let current = currentTrigger.map {
+            SnippetSuggestion(trigger: $0, title: "t", body: "b", alternativeCount: currentCount)
+        }
+        #expect(SnippetCandidateGate.canArm(pressed: pressed, current: current, tail: tail) == expected)
+    }
+
+    /// 행 탭 — 패널 열림(패널 trigger 있음) ∧ 지금 목록의 행 ∧ 꼬리 정합. 더블탭 둘째 탭은 패널이 닫혀 걸린다
+    @Test("★ AC-41 — 후보 행 탭 받기 표")
+    func acceptsRowTap() {
+        let first = SnippetCandidate(suggestion: SnippetSuggestion(trigger: "새해인사", title: "a", body: "A", alternativeCount: 1),
+                                     origin: .user)
+        let second = SnippetCandidate(suggestion: SnippetSuggestion(trigger: "새해인사", title: "b", body: "B"),
+                                      origin: .builtIn(id: SnippetPack.greetings))
+        let stranger = SnippetCandidate(suggestion: SnippetSuggestion(trigger: "새해인사", title: "c", body: "C"), origin: .user)
+        let panel = [first, second]
+        let tail = "팀장님 새해인사"
+        #expect(SnippetCandidateGate.acceptsRowTap(second, panelTrigger: "새해인사", panelCandidates: panel, tail: tail))
+        #expect(SnippetCandidateGate.acceptsRowTap(first, panelTrigger: "새해인사", panelCandidates: panel, tail: tail))
+        #expect(!SnippetCandidateGate.acceptsRowTap(second, panelTrigger: nil, panelCandidates: [], tail: tail),
+                "더블탭 둘째 탭 — 첫 탭이 패널을 닫았다")
+        #expect(!SnippetCandidateGate.acceptsRowTap(second, panelTrigger: nil, panelCandidates: panel, tail: tail),
+                "패널 trigger가 없으면(닫힘) 목록이 남아 있어도 받지 않는다")
+        #expect(!SnippetCandidateGate.acceptsRowTap(stranger, panelTrigger: "새해인사", panelCandidates: panel, tail: tail),
+                "지금 목록에 없는 행(다시 연 패널의 옛 행)")
+        #expect(!SnippetCandidateGate.acceptsRowTap(second, panelTrigger: "새해인사", panelCandidates: panel, tail: "팀장님"),
+                "꼬리가 바뀌었다")
+        #expect(!SnippetCandidateGate.acceptsRowTap(second, panelTrigger: "인사", panelCandidates: panel, tail: tail),
+                "패널 trigger와 행 trigger가 다르다")
+    }
+
     /// ✕ — 패널이 열려 있으면 **패널만** 닫는다(10-6 ⑤ · AC-43). 닫혀 있으면 지금 규칙 그대로(D18·D19 포함)
     @Test("★ AC-43 — ✕ 효과 표", arguments: [
         (true, false, true, SnippetDismissEffect.closeCandidatesPanel),
