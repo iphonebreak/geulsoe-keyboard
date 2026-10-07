@@ -3,7 +3,8 @@ import TadakDomain
 
 /// 가져오기 원본 — **메모리에만** 있다. 로그·파일·네트워크·분석 이벤트로 내보내지 않는다(보안 규칙)
 public enum PackImportSource: Equatable, Sendable {
-    /// 파일 앱에서 고른 CSV(`.csv`·`.tsv`·`.txt`)의 원본 바이트 — 인코딩 판정 전
+    /// 파일 앱에서 고른 파일의 원본 바이트 — CSV(`.csv`·`.tsv`·`.txt`)는 인코딩 판정 전. xlsx를 받는 판이면 ZIP·OLE2 매직으로 xlsx를 가른다
+    /// (`PackImporter.isWorkbook` — 확장자를 믿지 않는다)
     case file(Data)
     /// 붙여 넣은 글(3-E) — 이미 글자라 인코딩 단계가 없다
     case paste(String)
@@ -66,13 +67,26 @@ public struct PackImportPreview: Equatable, Sendable {
     }
 }
 
-/// 가져오기 상태기계(계획서 `external-snippet-packs-1c-plan.md` 5절 4행 ①, 시안 4-A~4-H).
+/// 4-D 시트 고르기 화면 값(AC-36) — 보이는 시트(워크북 순서, 숨김 제외)와 고른 자리(기본 0 = 첫 표시 시트)
+public struct PackSheetChoice: Equatable, Sendable {
+    public let sheets: [PackSheetSummary]
+    public internal(set) var selected: Int
+
+    public init(sheets: [PackSheetSummary], selected: Int) {
+        self.sheets = sheets
+        self.selected = selected
+    }
+}
+
+/// 가져오기 상태기계(계획서 `external-snippet-packs-1c-plan.md` 5절 4행 ①, 시안 4-A~4-H · 1-e ③ 4-D).
 ///
 /// ```
 /// idle ─start/begin+load─▶ reading ─receive─┬─▶ encoding(R18: BOM 없는 비ASCII) ─confirmEncoding─┐
 ///                                            ├─▶ delimiter(후보 둘 이상, 5-2 #3) ◀────────────────────┤
+///                                            ├─▶ sheet(xlsx 보이는 시트 둘 이상, AC-36) ─confirmSheet─▶ (일하는 중) ─receive─▶ preview·failed
 ///                                            ├─▶ preview(4-E·4-F·4-H·4-I) ◀──────────────────────────┤
 ///                                            └─▶ failed(4-G — 구조 오류·파일 못 엶·유효 0) ◀───────────┘
+/// preview·failed(고른 시트) ─reviewSheetAgain─▶ sheet(다시 읽지 않는다)
 /// encoding ─chooseEncoding─▶ (일하는 중) ─receive─▶ encoding(새 값)
 /// delimiter·preview ─chooseDelimiter─▶ (일하는 중) ─receive─▶ preview …   preview ─reviewEncodingAgain─▶ encoding
 /// delimiter·preview ─chooseDelimiter─▶ … ─receive(읽기 실패)─▶ failed + delimiterFallback ─revertDelimiter─▶ (일하는 중) ─receive─▶ 직전 화면
@@ -87,6 +101,10 @@ public struct PackImportPreview: Equatable, Sendable {
 ///   (`delimiterFallback`)을 둔다 — 「가져올 수 없어요」 뒤에 길이 없던 것. 되돌리기도 원본에서 다시 읽는다(AC-18). 그 밖의 거부는 지금처럼 끝이다.
 /// - **상한**: 원본이 바이트 상한을 넘으면 계산 없이 거부하고 원본을 들고 있지 않는다. 행·줄 상한은 파서가 전체 거부로 낸다.
 /// - **R10**: 건너뜀 50% 이상이면 명시 확인(`confirmPartialImport`) 전에는 진행하지 않는다(`canProceed`). 유효 0은 거부다.
+/// - **xlsx(1-e ③)**: 받는 판(`acceptsWorkbookFiles` — `PackCopySet`)일 때만 파일 원본을 매직으로 갈라 `PackImporter.readWorkbook`으로 읽는다 —
+///   글자 확인·칸 나누기 없음. 보이는 시트가 둘 이상이면 고르기(기본 첫 표시 시트)를 거치고, 고른 시트는 원본에서 다시 읽는다(시트 목록도
+///   들고 있지 않은 결과를 재사용하지 않는다). 고른 시트를 읽지 못하면 거부 화면이지만 **원본을 지니고** 고르기로 돌아갈 수 있다(`canReviewSheet`).
+///   CSV 전용판은 xlsx 바이트도 CSV로 읽는다(없는 기능을 열지 않는다 — AC-35).
 ///
 /// 원본·초안은 사용자 데이터다 — 이 값은 메모리에만 있고 로그·분석 이벤트에 싣지 않는다(보안 규칙).
 public struct PackImportSession: Equatable, Sendable {
@@ -99,6 +117,8 @@ public struct PackImportSession: Equatable, Sendable {
         case encoding(PackEncodingReview)
         /// 구분자 후보가 둘 이상 — 사용자가 고른다(5-2 #3)
         case delimiter([CSVDelimiter])
+        /// 4-D — xlsx 보이는 시트가 둘 이상, 사용자가 고른다(AC-36)
+        case sheet(PackSheetChoice)
         case preview(PackImportPreview)
         case failed(PackImportProblem)
     }
@@ -123,6 +143,8 @@ public struct PackImportSession: Equatable, Sendable {
         /// 처음 받은 원본 그대로(AC-18)
         public let source: PackImportSource
         public let options: PackImportOptions
+        /// 파일 원본을 xlsx로 가를지 — 세션의 판 값(`acceptsWorkbookFiles`)
+        public let acceptsWorkbookFiles: Bool
     }
 
     /// `compute`의 결과 — `receive`로 돌려준다
@@ -130,6 +152,7 @@ public struct PackImportSession: Equatable, Sendable {
         public enum Outcome: Equatable, Sendable {
             case preview(PackImportPreview)
             case chooseDelimiter([CSVDelimiter])
+            case chooseSheet([PackSheetSummary])
             case failed(PackImportProblem)
         }
 
@@ -151,6 +174,10 @@ public struct PackImportSession: Equatable, Sendable {
     public private(set) var lastReview: PackEncodingReview?
     /// 칸 나누기를 바꿔 실패한 거부 화면에서 돌아갈 곳(R29) — 이것이 있으면 원본을 지니고 있다. 그 밖의 단계·거부에서는 nil
     public private(set) var delimiterFallback: DelimiterFallback?
+    /// 파일 원본을 xlsx로 가르나 — 판을 따른다(`PackCopySet.acceptsWorkbookFiles`, CSV 전용판은 거짓 — AC-35)
+    public let acceptsWorkbookFiles: Bool
+    /// (xlsx) 이 원본의 시트 고르기 목록 — 미리보기·고른 시트 거부 화면의 「시트 다시 고르기」가 쓴다. 시트 이름은 화면에만(AC-34)
+    public private(set) var sheetChoice: PackSheetChoice?
 
     private var source: PackImportSource?
     private var generation = 0
@@ -160,11 +187,27 @@ public struct PackImportSession: Equatable, Sendable {
     private var pending: Computation?
     /// 지금 도는 칸 나누기 변경이 실패하면 돌아갈 곳 — 결과를 받을 때 `delimiterFallback`이 되거나 버려진다
     private var pendingFallback: DelimiterFallback?
+    /// 지금 도는 읽기가 고른 시트다 — 실패하면 원본을 지니고 고르기로 돌아갈 수 있게 한다
+    private var pendingSheetFallback = false
+    /// 고른 시트를 읽지 못한 거부 화면이다(원본을 지니고 있다)
+    private var sheetFallbackActive = false
 
-    public init() {}
+    public init(acceptsWorkbookFiles: Bool = PackCopySet.current.acceptsWorkbookFiles) {
+        self.acceptsWorkbookFiles = acceptsWorkbookFiles
+    }
 
     /// 원본을 들고 있나 — 취소·거부 뒤에는 비어 있어야 한다(메모리에만, 끝나면 비운다)
     public var hasSource: Bool { source != nil }
+
+    /// 「시트 다시 고르기」를 보이나 — 시트를 골라 읽은 미리보기, 또는 고른 시트를 읽지 못한 거부 화면에서
+    public var canReviewSheet: Bool {
+        guard !isWorking, source != nil, sheetChoice != nil else { return false }
+        switch phase {
+        case .preview: return true
+        case .failed: return sheetFallbackActive
+        default: return false
+        }
+    }
 
     /// 미리보기에서 「다음」(5단계 폼)으로 갈 수 있나 — 받을 항목이 있고, 절반 이상 건너뛰면 명시 확인 뒤(R10·AC-19)
     public var canProceed: Bool {
@@ -191,7 +234,7 @@ public struct PackImportSession: Equatable, Sendable {
             return nil
         }
         self.source = source
-        return Run(generation: generation, source: source, options: options)
+        return Run(generation: generation, source: source, options: options, acceptsWorkbookFiles: acceptsWorkbookFiles)
     }
 
     /// 파일을 열지 못했다(제한 읽기 실패) — 그 표일 때만
@@ -214,8 +257,10 @@ public struct PackImportSession: Equatable, Sendable {
         isWorking = false
         let fallback = pendingFallback
         pendingFallback = nil
+        let keepsSourceForSheet = pendingSheetFallback
+        pendingSheetFallback = false
         guard let review = computation.review else {
-            apply(computation.outcome, fallback: fallback)
+            apply(computation.outcome, fallback: fallback, keepsSourceForSheet: keepsSourceForSheet)
             return true
         }
         lastReview = review
@@ -267,8 +312,9 @@ public struct PackImportSession: Equatable, Sendable {
         switch phase {
         case .delimiter: previous = nil
         case .preview(let preview):
-            guard preview.draft.delimiter != delimiter else { return nil }
-            previous = preview.draft.delimiter
+            // xlsx 미리보기에는 칸 나누기가 없다(`delimiter` nil)
+            guard let current = preview.draft.delimiter, current != delimiter else { return nil }
+            previous = current
         default: return nil
         }
         let fallback = DelimiterFallback(failed: delimiter, previous: previous)
@@ -282,6 +328,35 @@ public struct PackImportSession: Equatable, Sendable {
         guard !isWorking, case .failed = phase, let fallback = delimiterFallback else { return nil }
         options.delimiter = fallback.previous
         return rerun(fallback: nil)
+    }
+
+    // MARK: 시트 (xlsx — AC-36)
+
+    /// 4-D — 시트 줄을 누른다(다시 읽지 않는다). 없는 자리는 무시
+    public mutating func selectSheet(_ index: Int) {
+        guard !isWorking, case .sheet(var choice) = phase, choice.sheets.indices.contains(index) else { return }
+        choice.selected = index
+        phase = .sheet(choice)
+        sheetChoice = choice
+    }
+
+    /// 4-D 「다음」 — 고른 시트로 **원본에서** 다시 읽는다. 읽지 못하면 거부 화면이지만 원본을 지니고 고르기로 돌아갈 수 있다
+    public mutating func confirmSheet() -> Run? {
+        guard !isWorking, case .sheet(let choice) = phase else { return nil }
+        sheetChoice = choice
+        options.sheet = choice.selected
+        pendingSheetFallback = true
+        return rerun(fallback: nil)
+    }
+
+    /// 미리보기·고른 시트 거부 화면에서 고르기로 돌아간다 — 다시 읽지 않고, 지금 읽은 시트가 골라져 있다
+    public mutating func reviewSheetAgain() {
+        guard canReviewSheet, var choice = sheetChoice else { return }
+        if let current = options.sheet, choice.sheets.indices.contains(current) { choice.selected = current }
+        sheetChoice = choice
+        partialImportConfirmed = false
+        sheetFallbackActive = false
+        phase = .sheet(choice)
     }
 
     /// 4-H — 절반 넘게 건너뛰어도 받을 수 있는 것만 가져오겠다고 **명시** 확인(R10). 유효 0은 거부라 해당 없다
@@ -304,6 +379,9 @@ public struct PackImportSession: Equatable, Sendable {
         pending = nil
         delimiterFallback = nil
         pendingFallback = nil
+        sheetChoice = nil
+        pendingSheetFallback = false
+        sheetFallbackActive = false
     }
 
     // MARK: - 안
@@ -314,21 +392,35 @@ public struct PackImportSession: Equatable, Sendable {
         generation += 1
         isWorking = true
         pendingFallback = fallback
-        return Run(generation: generation, source: source, options: options)
+        return Run(generation: generation, source: source, options: options, acceptsWorkbookFiles: acceptsWorkbookFiles)
     }
 
-    private mutating func apply(_ outcome: Computation.Outcome, fallback: DelimiterFallback? = nil) {
+    /// - Parameter keepsSourceForSheet: 고른 시트를 읽은 결과다 — 실패해도 원본을 지니고 고르기로 돌아갈 수 있다
+    private mutating func apply(_ outcome: Computation.Outcome, fallback: DelimiterFallback? = nil, keepsSourceForSheet: Bool = false) {
         partialImportConfirmed = false
         delimiterFallback = nil
+        sheetFallbackActive = false
         switch outcome {
         case .preview(let preview): phase = .preview(preview)
         case .chooseDelimiter(let candidates): phase = .delimiter(candidates)
+        case .chooseSheet(let sheets):
+            let choice = PackSheetChoice(sheets: sheets, selected: 0)
+            sheetChoice = choice
+            phase = .sheet(choice)
         case .failed(let problem):
-            guard let fallback else { return finish(.failed(problem)) }
-            // R29 — 칸 나누기를 바꿔 실패했다: 거부 화면이지만 원본을 지니고 돌아갈 곳을 둔다
-            phase = .failed(problem)
-            pending = nil
-            delimiterFallback = fallback
+            if let fallback {
+                // R29 — 칸 나누기를 바꿔 실패했다: 거부 화면이지만 원본을 지니고 돌아갈 곳을 둔다
+                phase = .failed(problem)
+                pending = nil
+                delimiterFallback = fallback
+            } else if keepsSourceForSheet, sheetChoice != nil {
+                // 고른 시트를 읽지 못했다 — 다른 시트를 고를 수 있게 원본을 지닌다
+                phase = .failed(problem)
+                pending = nil
+                sheetFallbackActive = true
+            } else {
+                finish(.failed(problem))
+            }
         }
     }
 
@@ -340,6 +432,9 @@ public struct PackImportSession: Equatable, Sendable {
         pending = nil
         delimiterFallback = nil
         pendingFallback = nil
+        sheetChoice = nil
+        pendingSheetFallback = false
+        sheetFallbackActive = false
     }
 
     // MARK: - 메인 밖에서 할 일
@@ -347,6 +442,20 @@ public struct PackImportSession: Equatable, Sendable {
     /// 한 번의 읽기 — **순수**하다(같은 Run이면 같은 결과). 원본 바이트에서 인코딩→구분자→파싱→검증을 전부 한다(5-1·AC-18).
     /// - Parameter library: 단축어 겹침(4-I)을 셀 지금 목록 — 못 읽었으면 nil(겹침 안내 없이 미리보기)
     public static func compute(_ run: Run, library: PackImpact.Library?) -> Computation {
+        // xlsx — 받는 판이고 원본이 ZIP·OLE2 매직이면. 인코딩·구분자 단계가 없다(6-1)
+        if case .file(let data) = run.source, run.acceptsWorkbookFiles, PackImporter.isWorkbook(data) {
+            let outcome: Computation.Outcome
+            do throws(PackImportFailure) {
+                switch try PackImporter.readWorkbook(data, sheet: run.options.sheet) {
+                case .chooseSheet(let sheets): outcome = .chooseSheet(sheets)
+                case .draft(let draft): outcome = previewOutcome(draft, library: library)
+                }
+            } catch {
+                outcome = .failed(.structural(error))
+            }
+            return Computation(generation: run.generation, review: nil, outcome: outcome)
+        }
+
         var review: PackEncodingReview?
         if case .file(let data) = run.source { review = PackEncodingReview.probe(data, choice: run.options.encoding) }
 
@@ -360,9 +469,7 @@ public struct PackImportSession: Equatable, Sendable {
             case .chooseDelimiter(let candidates):
                 outcome = .chooseDelimiter(candidates)
             case .draft(let draft):
-                let overlap = draft.mode == .phrases ? library.map { PackImpact.overlap(ofDraft: draft.entries, in: $0) } : nil
-                let preview = PackImportPreview(draft: draft, overlap: overlap)
-                outcome = draft.isImportable ? .preview(preview) : .failed(.noValidRecords(draft.skipped))
+                outcome = previewOutcome(draft, library: library)
                 review?.recordCount = draft.dataRecordCount
                 review?.multilineBodyCount = draft.mode == .numbered ? draft.items.filter { $0.body.contains("\n") }.count
                     : draft.entries.filter { $0.body.contains("\n") }.count
@@ -371,6 +478,12 @@ public struct PackImportSession: Equatable, Sendable {
             outcome = .failed(.structural(error))
         }
         return Computation(generation: run.generation, review: review, outcome: outcome)
+    }
+
+    /// 초안 → 미리보기(문구형은 단축어 겹침 4-I), 유효 0이면 거부(위치·사유만 들고 간다 — 검증 F-7)
+    private static func previewOutcome(_ draft: PackDraft, library: PackImpact.Library?) -> Computation.Outcome {
+        let overlap = draft.mode == .phrases ? library.map { PackImpact.overlap(ofDraft: draft.entries, in: $0) } : nil
+        return draft.isImportable ? .preview(PackImportPreview(draft: draft, overlap: overlap)) : .failed(.noValidRecords(draft.skipped))
     }
 
     /// `compute`를 전역 큐에서 — 화면(메인)은 `await` 동안 멈추지 않는다. 큰 파일(3MB) 파싱이 메인을 막지 않게(1-c G8).

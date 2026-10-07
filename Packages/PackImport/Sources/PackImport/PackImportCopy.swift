@@ -220,6 +220,22 @@ public enum PackImportCopy {
         kind == .file ? "되돌리면 파일을 처음부터 다시 읽어요." : "되돌리면 붙여 넣은 표를 처음부터 다시 읽어요."
     }
 
+    // MARK: - 4-D 시트 고르기 (엑셀 — 보이는 시트가 둘 이상일 때만, AC-36)
+
+    public static let sheetTitle = "시트 고르기"
+    public static let sheetHeader = "가져올 시트"
+    public static let sheetFooter = "숨긴 시트는 목록에 없어요. 한 번에 한 시트만 가져와요 — 다른 시트는 다시 가져오면 돼요."
+    /// 미리보기에서 고르기 화면으로(다시 읽지 않는다)
+    public static let reviewSheetAgain = "시트 다시 고르기"
+    /// 고른 시트를 읽지 못한 거부 화면에서 고르기 화면으로
+    public static let chooseAnotherSheet = "다른 시트 고르기"
+
+    /// 시트 줄의 보조 글 — 대략의 행 수(정보 줄·머리글 포함). 읽지 못한 시트는 nil(아무것도 쓰지 않는다)
+    public static func sheetRowCount(_ count: Int?) -> String? {
+        guard let count else { return nil }
+        return count == 0 ? "빈 시트" : "약 \(PackNoticeCopy.number(count))행"
+    }
+
     // MARK: - 4-E·4-F·4-H 미리보기
 
     public static let previewTitle = "미리보기"
@@ -264,6 +280,10 @@ public enum PackImportCopy {
     /// 문자 정리(11절)로 뺀 글자 — 조용히 바꾸지 않는다
     public static func sanitized(_ count: Int) -> String { "눈에 보이지 않는 글자 \(PackNoticeCopy.number(count))개는 빼고 가져와요" }
 
+    /// (엑셀) 숨긴 행·열도 읽는다 — 사용자의 의도를 추정하지 않고 알린다(6-4, 시안 4-F)
+    public static func hiddenRows(_ count: Int) -> String { "숨긴 행 \(PackNoticeCopy.number(count))개도 가져와요" }
+    public static func hiddenColumns(_ count: Int) -> String { "숨긴 열 \(PackNoticeCopy.number(count))개도 가져와요" }
+
     /// 따옴표 없는 칸 가운데의 `"` — 글자로 받고 건수만(5-4)
     public static func strayQuotes(_ count: Int) -> String { "칸 가운데의 따옴표 \(PackNoticeCopy.number(count))개는 글자 그대로 가져와요" }
 
@@ -284,8 +304,16 @@ public enum PackImportCopy {
     /// CSV는 「n번째 항목(m번째 줄)」 — 여러 줄 본문 때문에 둘이 다르다(5-4)
     public static func position(record: Int, line: Int) -> String { "\(PackNoticeCopy.number(record))번째 항목(\(PackNoticeCopy.number(line))번째 줄)" }
 
+    /// 엑셀은 「n번째 행」(엑셀에서 보이는 행 번호), CSV는 「n번째 항목(m번째 줄)」(시안 4-F 판단 ⑤)
+    public static func position(_ position: PackRecordPosition) -> String {
+        switch position {
+        case .record(let record, let line): self.position(record: record, line: line)
+        case .row(let row): "\(PackNoticeCopy.number(row))번째 행"
+        }
+    }
+
     public static func skipTitle(_ skipped: SkippedRecord) -> String {
-        "\(position(record: skipped.record, line: skipped.line)) — \(skipReason(skipped.reason))"
+        "\(position(skipped.position)) — \(skipReason(skipped.reason))"
     }
 
     public static func skipReason(_ reason: SkipReason) -> String {
@@ -300,6 +328,11 @@ public enum PackImportCopy {
         case .emptyBody: "본문이 비어 있어요"
         case .titleTooLong: "제목이 너무 길어요"
         case .bodyTooLong: "본문이 너무 길어요"
+        case .formula: "수식이에요"
+        case .dateFormat: "날짜 서식이에요"
+        case .booleanOrError: "TRUE·FALSE나 오류 값이에요"
+        case .numberCell: "숫자로 저장된 칸이에요"
+        case .merged: "병합한 칸이 있어요"
         }
     }
 
@@ -315,7 +348,18 @@ public enum PackImportCopy {
         case .emptyBody: "본문을 채워 주세요"
         case .titleTooLong: "제목은 \(PackNoticeCopy.number(PackLimits.title.characters))자까지예요"
         case .bodyTooLong: "본문은 한 칸에 \(PackNoticeCopy.number(PackLimits.body.characters))자까지예요"
+        // 6-4 — 원인과 해결 한 줄(6-6). 날짜·불리언·오류·숫자는 칸에 입력할 때 엑셀이 바꾼 것이라 해결이 같다(PDR 6-4 R19 문구)
+        case .formula: "「값만 붙여넣기」로 바꿔 주세요"
+        case .dateFormat, .booleanOrError, .numberCell: "그 열 서식을 「텍스트」로 바꿔 주세요"
+        case .merged: "병합을 풀어 주세요"
         }
+    }
+
+    /// 화면의 고치는 법 — 사유가 같아도 엑셀 행이면 엑셀 말로. 「칸 수가 머리글과 달라요」는 CSV에선 쉼표 문제지만 엑셀 행에선 머리글보다
+    /// 오른쪽 칸에 값이 있는 것이다(엑셀은 빈 칸을 채우므로 모자랄 수는 없다)
+    public static func skipFix(_ skipped: SkippedRecord) -> String {
+        if case .row = skipped.position, skipped.reason == .columnCount { return "머리글이 없는 오른쪽 칸을 비워 주세요" }
+        return skipFix(skipped.reason)
     }
 
     public struct SkipGroup: Equatable, Sendable {
@@ -474,6 +518,37 @@ public enum PackImportCopy {
             "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~\(PackNoticeCopy.number(PackLimits.templatePatterns))개예요."
         case .templateInPhrasesMode:
             "단축어 열이 있는 \(kind == .file ? "파일" : "표")에는 「#틀」 줄을 쓸 수 없어요."
+        case .mergedHeaderOrMeta:
+            "머리글이나 정보 줄에 병합한 칸이 있어요. 병합을 풀어 주세요."
+        case .nonTextHeaderCell:
+            "머리글이나 정보 줄에 수식·날짜처럼 글이 아닌 칸이 있어요. 그 칸을 글로 바꿔 주세요."
+        case .workbook(let workbook):
+            workbookMessage(workbook)
+        }
+    }
+
+    /// 4-G 엑셀 행(시안 표) — 컨테이너·XML 거부 코드를 사용자가 할 수 있는 일로 묶는다: 비밀번호·옛 형식 / 매크로 / 너무 큼 / 항목 많음 /
+    /// 보이는 시트 없음 / 긴 글 / 그 밖은 「읽을 수 없어요」 하나(계획 ③ — 손상·적대 구조를 사용자가 구별할 까닭이 없다).
+    /// **xlsx를 받는 판에서만 닿는다**(CSV 전용판 세션은 xlsx로 읽지 않는다 — AC-35). 시트 이름·파트 이름·내용 없음(AC-34)
+    private static func workbookMessage(_ failure: XLSXWorkbookFailure) -> String {
+        switch failure {
+        case .archive(.legacyOrProtectedWorkbook):
+            "비밀번호가 걸렸거나 옛 형식(.xls)인 엑셀이에요. 비밀번호를 풀고 「Excel 통합 문서(.xlsx)」로 저장해 주세요."
+        case .macroEnabled:
+            "매크로가 든 파일은 받지 않아요. 「Excel 통합 문서(.xlsx)」로 다시 저장해 주세요."
+        case .archive(.fileTooLarge), .archive(.partTooLarge), .archive(.totalOutputExceeded), .archive(.compressionRatioExceeded), .tooMuchText:
+            message(.fileTooLarge, kind: .file)
+        case .tooManyRows, .tooManyCells, .tooManySharedStrings:
+            message(.tooManyRecords, kind: .file)
+        case .noVisibleSheet:
+            "보이는 시트가 없어요. 숨긴 시트는 가져오지 않으니 숨기기를 풀어 주세요."
+        case .textTooLong:
+            "칸 하나의 글이 너무 길어요. 본문은 한 칸에 \(PackNoticeCopy.number(PackLimits.body.characters))자까지예요."
+        case .archive, .doctypeOrEntity, .unsupportedTextEncoding, .malformedXML, .nestingTooDeep, .tooManyAttributes, .notSpreadsheet,
+             .unsafeRelationshipTarget,
+             .brokenRelationship, .unexpectedPart, .malformedPart, .sheetNotFound, .invalidSharedStringIndex, .invalidStyleIndex,
+             .invalidCellReference, .unknownCellType, .invalidMergeRange:
+            "이 엑셀 파일을 읽을 수 없어요. 엑셀에서 「Excel 통합 문서(.xlsx)」로 다시 저장해 주세요."
         }
     }
 
@@ -502,10 +577,11 @@ public enum PackImportCopy {
         switch failure {
         case .quote, .columnCountMismatch, .headerNotRecognized, .duplicateHeader, .duplicateHeaderAlias, .mixedModeHeader,
              .missingRequiredColumn, .tooManyColumns, .metaAfterHeader, .duplicateMeta, .duplicateSourceMeta, .unknownMeta, .unsupportedEscapeMeta,
-             .metaValueCount, .metaTooManyCells, .templateInPhrasesMode:
+             .metaValueCount, .metaTooManyCells, .templateInPhrasesMode, .mergedHeaderOrMeta, .nonTextHeaderCell:
             return true
+        // 엑셀 컨테이너·XML 거부는 「한 행이 틀려서」가 아니라 파일을 못 읽은 것이다
         case .fileTooLarge, .emptyFile, .unsupportedEncoding, .invalidUTF8AfterBOM, .invalidUTF16, .encodingDoesNotMatchBOM,
-             .undecodable, .tooManyLines, .tooManyRecords:
+             .undecodable, .tooManyLines, .tooManyRecords, .workbook:
             return false
         }
     }

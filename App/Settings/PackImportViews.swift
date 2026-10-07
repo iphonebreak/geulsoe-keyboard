@@ -13,8 +13,9 @@ import TadakDomain
 // `PasteButton` — 누르기 전에는 읽지 않고 확인 창도 없다). 샘플 받기는 번들의 고정 파일(가짜 내용)을 앱 임시 폴더에 보이는 이름으로 복사해
 // 시스템 공유 시트로 넘긴다 — 사용자 입력은 담기지 않고, 무엇을 받았는지 기록하지 않는다.
 
-/// 3-D 파일 선택기가 받는 형식 — `.csv`·`.tsv`·`.txt`(계획서 3-2절). 나머지는 선택기에서 고를 수 없다
-let packImportContentTypes: [UTType] = [.commaSeparatedText, .tabSeparatedText, .plainText]
+/// 3-D 파일 선택기가 받는 형식 — 판을 따른다(`PackImportFileTypes`, 1-e ③): CSV 전용판은 `.csv`·`.tsv`·`.txt`(계획서 3-2절)만,
+/// xlsx 중심판은 엑셀 통합 문서를 더한다. 나머지는 선택기에서 고를 수 없다
+let packImportContentTypes: [UTType] = PackImportFileTypes.allowed(for: .selected)
 
 // MARK: - 3-A 첫 화면
 

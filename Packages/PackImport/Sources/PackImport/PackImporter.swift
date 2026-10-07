@@ -6,10 +6,14 @@ public struct PackImportOptions: Equatable, Sendable {
     public var encoding: PackEncodingChoice
     /// 사용자가 고른 구분자(후보가 2개 이상일 때 또는 수동 변경) — nil이면 후보 검증(5-2)
     public var delimiter: CSVDelimiter?
+    /// (xlsx) 고른 시트 — 표시 시트 목록(`XLSXWorkbookReader.sheets`, 워크북 순서)의 자리. nil이면 표시 시트가 하나일 때 그 시트,
+    /// 둘 이상이면 고르기(AC-36). CSV는 보지 않는다
+    public var sheet: Int?
 
-    public init(encoding: PackEncodingChoice = .automatic, delimiter: CSVDelimiter? = nil) {
+    public init(encoding: PackEncodingChoice = .automatic, delimiter: CSVDelimiter? = nil, sheet: Int? = nil) {
         self.encoding = encoding
         self.delimiter = delimiter
+        self.sheet = sheet
     }
 }
 
@@ -35,14 +39,67 @@ public enum SkipReason: Equatable, Sendable {
     case titleTooLong
     /// 본문 3,000자 초과(잠정 — P-8)
     case bodyTooLong
+    // 6-4 — xlsx 칸이 원문이 아니다(1-e ③). 한 행에 여럿이면 이 순서의 첫 것: 수식 → 날짜 서식 → 불리언·오류 → 숫자 → 병합.
+    // 이 다섯은 위의 검사(열 수·번호·단축어·본문)보다 먼저 본다 — 칸 값을 믿을 수 없는 행이라 그 값으로 한 판정이 틀린다. CSV는 내지 않는다
+    /// 수식 칸(`<f>`·`t="str"`) — 캐시 값은 원문이 아니다
+    case formula
+    /// 날짜·시간 서식의 숫자 칸 — 원문이 이미 사라졌다
+    case dateFormat
+    /// 불리언(`TRUE`)·오류(`#N/A`) 칸
+    case booleanOrError
+    /// 번호 열 밖의 숫자 칸(R19 — 단축어·제목·본문·모르는 열) — `=2+3`→5·`007`→7처럼 원문과 다를 수 있다
+    case numberCell
+    /// 병합 범위와 겹치는 행(선두·비선두 모두)
+    case merged
+}
+
+/// 건너뛴 행·구조 오류가 가리키는 자리 — **번호만**(AC-34)
+public enum PackRecordPosition: Equatable, Sendable {
+    /// CSV 논리 레코드 n(1부터, 파일 전체 기준 — 빈 레코드 포함)과 그 레코드가 시작한 물리 줄 m — 「n번째 항목(m번째 줄)」
+    case record(Int, line: Int)
+    /// xlsx 시트 행 번호(사용자가 엑셀에서 보는 번호) — 「n번째 행」
+    case row(Int)
+
+    /// 레코드 번호 — xlsx는 시트 행 번호
+    public var record: Int {
+        switch self {
+        case .record(let record, _): record
+        case .row(let row): row
+        }
+    }
+
+    /// 레코드가 시작한 물리 줄 — xlsx는 시트 행 번호(구조 오류 코드의 `line` 자리)
+    public var line: Int {
+        switch self {
+        case .record(_, let line): line
+        case .row(let row): row
+        }
+    }
 }
 
 public struct SkippedRecord: Equatable, Sendable {
-    /// 논리 레코드 번호(1부터, 파일 전체 기준)
-    public var record: Int
-    /// 그 레코드가 시작한 물리 줄
-    public var line: Int
+    public var position: PackRecordPosition
     public var reason: SkipReason
+
+    /// CSV — 논리 레코드 번호(1부터, 파일 전체 기준)와 그 레코드가 시작한 물리 줄
+    public init(record: Int, line: Int, reason: SkipReason) {
+        self.init(position: .record(record, line: line), reason: reason)
+    }
+
+    /// xlsx — 시트 행 번호
+    public init(row: Int, reason: SkipReason) {
+        self.init(position: .row(row), reason: reason)
+    }
+
+    init(position: PackRecordPosition, reason: SkipReason) {
+        self.position = position
+        self.reason = reason
+    }
+
+    /// 논리 레코드 번호 — xlsx는 시트 행 번호
+    public var record: Int { position.record }
+    /// 물리 줄 — xlsx는 시트 행 번호
+    public var line: Int { position.line }
 }
 
 /// 메타 값이 상한을 넘어 미리 채우지 않은 칸 — 폼이 최종 권위라 거부하지 않는다(5-6)
@@ -86,9 +143,16 @@ public struct PackDraft: Equatable, Sendable {
     public var hadBOM: Bool
     /// R18 — BOM 없는 비ASCII 파일
     public var needsEncodingConfirmation: Bool
-    public var delimiter: CSVDelimiter
-    /// 자동 판정(5-2)이 채택한 구분자 — 구분자를 골라 읽었어도 같은 원본의 판정이다. **둘 이상일 때만** 미리보기가 「칸 나누기」를 보인다(R29)
+    /// 읽은 구분자 — xlsx는 nil(칸 나누기가 없다)
+    public var delimiter: CSVDelimiter?
+    /// 자동 판정(5-2)이 채택한 구분자 — 구분자를 골라 읽었어도 같은 원본의 판정이다. **둘 이상일 때만** 미리보기가 「칸 나누기」를 보인다(R29). xlsx는 빈 배열
     public var delimiterCandidates: [CSVDelimiter]
+    /// (xlsx) 읽은 시트의 이름 — 화면과 팩 이름 기본값(`suggestedPackName`)에만 쓴다. 로그·분석·오류 값에 싣지 않는다(6-4·AC-34). CSV는 nil
+    public var sheetName: String?
+    /// (xlsx) 받은 행 가운데 숨긴 행 수 — 미리보기 「숨긴 행 N개도 가져와요」(6-4: 읽되 알린다). CSV는 0
+    public var hiddenRowCount: Int
+    /// (xlsx) 가져오는 열(번호·단축어·제목·본문) 가운데 숨긴 열 수 — 「숨긴 열 N개도 가져와요」. CSV는 0
+    public var hiddenColumnCount: Int
     public var mode: ExternalPack.Mode
     public var meta: PackMetaPrefill
     /// 문구형 항목(정규화 기준 같은 단축어는 뒤 항목이 이긴 결과)
@@ -114,12 +178,39 @@ public struct PackDraft: Equatable, Sendable {
     public var requiresConfirmation: Bool { skippedRatio >= PackLimits.skipRatioRequiringConfirmation }
     /// 유효 레코드 0이면 영구 비활성(5-5)
     public var isImportable: Bool { acceptedRecordCount > 0 }
+
+    /// 팩 이름 칸의 기본값 후보 — (xlsx) 시트 이름. 앱이 붙인 이름(`Sheet1`·`시트1`)·빈 이름은 nil(6-4 P-10 보강), 문자 정리(11절) 뒤
+    /// 이름 상한(`PackLimits.name`)을 넘으면 nil(메타 값과 같은 규칙 — 거부하지 않고 채우지 않는다, 5-6). `#이름`이 있으면 폼은 그쪽을 쓴다
+    public var suggestedPackName: String? {
+        guard let sheetName, let suggested = XLSXWorkbookReader.Sheet.suggestedPackName(forSheetName: sheetName) else { return nil }
+        let name = PackTextSanitizer.sanitize(suggested).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !name.isEmpty && PackLimits.name.admits(name) ? name : nil
+    }
 }
 
 public enum PackImportOutcome: Equatable, Sendable {
     case draft(PackDraft)
     /// 채택 후보가 2개 이상 — 사용자가 고르면 `PackImportOptions.delimiter`로 다시 부른다(5-2 #3)
     case chooseDelimiter([CSVDelimiter])
+}
+
+/// (xlsx) 시트 고르기 화면의 한 줄(4-D) — 이름은 화면에만(로그·분석·오류 값에 싣지 않는다, AC-34)
+public struct PackSheetSummary: Equatable, Sendable {
+    /// 시트 이름(`_xHHHH_`를 푼 것)
+    public let name: String
+    /// 대략의 행 수 — 비지 않은 행(정보 줄·머리글 포함). 목록을 만들 때 읽지 못한 시트는 nil(고르면 그때 거부된다)
+    public let rowCount: Int?
+
+    public init(name: String, rowCount: Int?) {
+        self.name = name
+        self.rowCount = rowCount
+    }
+}
+
+public enum PackWorkbookOutcome: Equatable, Sendable {
+    case draft(PackDraft)
+    /// 표시 시트가 둘 이상이고 아직 고르지 않았다 — 사용자가 고르면 `PackImportOptions.sheet`로 다시 부른다(AC-36)
+    case chooseSheet([PackSheetSummary])
 }
 
 /// CSV(`.csv`·`.tsv`·`.txt`·붙여넣기) 가져오기 파이프라인(PDR `external-snippet-packs.md` 5절):
@@ -172,7 +263,8 @@ public enum PackImporter {
             }
         }
         guard parsed.records.contains(where: { !$0.isBlank }) else { throw .emptyFile }
-        var draft = try PackRecordReader.read(parsed.records, delimiter: delimiter)
+        let records = parsed.records.enumerated().map { PackRecord(csv: $1, number: $0 + 1) }
+        var draft = try PackRecordReader.read(records, delimiter: delimiter)
         draft.delimiterCandidates = candidates
         draft.encoding = encoding?.encoding
         draft.hadBOM = encoding?.hadBOM ?? false
@@ -233,9 +325,116 @@ public enum PackImporter {
             }
         }
     }
+
+    // MARK: - xlsx (1-e ③)
+
+    /// 원본 판별 — xlsx 쪽 매직이면 참: ZIP 로컬 헤더 `PK\3\4`·빈 ZIP `PK\5\6`·OLE2 복합 문서(비밀번호 걸린 엑셀·옛 `.xls` — 컨테이너가
+    /// 알맞은 사유로 거부한다). 참이면 인코딩·구분자 단계를 건너뛴다(6-1). BOM으로 시작하는 글은 CSV다
+    public static func isWorkbook(_ data: Data) -> Bool {
+        let signatures: [[UInt8]] = [[0x50, 0x4B, 0x03, 0x04], [0x50, 0x4B, 0x05, 0x06], [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]]
+        return signatures.contains { data.starts(with: $0) }
+    }
+
+    /// xlsx 파이프라인 — 컨테이너·XML(1-e ①②) → 시트 하나의 `RawTable` → **CSV와 같은** 헤더·메타 판정 → 행별 검증(`PackRecordReader`, AC-32).
+    /// 표시 시트가 둘 이상인데 `sheet`가 nil이면 고르기 목록을 돌려준다(AC-36 — 기본은 첫 표시 시트, 목록의 0번).
+    /// 상태가 없다 — 시트를 고르면 원본 바이트에서 다시 연다(5-1과 같은 원칙). 실패는 내용 없는 코드다(AC-34)
+    public static func readWorkbook(_ data: Data, sheet: Int?) throws(PackImportFailure) -> PackWorkbookOutcome {
+        var reader: XLSXWorkbookReader
+        do {
+            reader = try XLSXWorkbookReader.open(data)
+        } catch {
+            throw .workbook(error)
+        }
+        guard let index = sheet ?? (reader.sheets.count == 1 ? 0 : nil) else {
+            return .chooseSheet(sheetSummaries(&reader))
+        }
+        guard reader.sheets.indices.contains(index) else { throw .workbook(.sheetNotFound) }
+        let chosen = reader.sheets[index]
+        let table: RawTable
+        do {
+            table = try reader.table(for: chosen)
+        } catch {
+            throw .workbook(error)
+        }
+        var draft = try PackRecordReader.read(table)
+        draft.sheetName = displayName(chosen.name)
+        return .draft(draft)
+    }
+
+    /// 시트 고르기 목록 — 표시 시트마다 대략의 행 수. 한 독자의 해제 총량(①)을 나눠 쓰므로 큰 시트 뒤의 시트는 총량에 걸릴 수 있다 —
+    /// 그 시트(와 읽지 못한 시트)는 행 수 없이 보이고, 고르면 새로 연 독자가 다시 읽는다(②-6 12번)
+    private static func sheetSummaries(_ reader: inout XLSXWorkbookReader) -> [PackSheetSummary] {
+        reader.sheets.map { sheet in
+            PackSheetSummary(name: displayName(sheet.name), rowCount: try? reader.table(for: sheet).rows.count)
+        }
+    }
+
+    /// 화면에 그릴 시트 이름 — `_xHHHH_`로 들어온 제어·방향 재정의·제로폭 문자를 문자 정리(11절)로 뺀다(보안 검토 S7 — 표시 위장).
+    /// 길이는 ②의 시트 이름 상한(255B)에 묶여 있다
+    static func displayName(_ name: String) -> String {
+        PackTextSanitizer.sanitize(name).text
+    }
 }
 
-/// 논리 레코드 → 헤더·메타 판정 → 행별 검증. **xlsx(1-e)도 `RawTable`을 같은 레코드 모양으로 넘겨 이 경로를 탄다**(6-1·AC-32).
+/// 판정 경로에 들어가는 레코드 하나 — CSV 논리 레코드와 xlsx 시트 행이 **같은 모양**으로 들어온다(6-1·AC-32).
+/// 판정(`PackRecordReader`)은 이 값만 보고 원본 형식을 묻지 않는다 — xlsx 행이 더 가진 것은 칸 종류(6-4)·병합·숨김뿐이고, CSV에서는 비어 있다
+struct PackRecord: Equatable {
+
+    /// 칸 하나가 원문이 아닌 사정 — 판정이 그 행을 건너뛸지(6-4) 본다. 글·빈 칸은 `.text`
+    enum CellKind: Equatable {
+        case text
+        /// 숫자 칸 — `cells`에는 `<v>` 글자 그대로(번호 열이면 받는다, R19)
+        case number
+        case unsupported(UnsupportedCellKind)
+    }
+
+    /// 칸 글 — **trim하지 않는다**. CSV는 셀 그대로, xlsx는 글·숫자 글자 그대로이고 빈 칸·원문이 아닌 칸은 빈 글
+    var cells: [String]
+    /// 칸 종류(`cells`와 같은 자리) — CSV는 빈 배열(모든 칸이 글)
+    var kinds: [CellKind]
+    var position: PackRecordPosition
+    var isMerged: Bool
+    var isHidden: Bool
+
+    /// CSV 논리 레코드 — 번호는 파일 전체 기준(빈 레코드 포함, 1부터)
+    init(csv record: CSVRecord, number: Int) {
+        cells = record.cells
+        kinds = []
+        position = .record(number, line: record.line)
+        isMerged = false
+        isHidden = false
+    }
+
+    /// xlsx 시트 행 — **`RawTable.columnLimit` 칸까지 빈 칸으로 채운다.** xlsx는 빈 칸을 저장하지 않을 뿐 행에는 모든 열이 있다 —
+    /// 끝 빈 칸이 모자라다고 「열 수」로 건너뛰면 안 된다(스프레드시트가 저장한 CSV도 표 폭까지 채운다, 5-3). 넘침 칸(13번째)에 글이 있으면
+    /// 메타는 칸 상한, 데이터는 「열 수」로 CSV와 같은 결과가 난다(②-6 2번)
+    init(row: RawRow) {
+        var cells: [String] = []
+        var kinds: [CellKind] = []
+        for cell in row.cells {
+            switch cell {
+            case .text(let text): cells.append(text); kinds.append(.text)
+            case .number(let literal): cells.append(literal); kinds.append(.number)
+            case .blank: cells.append(""); kinds.append(.text)
+            case .unsupported(let kind): cells.append(""); kinds.append(.unsupported(kind))
+            }
+        }
+        let padding = max(0, RawTable.columnLimit - cells.count)
+        self.cells = cells + Array(repeating: "", count: padding)
+        self.kinds = kinds + Array(repeating: .text, count: padding)
+        position = .row(row.number)
+        isMerged = row.isMerged
+        isHidden = row.isHidden
+    }
+
+    /// 빈 레코드 — 모든 칸이 빈 글이고 원문이 아닌 칸도 없다(5-4 명확화 ②). xlsx 표는 빈 행을 담지 않는다
+    var isBlank: Bool { cells.allSatisfy(\.isEmpty) && kinds.allSatisfy { $0 == .text } }
+
+    /// 원문이 아닌 칸(수식·날짜·불리언·오류)이 있다
+    var hasUnsupportedCell: Bool { kinds.contains { if case .unsupported = $0 { true } else { false } } }
+}
+
+/// 논리 레코드 → 헤더·메타 판정 → 행별 검증. **xlsx(1-e)도 `RawTable`을 같은 레코드 모양(`PackRecord`)으로 넘겨 이 경로를 탄다**(6-1·AC-32).
 enum PackRecordReader {
 
     enum Field: Equatable { case number, trigger, title, body }
@@ -354,70 +553,124 @@ enum PackRecordReader {
         return .rejected(.columnCountMismatch(record: firstMismatch.record, line: firstMismatch.line))
     }
 
-    /// 본 판정 — 구조 오류는 throw, 행 오류는 건너뜀
-    static func read(_ records: [CSVRecord], delimiter: CSVDelimiter) throws(PackImportFailure) -> PackDraft {
+    /// xlsx 시트 표 — 행을 `PackRecord`로 바꿔 **같은** 본 판정에 넣는다(AC-32). 숨긴 열은 가져오는 열만 센다
+    static func read(_ table: RawTable) throws(PackImportFailure) -> PackDraft {
+        try read(table.rows.map(PackRecord.init(row:)), delimiter: nil, hiddenColumns: Set(table.hiddenColumns))
+    }
+
+    /// 본 판정 — 구조 오류는 throw, 행 오류는 건너뜀. CSV·xlsx가 같은 길이다: 원본 형식을 묻지 않고 레코드의 칸·칸 종류·병합만 본다
+    /// (CSV 레코드는 칸 종류가 모두 글이고 병합이 없어 xlsx 몫의 검사가 언제나 통과한다)
+    static func read(_ records: [PackRecord], delimiter: CSVDelimiter?, hiddenColumns: Set<Int> = []) throws(PackImportFailure) -> PackDraft {
         var meta = PackMetaPrefill(name: nil, license: nil, templateSpecs: [], issues: [])
         var seenMeta: [PackMetaField: String] = [:]
         var header: Header?
         var rows = RowCollector()
 
-        for (offset, record) in records.enumerated() {
-            let number = offset + 1
+        for record in records {
+            let position = record.position
             if record.isBlank { continue }                        // 빈 레코드 — 어디서든 무시, 분모 제외
             let key = record.cells[0].trimmingCharacters(in: .whitespacesAndNewlines)
             guard let current = header else {
                 if key.hasPrefix("#") {
-                    try readMeta(record, key: key, number: number, seen: &seenMeta, into: &meta)
+                    try checkStructureRow(record)
+                    try readMeta(record, key: key, seen: &seenMeta, into: &meta)
                     continue
                 }
                 switch parseHeader(record.cells) {
-                case .header(let parsed): header = parsed
                 case .unrecognized: throw .headerNotRecognized
-                case .invalid(let failure): throw failure
+                case .header(let parsed):
+                    try checkStructureRow(record)
+                    header = parsed
+                case .invalid(let failure):
+                    try checkStructureRow(record)
+                    throw failure
                 }
                 continue
             }
             // 머리글 뒤의 예약 메타 키 = 위치 오류(엑셀 정렬 사고)
-            if reservedMetaKeys.contains(key) { throw .metaAfterHeader(record: number, line: record.line) }
+            if reservedMetaKeys.contains(key) { throw .metaAfterHeader(record: position.record, line: position.line) }
             rows.dataRecordCount += 1
             guard rows.dataRecordCount <= PackLimits.dataRecords else { throw .tooManyRecords }
-            guard columnsMatch(record.cells, width: current.width) else {
-                rows.skip(number, record.line, .columnCount)
+            if let reason = cellSkipReason(record, numberColumn: current.columns[.number]) {
+                rows.skip(position, reason)
                 continue
             }
-            rows.accept(record, number: number, header: current)
+            guard columnsMatch(record.cells, width: current.width) else {
+                rows.skip(position, .columnCount)
+                continue
+            }
+            rows.accept(record, header: current)
         }
         guard let header else { throw .headerNotRecognized }
         if header.mode == .phrases && !meta.templateSpecs.isEmpty { throw .templateInPhrasesMode }
 
         let (entries, items, duplicates) = rows.finish(mode: header.mode)
         return PackDraft(encoding: nil, hadBOM: false, needsEncodingConfirmation: false, delimiter: delimiter,
-                         delimiterCandidates: [delimiter], mode: header.mode, meta: meta, entries: entries, items: items,
+                         delimiterCandidates: delimiter.map { [$0] } ?? [], sheetName: nil, hiddenRowCount: rows.acceptedHidden,
+                         hiddenColumnCount: Set(header.columns.values).intersection(hiddenColumns).count,
+                         mode: header.mode, meta: meta, entries: entries, items: items,
                          skipped: rows.skipped, dataRecordCount: rows.dataRecordCount, acceptedRecordCount: rows.accepted,
                          duplicateCount: duplicates, ignoredColumnCount: header.ignored,
                          sanitizedCharacterCount: rows.sanitized, strayQuoteCount: 0)
     }
 
+    /// 머리글·정보 줄(6-4) — 병합과 겹치면 전체 거부(비선두 칸이 비어 열 구조를 믿을 수 없다), 원문이 아닌 칸(수식·날짜·불리언·오류)이 있어도
+    /// 전체 거부 `[판단 1-e ③]`(그 줄의 값을 알 수 없다 — 데이터 행처럼 건너뛸 수 없는 줄이다). 숫자 칸은 글자 그대로 읽는다(CSV와 같다).
+    /// 머리글로 인정되지 않는 줄(제목 줄)은 여기 오지 않는다 — CSV처럼 「머리글을 찾지 못했어요」가 먼저다
+    private static func checkStructureRow(_ record: PackRecord) throws(PackImportFailure) {
+        if record.isMerged { throw .mergedHeaderOrMeta(record: record.position.record, line: record.position.line) }
+        if record.hasUnsupportedCell { throw .nonTextHeaderCell(record: record.position.record, line: record.position.line) }
+    }
+
+    /// 6-4 — 원문이 아닌 칸이 있는 데이터 행의 사유. 우선순위(한 행에 여럿이면 첫 것): 수식 → 날짜 서식 → 불리언·오류 →
+    /// 숫자(번호 열 밖 — 단축어·제목·본문·모르는 열·머리글 밖, R19) → 병합. 행의 **모든 칸**을 본다. CSV 레코드는 언제나 nil
+    static func cellSkipReason(_ record: PackRecord, numberColumn: Int?) -> SkipReason? {
+        var found: SkipReason?
+        var rank = Int.max
+        for (index, kind) in record.kinds.enumerated() {
+            let reason: SkipReason
+            switch kind {
+            case .text: continue
+            case .number:
+                guard index != numberColumn else { continue }
+                reason = .numberCell
+            case .unsupported(.formula): reason = .formula
+            case .unsupported(.date): reason = .dateFormat
+            case .unsupported(.boolean), .unsupported(.error): reason = .booleanOrError
+            }
+            if let candidate = cellReasonOrder.firstIndex(of: reason), candidate < rank {
+                rank = candidate
+                found = reason
+            }
+        }
+        return found ?? (record.isMerged ? .merged : nil)
+    }
+
+    /// 6-4 사유 순서 — 병합은 행 속성이라 칸 사유가 없을 때만
+    private static let cellReasonOrder: [SkipReason] = [.formula, .dateFormat, .booleanOrError, .numberCell]
+
     /// 5-3 — 메타는 머리글 앞에서만. 중복(같은 **칸** — `#출처`와 옛 `#권리`는 한 칸)·알 수 없는 키·`#escape`(후속)·셀 cap·
     /// 값 개수(trailing 빈 셀만 허용). `seen`은 칸마다 처음 쓴 키 — 키가 다른 중복(`#출처`+`#권리`)은 문구가 따로다(검증 O1)
     private static func readMeta(
-        _ record: CSVRecord, key: String, number: Int, seen: inout [PackMetaField: String], into meta: inout PackMetaPrefill
+        _ record: PackRecord, key: String, seen: inout [PackMetaField: String], into meta: inout PackMetaPrefill
     ) throws(PackImportFailure) {
+        let number = record.position.record
+        let line = record.position.line
         guard let field = PackMetaField.field(forKey: key) else {
-            if key == metaEscape { throw .unsupportedEscapeMeta(record: number, line: record.line) }
-            throw .unknownMeta(record: number, line: record.line)
+            if key == metaEscape { throw .unsupportedEscapeMeta(record: number, line: line) }
+            throw .unknownMeta(record: number, line: line)
         }
         if let first = seen[field] {
             // 키가 둘인 칸은 출처뿐이다 — 키가 다르면 `#출처`와 `#권리`가 함께 있는 것
-            throw first == key ? .duplicateMeta(record: number, line: record.line) : .duplicateSourceMeta(record: number, line: record.line)
+            throw first == key ? .duplicateMeta(record: number, line: line) : .duplicateSourceMeta(record: number, line: line)
         }
         seen[field] = key
         let effective = effectiveCount(record.cells)
-        guard effective <= PackLimits.metaCells else { throw .metaTooManyCells(record: number, line: record.line) }
+        guard effective <= PackLimits.metaCells else { throw .metaTooManyCells(record: number, line: line) }
         let values = Array(record.cells[1..<max(1, effective)])
         let allowed = field == .template ? 1...PackLimits.templatePatterns : 1...1
         guard allowed.contains(values.count), !values.contains(where: \.isEmpty) else {
-            throw .metaValueCount(record: number, line: record.line)
+            throw .metaValueCount(record: number, line: line)
         }
         switch field {
         case .name:
@@ -436,17 +689,25 @@ enum PackRecordReader {
 private struct RowCollector {
     var dataRecordCount = 0
     var accepted = 0
+    /// 받은 행 가운데 숨긴 행(xlsx 「숨김 N」, 6-4) — 중복으로 덮인 것 포함(`accepted`와 같은 잣대)
+    var acceptedHidden = 0
     var sanitized = 0
     var skipped: [SkippedRecord] = []
     /// 번호형 — 받은 순서대로(중복은 끝에서 정리)
     private var numbered: [PackTemplateItem] = []
     private var phrases: [SnippetEntry] = []
 
-    mutating func skip(_ record: Int, _ line: Int, _ reason: SkipReason) {
-        skipped.append(SkippedRecord(record: record, line: line, reason: reason))
+    mutating func skip(_ position: PackRecordPosition, _ reason: SkipReason) {
+        skipped.append(SkippedRecord(position: position, reason: reason))
     }
 
-    mutating func accept(_ record: CSVRecord, number: Int, header: PackRecordReader.Header) {
+    mutating func accept(_ record: PackRecord, header: PackRecordReader.Header) {
+        let before = accepted
+        accept(record, position: record.position, header: header)
+        if accepted > before, record.isHidden { acceptedHidden += 1 }
+    }
+
+    private mutating func accept(_ record: PackRecord, position number: PackRecordPosition, header: PackRecordReader.Header) {
         func cell(_ field: PackRecordReader.Field) -> String? {
             header.columns[field].map { record.cells[$0] }
         }
@@ -461,15 +722,15 @@ private struct RowCollector {
         switch header.mode {
         case .numbered:
             let raw = (cell(.number) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !raw.isEmpty else { return skip(number, record.line, .missingNumber) }
-            guard let n = Self.number(raw) else { return skip(number, record.line, .invalidNumber) }
-            guard PackLimits.numberRange.contains(n) else { return skip(number, record.line, .numberOutOfRange) }
+            guard !raw.isEmpty else { return skip(number, .missingNumber) }
+            guard let n = Self.number(raw) else { return skip(number, .invalidNumber) }
+            guard PackLimits.numberRange.contains(n) else { return skip(number, .numberOutOfRange) }
             guard let reason = Self.contentFailure(title: title, body: body) else {
                 accepted += 1
                 numbered.append(PackTemplateItem(n: n, title: title, body: body))
                 return
             }
-            skip(number, record.line, reason)
+            skip(number, reason)
         case .phrases:
             switch TriggerCell.parse(clean(cell(.trigger) ?? "")) {
             case .failure(let failure):
@@ -478,9 +739,9 @@ private struct RowCollector {
                 case .tooMany: .tooManyTriggers
                 case .tooLong: .triggerTooLong
                 }
-                skip(number, record.line, reason)
+                skip(number, reason)
             case .success(let triggers):
-                if let reason = Self.contentFailure(title: title, body: body) { return skip(number, record.line, reason) }
+                if let reason = Self.contentFailure(title: title, body: body) { return skip(number, reason) }
                 accepted += 1
                 phrases.append(SnippetEntry(triggers: triggers, title: title.isEmpty ? triggers[0] : title, body: body))
             }

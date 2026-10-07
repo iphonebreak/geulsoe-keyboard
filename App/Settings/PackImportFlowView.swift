@@ -2,7 +2,8 @@ import SwiftUI
 import PackImport
 import TadakDomain
 
-// 외부 채움글 1-c 4·5단계 — 가져오기 시트: 4-A 읽는 중 · 4-B·4-C 글자 확인 · 구분자 고르기 · 4-E·4-F·4-H·4-I 미리보기 · 4-G 거부
+// 외부 채움글 1-c 4·5단계 — 가져오기 시트: 4-A 읽는 중 · 4-B·4-C 글자 확인 · 구분자 고르기 · 4-D 시트 고르기(엑셀, 1-e ③) ·
+// 4-E·4-F·4-H·4-I 미리보기 · 4-G 거부
 // → (5단계) 「팩 정보」 폼 · 확정 · 4-M 완료(`PackImportFormView.swift`)
 // (계획서 `external-snippet-packs-1c-plan.md` 3-3·3-4절·5절 4·5행, 시안 4-A~4-C·4-E~4-M·5-A~5-C, PDR 5-1·5-2·5-3b·5-5·5-6·9-2, AC-3·17~20·34).
 //
@@ -128,13 +129,16 @@ struct PackImportFlowView: View {
             encodingContent(review)
         case .delimiter(let candidates):
             delimiterContent(candidates)
+        case .sheet(let choice):
+            sheetContent(choice)
         case .preview(let preview):
             PackImportPreviewSections(
                 preview: preview, kind: request.kind, partialConfirmed: session.partialImportConfirmed,
-                canReviewEncoding: session.lastReview != nil, isWorking: session.isWorking,
+                canReviewEncoding: session.lastReview != nil, canReviewSheet: session.canReviewSheet, isWorking: session.isWorking,
                 summary: { id in library?.pack(id)?.summary },
                 onDelimiter: { run(session.chooseDelimiter($0)) },
                 onReviewEncoding: { session.reviewEncodingAgain() },
+                onReviewSheet: { session.reviewSheetAgain() },
                 onShowAll: { path.append(.allRows) }, onShowAllSkipped: { path.append(.allSkipped) },
                 onHowToFix: { path.append(.guide) }, onPartial: { showsPartialConfirmation = true })
         case .failed(let problem):
@@ -259,6 +263,42 @@ struct PackImportFlowView: View {
         }
     }
 
+    /// 4-D — 보이는 시트(숨김 제외, 워크북 순서)와 대략의 행 수. 줄을 누르면 고르고(다시 읽지 않는다), 「다음」이 고른 시트로 원본에서 다시 읽는다.
+    /// 시트 이름은 화면에만 — 문자 정리 뒤의 이름이다(보안 검토 S7)
+    private func sheetContent(_ choice: PackSheetChoice) -> some View {
+        Section {
+            ForEach(Array(choice.sheets.enumerated()), id: \.offset) { index, sheet in
+                Button {
+                    session.selectSheet(index)
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(verbatim: sheet.name)
+                                .foregroundStyle(.primary)
+                            if let rows = PackImportCopy.sheetRowCount(sheet.rowCount) {
+                                Text(rows)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        Image(systemName: "checkmark")
+                            .foregroundStyle(.tint)
+                            .opacity(index == choice.selected ? 1 : 0)
+                            .accessibilityHidden(true)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .accessibilityAddTraits(index == choice.selected ? .isSelected : [])
+                .disabled(session.isWorking)
+            }
+        } header: {
+            Text(PackImportCopy.sheetHeader)
+        } footer: {
+            Text(PackImportCopy.sheetFooter)
+        }
+    }
+
     /// 4-G — 큰 ✕ + 제목 + 사유 한 줄(파일 내용 없음). 머리글 사유면 머리글 예시, 유효 0이면 건너뛴 이유. 다음 행동 둘 — 만드는 법 · 다른 파일.
     /// 칸 나누기를 바꿔 실패했으면(R29) 제목이 그 칸 나누기를 말하고, 맨 앞에 「직전 구분자로 되돌리기」가 있다(원본에서 다시 읽는다)
     @ViewBuilder
@@ -297,6 +337,22 @@ struct PackImportFlowView: View {
                 .disabled(session.isWorking)
             } footer: {
                 Text(PackImportCopy.revertDelimiterFooter(request.kind))
+            }
+            .listRowBackground(Color.clear)
+        }
+
+        // 고른 시트를 읽지 못했다 — 원본을 지니고 있어 고르기로 돌아갈 수 있다(다시 읽지 않는다)
+        if session.canReviewSheet {
+            Section {
+                Button {
+                    session.reviewSheetAgain()
+                } label: {
+                    Text(PackImportCopy.chooseAnotherSheet)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
             }
             .listRowBackground(Color.clear)
         }
@@ -398,6 +454,7 @@ struct PackImportFlowView: View {
         return switch session.phase {
         case .encoding: PackImportCopy.encodingTitle
         case .delimiter: PackImportCopy.delimiterTitle
+        case .sheet: PackImportCopy.sheetTitle
         case .preview: PackImportCopy.previewTitle
         case .idle, .reading, .failed: PackImportCopy.flowTitle
         }
@@ -419,6 +476,10 @@ struct PackImportFlowView: View {
             case .encoding(let review):
                 Button(PackImportCopy.next) { session.confirmEncoding() }
                     .disabled(session.isWorking || !review.reading(review.selected).isReadable)
+            case .sheet:
+                // 4-D 「다음」 — 고른 시트로 원본에서 다시 읽는다
+                Button(PackImportCopy.next) { run(session.confirmSheet()) }
+                    .disabled(session.isWorking)
             case .preview(let preview):
                 // 4-H는 확인 전에 「다음」이 없다(자동 진행 금지, R10). 「다음」 = 「팩 정보」 폼(5-A·5-B)
                 if completion == nil, !preview.draft.requiresConfirmation || session.partialImportConfirmed {
@@ -517,11 +578,14 @@ private struct PackImportPreviewSections: View {
     let kind: PackImportSource.Kind
     let partialConfirmed: Bool
     let canReviewEncoding: Bool
+    /// (엑셀) 시트를 골라 읽었다 — 「시트 다시 고르기」
+    let canReviewSheet: Bool
     let isWorking: Bool
     /// 겹친 팩의 이름·켬/끔(4-I 「(꺼짐)」) — 겹침을 센 그 목록의 읽기 모델
     let summary: (String) -> PackSummary?
     let onDelimiter: @MainActor (CSVDelimiter) -> Void
     let onReviewEncoding: @MainActor () -> Void
+    let onReviewSheet: @MainActor () -> Void
     let onShowAll: @MainActor () -> Void
     let onShowAllSkipped: @MainActor () -> Void
     let onHowToFix: @MainActor () -> Void
@@ -586,8 +650,9 @@ private struct PackImportPreviewSections: View {
             }
             // 칸 나누기를 바꾸면 원본에서 다시 읽는다(5-2 #4). 자동 판정이 하나로 정했으면 보이지 않는다 — 두 가지 이상으로
             // 읽힐 때만, 그 후보만(R29 — 하나로 정해진 표를 바꾸면 거의 실패했다)
-            if preview.offersDelimiterChoice {
-                Picker(PackImportCopy.delimiterLabel, selection: Binding(get: { draft.delimiter }, set: onDelimiter)) {
+            // 엑셀 미리보기는 칸 나누기가 없다(`delimiter` nil — 후보도 비어 고르기가 뜨지 않는다)
+            if preview.offersDelimiterChoice, let delimiter = draft.delimiter {
+                Picker(PackImportCopy.delimiterLabel, selection: Binding(get: { delimiter }, set: onDelimiter)) {
                     ForEach(draft.delimiterCandidates, id: \.self) { delimiter in
                         Text(PackImportCopy.delimiterName(delimiter)).tag(delimiter)
                     }
@@ -596,6 +661,10 @@ private struct PackImportPreviewSections: View {
             }
             if canReviewEncoding {
                 Button(PackImportCopy.reviewEncodingAgain, action: onReviewEncoding)
+                    .disabled(isWorking)
+            }
+            if canReviewSheet {
+                Button(PackImportCopy.reviewSheetAgain, action: onReviewSheet)
                     .disabled(isWorking)
             }
         }
@@ -662,10 +731,12 @@ private struct PackImportPreviewSections: View {
         }
     }
 
-    /// 같은 번호·단축어 · 문자 정리 · 따옴표 — 파랑 정보(4-F 아래)
+    /// 같은 번호·단축어 · 숨긴 행·열(엑셀) · 문자 정리 · 따옴표 — 파랑 정보(4-F 아래)
     private var infoNotes: [String] {
         var notes: [String] = []
         if draft.duplicateCount > 0 { notes.append(PackImportCopy.duplicates(draft.duplicateCount, mode: draft.mode)) }
+        if draft.hiddenRowCount > 0 { notes.append(PackImportCopy.hiddenRows(draft.hiddenRowCount)) }
+        if draft.hiddenColumnCount > 0 { notes.append(PackImportCopy.hiddenColumns(draft.hiddenColumnCount)) }
         if draft.sanitizedCharacterCount > 0 { notes.append(PackImportCopy.sanitized(draft.sanitizedCharacterCount)) }
         if draft.strayQuoteCount > 0 { notes.append(PackImportCopy.strayQuotes(draft.strayQuoteCount)) }
         return notes
@@ -726,12 +797,12 @@ private struct PackImportRowsSection: View {
     }
 }
 
-/// 건너뛴 행 — 위치와 사유 + 고치는 법(내용 없음, 5-5)
+/// 건너뛴 행 — 위치와 사유 + 고치는 법(내용 없음, 5-5). 엑셀은 「n번째 행」, CSV는 「n번째 항목(m번째 줄)」
 private struct SkippedRow: View {
     let skipped: SkippedRecord
 
     var body: some View {
-        NoteRow(message: PackImportCopy.skipTitle(skipped), details: [PackImportCopy.skipFix(skipped.reason)], isWarning: true)
+        NoteRow(message: PackImportCopy.skipTitle(skipped), details: [PackImportCopy.skipFix(skipped)], isWarning: true)
     }
 }
 

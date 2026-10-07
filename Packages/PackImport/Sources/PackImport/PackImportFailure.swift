@@ -56,6 +56,13 @@ public enum PackImportFailure: Error, Equatable, Sendable {
     case metaTooManyCells(record: Int, line: Int)
     /// 문구형(`단축어` 열)인데 `#틀`이 있다(혼재)
     case templateInPhrasesMode
+    /// (xlsx) 병합 범위가 머리글·정보 줄과 겹친다 — 병합의 비선두 칸은 비어 열 구조를 믿을 수 없다(6-4). 위치는 그 행 번호(둘 다 시트 행)
+    case mergedHeaderOrMeta(record: Int, line: Int)
+    /// (xlsx) 머리글·정보 줄에 수식·날짜 서식·불리언·오류 칸이 있다 — 원문을 알 수 없어 그 줄을 믿을 수 없다(데이터 행이면 건너뛸 사유, 6-4)
+    /// `[판단 1-e ③]` 숫자 칸은 CSV처럼 글자 그대로 읽는다(`#이름 2026`). 위치는 그 행 번호(둘 다 시트 행)
+    case nonTextHeaderCell(record: Int, line: Int)
+    /// (xlsx) 컨테이너·XML 층 거부(1-e ①②) — 내용 없는 코드 그대로(AC-34). 사용자 문구는 묶어서 보인다(4-G 엑셀 행)
+    case workbook(XLSXWorkbookFailure)
 }
 
 /// quote 오류의 위치 — 내용 없이 번호만(1부터)

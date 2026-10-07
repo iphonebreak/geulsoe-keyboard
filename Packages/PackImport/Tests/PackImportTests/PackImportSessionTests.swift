@@ -303,7 +303,7 @@ struct PackImportDelimiterFallbackTests {
         var session = started(source)
         session.confirmEncoding()                                   // 글자 확인이 있는 파일이면 넘긴다(없으면 아무 일 없음)
         let preview = try #require(session.preview)
-        #expect(preview.draft.delimiterCandidates == [preview.draft.delimiter])
+        #expect(preview.draft.delimiterCandidates == [try #require(preview.draft.delimiter)])
         #expect(!preview.offersDelimiterChoice)
     }
 

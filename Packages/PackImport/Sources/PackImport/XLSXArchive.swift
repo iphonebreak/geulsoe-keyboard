@@ -44,8 +44,12 @@ public struct XLSXArchive: Sendable {
     /// 이름 **바이트** → 엔트리. 찾기는 바이트 완전 일치뿐이다(대소문자·정규화·`./` 해석 없음)
     private let entries: [[UInt8]: Entry]
     public let limits: XLSXArchiveLimits
-    /// 지금까지 `read`가 풀어 낸 바이트 합 — 해제 총량 상한과 비교한다
-    public private(set) var inflatedBytes = 0
+    /// 해제 총량 장부 — **참조**로 둔다(보안 검토 S4). 이 값이나 이 값을 든 `XLSXWorkbookReader`를 복사해 사본에서 읽어도 같은 장부에 더한다 —
+    /// 값 타입 카운터였을 때는 사본마다 0부터 세어 총량 상한이 조용히 사라졌다
+    private let ledger = InflationLedger()
+
+    /// 지금까지 `read`가 풀어 낸 바이트 합(사본 포함) — 해제 총량 상한과 비교한다
+    public var inflatedBytes: Int { ledger.total }
 
     /// 모든 엔트리 이름(디렉터리 엔트리 포함) — 시험·진단용, 내용은 밖으로 내보내지 않는다
     var entryNames: Set<String> {
@@ -64,7 +68,7 @@ public struct XLSXArchive: Sendable {
         // 선언 크기로 먼저 거른다 — 정직한 폭탄은 풀지도 않는다
         let declared = entry.uncompressedSize
         guard declared <= limits.outputLimit(for: kind) else { throw .partTooLarge }
-        guard declared <= limits.totalOutputBytes - inflatedBytes else { throw .totalOutputExceeded }
+        guard declared <= limits.totalOutputBytes - ledger.total else { throw .totalOutputExceeded }
         guard declared <= limits.compressionRatio * entry.compressedSize else { throw .compressionRatioExceeded }
 
         let payload = bytes[entry.dataStart..<(entry.dataStart + entry.compressedSize)]
@@ -81,8 +85,30 @@ public struct XLSXArchive: Sendable {
         }
         guard output.count == declared else { throw .sizeMismatch }
         guard CRC32.checksum(output) == entry.crc else { throw .crcMismatch }
-        inflatedBytes += output.count
+        // 위의 사전 검사와 여기 더하기 사이에 다른 사본이 더했을 수 있다 — 더하기 자체가 상한을 다시 본다
+        guard ledger.add(output.count, limit: limits.totalOutputBytes) else { throw .totalOutputExceeded }
         return Data(output)
+    }
+}
+
+/// 해제 총량 장부 — 한 아카이브(와 그 사본들)가 함께 쓴다. 사본이 다른 스레드에서 읽어도 합이 맞게 잠근다
+private final class InflationLedger: @unchecked Sendable {
+    private let lock = NSLock()
+    private var used = 0
+
+    var total: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return used
+    }
+
+    /// 더해도 상한 안이면 더하고 참
+    func add(_ bytes: Int, limit: Int) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard bytes <= limit - used else { return false }
+        used += bytes
+        return true
     }
 }
 

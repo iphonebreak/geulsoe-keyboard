@@ -8,6 +8,8 @@ import Foundation
 ///   `externalEntityResolvingPolicy = .never` — 애플 문서 「The parser should never resolve external entities」). 선언 콜백이 오면
 ///   대리자가 멈춘다(이중 방어). **실측**(1-e ②): 이 설정에서 외부 엔티티 선언은 보고되지 않고 참조는 빈 글로 사라진다 — 내용은 새지 않는다.
 /// - **깊이** ≤ 상한(32): 건너뛰는 모르는 요소 안의 깊이도 센다.
+/// - **시작 태그당 속성 수** ≤ 상한(64, xmlns 포함): 사전 스캔이 센다 — libxml2 2.9의 속성 중복 검사가 제곱 시간이고, 한 시작 태그 안의 일이라
+///   대리자가 끊을 수 없다(보안 검토 S2, 모르는 요소도 파서는 끝까지 읽는다).
 /// - **모르는 요소는 하위 트리째 건너뛴다**(6-5b) — 처리기가 `false`를 돌려주면 그 요소가 닫힐 때까지 아무것도 넘기지 않는다.
 /// - 네임스페이스를 처리한다: 요소는 (네임스페이스, 로컬 이름), 접두 붙은 속성은 접두 대응표로 네임스페이스를 푼다(`r:id`의 `r`을 글자로 믿지 않는다).
 enum XLSXXML {
@@ -47,8 +49,8 @@ enum XLSXXML {
         }
     }
 
-    static func parse(_ data: Data, maxDepth: Int, handler: some XLSXXMLHandler) throws(XLSXWorkbookFailure) {
-        try prescan(data)
+    static func parse(_ data: Data, maxDepth: Int, maxAttributes: Int, handler: some XLSXXMLHandler) throws(XLSXWorkbookFailure) {
+        try prescan(data, maxAttributes: maxAttributes)
         try runParser(data, maxDepth: maxDepth, handler: handler)
     }
 
@@ -56,7 +58,7 @@ enum XLSXXML {
 
     private static let utf8BOM: [UInt8] = [0xEF, 0xBB, 0xBF]
 
-    static func prescan(_ data: Data) throws(XLSXWorkbookFailure) {
+    static func prescan(_ data: Data, maxAttributes: Int = XLSXWorkbookLimits.product.attributesPerElement) throws(XLSXWorkbookFailure) {
         let bytes = [UInt8](data)
         let start = bytes.starts(with: utf8BOM) ? utf8BOM.count : 0
         // UTF-16·UTF-32는 ASCII 표기에 0 바이트가 낀다 — 바이트 스캔이 `<\0!\0D…`를 못 보므로 받지 않는다
@@ -76,6 +78,57 @@ enum XLSXXML {
             }
             index += 1
         }
+        try countAttributes(bytes, from: first, limit: maxAttributes)
+    }
+
+    /// 시작 태그마다 **따옴표 밖의 `=`**를 센다(속성·xmlns 선언 하나에 하나) — 상한을 넘으면 거부(S2). 따옴표를 아는 작은 상태 기계다:
+    /// 속성 값 안의 `>`(XML이 허용)로 태그를 쪼개 우회할 수 없고, 태그 밖 본문의 `=`(「======」 구분선)는 세지 않는다.
+    /// 주석·CDATA·처리 명령·`<!…>`·끝 태그는 건너뛴다(본문에는 날 `<`가 올 수 없으니 `<`가 곧 표지의 시작이다). 형식 오류는 파서 몫이다
+    private static func countAttributes(_ bytes: [UInt8], from start: Int, limit: Int) throws(XLSXWorkbookFailure) {
+        let lessThan: UInt8 = 0x3C, greaterThan: UInt8 = 0x3E, equals: UInt8 = 0x3D
+        let doubleQuote: UInt8 = 0x22, singleQuote: UInt8 = 0x27, bang: UInt8 = 0x21, question: UInt8 = 0x3F, slash: UInt8 = 0x2F
+        var index = start
+        while index < bytes.count {
+            guard bytes[index] == lessThan, index + 1 < bytes.count else { index += 1; continue }
+            switch bytes[index + 1] {
+            case bang:
+                if matches(bytes, at: index, "<!--") {
+                    index = skip(past: Array("-->".utf8), in: bytes, from: index + 4)
+                } else if matches(bytes, at: index, "<![cdata[") {
+                    index = skip(past: Array("]]>".utf8), in: bytes, from: index + 9)
+                } else {
+                    index = skip(past: [greaterThan], in: bytes, from: index + 2)
+                }
+            case question:
+                index = skip(past: Array("?>".utf8), in: bytes, from: index + 2)
+            case slash:
+                index = skip(past: [greaterThan], in: bytes, from: index + 2)
+            default:
+                // 시작 태그 — 따옴표 밖 `>`에서 끝난다
+                var count = 0
+                var quote: UInt8?
+                index += 1
+                while index < bytes.count {
+                    let byte = bytes[index]
+                    index += 1
+                    if let open = quote {
+                        if byte == open { quote = nil }
+                    } else if byte == doubleQuote || byte == singleQuote {
+                        quote = byte
+                    } else if byte == equals {
+                        count += 1
+                        if count > limit { throw .tooManyAttributes }
+                    } else if byte == greaterThan {
+                        break
+                    }
+                }
+            }
+        }
+    }
+
+    /// `needle` 바로 뒤 자리 — 없으면 끝
+    private static func skip(past needle: [UInt8], in bytes: [UInt8], from start: Int) -> Int {
+        firstIndex(of: needle, in: bytes, from: start).map { $0 + needle.count } ?? bytes.count
     }
 
     /// `<?xml … encoding="…"?>`가 있으면 UTF-8이어야 한다

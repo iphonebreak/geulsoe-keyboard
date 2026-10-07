@@ -3,7 +3,7 @@ import TadakDomain
 /// 가져오기 폼(시안 5-A 번호형 · 5-B 문구형 — PDR `external-snippet-packs.md` 5-6·R7, AC-20, 계획서 5절 5행 ①).
 ///
 /// - **모드별 필수 칸이 다르다(AC-20):** 번호형 = 이름 · 틀(별칭 포함, 첫 칸이 칩 제목) · 출처, 문구형 = 이름 · 출처(**틀 칸이 아예 없다**).
-/// - **파일의 `#` 줄은 미리 채움, 폼이 최종 권위(5-6).** 파일명은 쓰지 않는다. 상한을 넘은 파일 값은 채우지 않고 빈칸으로 시작한다(`meta.issues`).
+/// - **파일의 `#` 줄은 미리 채움, 폼이 최종 권위(5-6).** 파일명은 쓰지 않는다. `#이름`이 없는 xlsx는 시트 이름이 이름 칸 기본값이다(6-4). 상한을 넘은 파일 값은 채우지 않고 빈칸으로 시작한다(`meta.issues`).
 /// - **출처는 필수다**(화면 이름 「출처」 — R27, 코드 식별자는 `license` 그대로). **파일에 `#출처`(옛 `#권리`)가 있으면 그 원문을 미리 골라 둔다**
 ///   (R28 — 시안 리뷰 수정 1 「미리 고르지 않는다」를 바꿨다). 파일에 없거나 상한을 넘어 미리 채우지 않았으면 비어 있고 「가져오기」가 꺼진다(AC-20).
 ///   선택지는 **증명이 아니다**(R7). 파일에 적힌 제작자 문구는 선택지로 덮지 않고 원문 그대로 첫 선택지로 보인다. 폼이 최종 권위라 바꿀 수 있다.
@@ -40,7 +40,8 @@ public struct PackImportForm: Equatable, Sendable {
         mode = draft.mode
         meta = draft.meta
         exampleItem = draft.items.first
-        name = draft.meta.name ?? ""
+        // `#이름`이 먼저, 없으면 (xlsx) 시트 이름 — 앱이 붙인 `Sheet1`·`시트1`이나 상한을 넘는 이름은 빈칸(6-4, 1-e ③)
+        name = draft.meta.name ?? draft.suggestedPackName ?? ""
         switch draft.mode {
         case .phrases: templates = []
         case .numbered: templates = draft.meta.templateSpecs.isEmpty ? [""] : Array(draft.meta.templateSpecs.prefix(PackLimits.templatePatterns))

@@ -6,7 +6,9 @@
 /// `PackCopySet.current.lines`를 읽는다. **CSV 전용판에는 xlsx 형식·엑셀 파일을 가져오는 안내가 없다**(AC-35 — `PackCopyLintTests`가 검색한다).
 ///
 /// 판에 넣지 않은 것: 가져온 파일 **형식**에 따라 갈리는 문구(xlsx 출처의 「시트 이름」·수식·병합 사유 등)는 판이 아니라 xlsx 파서(1-e)와 함께 온다 —
-/// xlsx 중심판에서도 CSV를 가져오면 CSV 문구가 맞기 때문이다. 파일 선택기가 받는 형식도 코드(1-e)다.
+/// xlsx 중심판에서도 CSV를 가져오면 CSV 문구가 맞기 때문이다.
+/// **xlsx를 받는지는 판을 따른다**(`acceptsWorkbookFiles`, 1-e ③ 코디네이터 결정) — CSV 전용판은 파일 고르기가 xlsx를 보이지 않고 가져오기도
+/// xlsx로 읽지 않는다(없는 기능을 열지 않는다 — AC-35). 그래서 판 전환(`selected`) 한 줄이 곧 xlsx 열기다(④ 게이트 뒤).
 public enum PackCopySet: String, CaseIterable, Sendable {
     /// CSV 전용판 — 1.3.0이 내는 판(R12: xlsx가 출시 게이트를 못 넘어도 CSV만으로 나갈 수 있게)
     case csv
@@ -21,6 +23,10 @@ public enum PackCopySet: String, CaseIterable, Sendable {
 
     /// 문구 표가 따르는 판 — 평소 `selected`
     public static var current: PackCopySet { previewing ?? selected }
+
+    /// 파일 고르기·가져오기가 엑셀 통합 문서(xlsx)를 받나 — CSV 전용판은 받지 않는다(AC-35). 파일 형식 목록은 `PackImportFileTypes`,
+    /// 가져오기 판별은 `PackImportSession.acceptsWorkbookFiles`가 이 값을 따른다
+    public var acceptsWorkbookFiles: Bool { self == .xlsx }
 
     public var lines: Lines {
         switch self {

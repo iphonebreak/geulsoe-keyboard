@@ -130,7 +130,7 @@ public struct XLSXWorkbookReader: Sendable {
         } catch {
             throw .archive(error)
         }
-        try XLSXXML.parse(data, maxDepth: limits.depth, handler: handler)
+        try XLSXXML.parse(data, maxDepth: limits.depth, maxAttributes: limits.attributesPerElement, handler: handler)
     }
 
     /// 그 종류 관계가 없으면 nil, 둘 이상이면 모호성 거부
@@ -143,13 +143,13 @@ public struct XLSXWorkbookReader: Sendable {
     }
 
     /// 관계 대상 → 아카이브 파트 이름. 절대(`/xl/…`)·상대(`worksheets/…`·`./…`)를 풀고, 외부·스킴(`:`)·`\`·`?`·`#`·`..`·빈 조각은 거부.
-    /// 퍼센트 인코딩은 풀지 않는다(이름 완전 일치 — 정상 생성기는 ASCII 이름만 쓴다, P-10)
+    /// **`%`도 거부한다**(보안 검토 S5) — 퍼센트 인코딩을 풀어 찾는 독자와 글자 그대로 찾는 우리가 다른 파트를 읽을 수 있다(정상 생성기 표본 0건, P-10)
     static func resolve(_ relationship: Relationship, from directory: String) throws(XLSXWorkbookFailure) -> String {
         guard relationship.targetMode.map({ $0.caseInsensitiveCompare("Internal") == .orderedSame }) ?? true else {
             throw .unsafeRelationshipTarget
         }
         let target = relationship.target
-        guard !target.isEmpty, !target.contains(where: { "\\:?#".contains($0) }) else { throw .unsafeRelationshipTarget }
+        guard !target.isEmpty, !target.contains(where: { "\\:?#%".contains($0) }) else { throw .unsafeRelationshipTarget }
         var segments = target.hasPrefix("/") ? [] : directory.split(separator: "/").map(String.init)
         for segment in (target.hasPrefix("/") ? target.dropFirst() : Substring(target)).split(separator: "/", omittingEmptySubsequences: false) {
             switch segment {
@@ -181,8 +181,15 @@ public struct XLSXWorkbookLimits: Equatable, Sendable {
     public var textBytes: Int
     /// 시트 이름 UTF-8 바이트 — 엑셀은 31자, 넉넉히 255B(①의 엔트리 이름 상한과 같다) `[판단]`
     public var sheetNameBytes: Int
+    /// 시작 태그 하나의 속성 수(xmlns 선언 포함) — 64 `[판단]`(보안 검토 S2: libxml2 2.9의 속성 중복 검사가 속성 수의 제곱 시간이라
+    /// 1MB 파트 약 2초·8MB 파트 수 분. 번들 샘플 최댓값 9). 사전 스캔이 파서보다 먼저 센다
+    public var attributesPerElement: Int
+    /// 한 시트 표(`RawTable`)에 실린 글·숫자 칸의 UTF-8 합 — 파일 상한 × 2 = 6MB `[판단]`(보안 검토 S3: 공유 문자열 하나를 여러 칸이 가리키면
+    /// 파일보다 훨씬 큰 글이 판정 경로로 들어간다. CSV는 파일 3MB가 곧 글 합의 상한이다 — 정상 팩은 예산 3MB를 넘을 수 없어 오거부가 없다)
+    public var tableTextBytes: Int
 
-    public init(archive: XLSXArchiveLimits, depth: Int, scannedRows: Int, cells: Int, sharedStrings: Int, textBytes: Int, sheetNameBytes: Int) {
+    public init(archive: XLSXArchiveLimits, depth: Int, scannedRows: Int, cells: Int, sharedStrings: Int, textBytes: Int, sheetNameBytes: Int,
+                attributesPerElement: Int = 64, tableTextBytes: Int = PackLimits.fileBytes * 2) {
         self.archive = archive
         self.depth = depth
         self.scannedRows = scannedRows
@@ -190,11 +197,13 @@ public struct XLSXWorkbookLimits: Equatable, Sendable {
         self.sharedStrings = sharedStrings
         self.textBytes = textBytes
         self.sheetNameBytes = sheetNameBytes
+        self.attributesPerElement = attributesPerElement
+        self.tableTextBytes = tableTextBytes
     }
 
     public static let product = XLSXWorkbookLimits(
         archive: .product, depth: 32, scannedRows: 20_000, cells: 100_000, sharedStrings: 50_000,
-        textBytes: PackLimits.body.utf8Bytes, sheetNameBytes: 255
+        textBytes: PackLimits.body.utf8Bytes, sheetNameBytes: 255, attributesPerElement: 64, tableTextBytes: PackLimits.fileBytes * 2
     )
 }
 
@@ -213,6 +222,8 @@ public enum XLSXWorkbookFailure: Error, Equatable, Sendable {
     case malformedXML
     /// 요소 깊이 상한 초과
     case nestingTooDeep
+    /// 시작 태그 하나의 속성(xmlns 포함)이 상한을 넘는다(사전 스캔 — 보안 검토 S2)
+    case tooManyAttributes
     /// 엑셀 통합 문서가 아니다(콘텐츠 타입·officeDocument 관계가 없거나 다른 문서 종류)
     case notSpreadsheet
     /// 매크로 포함 통합 문서(`…macroEnabled…` 콘텐츠 타입·XLM 매크로 시트)
@@ -237,6 +248,8 @@ public enum XLSXWorkbookFailure: Error, Equatable, Sendable {
     case tooManySharedStrings
     /// 글 하나가 상한을 넘는다
     case textTooLong
+    /// 한 시트 표에 실린 글의 합이 상한을 넘는다(공유 문자열 증폭 — 보안 검토 S3)
+    case tooMuchText
     /// 공유 문자열 색인이 범위 밖·숫자 아님
     case invalidSharedStringIndex
     /// 스타일 색인이 범위 밖·숫자 아님

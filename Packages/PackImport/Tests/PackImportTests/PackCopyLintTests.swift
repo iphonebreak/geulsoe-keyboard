@@ -95,9 +95,11 @@ var stage6Copy: [String] {
     return texts
 }
 
-/// 화면 문구 전부(1~6단계) — **지금 판으로** 만든다. 시험은 `PackCopySet.$previewing`으로 판을 고른다
+/// 화면 문구 전부(1~6단계 + 1-e ③) — **지금 판으로** 만든다. 시험은 `PackCopySet.$previewing`으로 판을 고른다.
+/// 엑셀 사유·시트 고르기 문구(`workbookOnlyCopy`)는 xlsx를 받는 판에서만 화면에 닿는다(CSV 전용판 세션은 xlsx를 읽지 않는다 — AC-35)
 var allScreenCopy: [String] {
     stage1To3Copy + stage4Copy + PackImportCopy.guideSheet.flatMap { $0 } + stage5Copy + [PackNoticeCopy.unreadableListFooter] + stage6Copy
+        + (PackCopySet.current.acceptsWorkbookFiles ? workbookOnlyCopy : [])
 }
 
 /// `#` 예시 — 만드는 법 시트 그림의 정보 줄·폼의 틀 예시(U6이 「`#` 메타 예시」를 따로 부른다)

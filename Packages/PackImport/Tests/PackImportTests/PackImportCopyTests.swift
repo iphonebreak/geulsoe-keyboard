@@ -16,7 +16,8 @@ private func exhaustive(_ failure: PackImportFailure) {
     case .fileTooLarge, .emptyFile, .unsupportedEncoding, .invalidUTF8AfterBOM, .invalidUTF16, .encodingDoesNotMatchBOM, .undecodable,
          .quote, .tooManyLines, .tooManyRecords, .headerNotRecognized, .columnCountMismatch, .duplicateHeader, .duplicateHeaderAlias,
          .mixedModeHeader, .missingRequiredColumn, .tooManyColumns, .metaAfterHeader, .duplicateMeta, .duplicateSourceMeta, .unknownMeta,
-         .unsupportedEscapeMeta, .metaValueCount, .metaTooManyCells, .templateInPhrasesMode:
+         .unsupportedEscapeMeta, .metaValueCount, .metaTooManyCells, .templateInPhrasesMode,
+         .mergedHeaderOrMeta, .nonTextHeaderCell, .workbook:
         break
     }
 }
@@ -24,7 +25,7 @@ private func exhaustive(_ failure: PackImportFailure) {
 private func exhaustive(_ reason: SkipReason) {
     switch reason {
     case .columnCount, .missingNumber, .invalidNumber, .numberOutOfRange, .missingTrigger, .tooManyTriggers, .triggerTooLong,
-         .emptyBody, .titleTooLong, .bodyTooLong:
+         .emptyBody, .titleTooLong, .bodyTooLong, .formula, .dateFormat, .booleanOrError, .numberCell, .merged:
         break
     }
 }
@@ -58,7 +59,10 @@ private let failureTable: [(PackImportFailure, String)] = [
     (.unsupportedEscapeMeta(record: 12, line: 40), "「#escape」 줄은 아직 쓸 수 없어요. 그 줄을 지우고 다시 가져와 주세요."),
     (.metaValueCount(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~8개예요."),
     (.metaTooManyCells(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~8개예요."),
-    (.templateInPhrasesMode, "단축어 열이 있는 파일에는 「#틀」 줄을 쓸 수 없어요.")
+    (.templateInPhrasesMode, "단축어 열이 있는 파일에는 「#틀」 줄을 쓸 수 없어요."),
+    // 1-e ③ — 엑셀만 내는 머리글·정보 줄 사유(문구에 xlsx 말이 없어 두 판 공유). 엑셀 컨테이너·XML 사유(`.workbook`)는 `workbookOnlyCopy`
+    (.mergedHeaderOrMeta(record: 12, line: 40), "머리글이나 정보 줄에 병합한 칸이 있어요. 병합을 풀어 주세요."),
+    (.nonTextHeaderCell(record: 12, line: 40), "머리글이나 정보 줄에 수식·날짜처럼 글이 아닌 칸이 있어요. 그 칸을 글로 바꿔 주세요.")
 ]
 
 /// 시안 4-F(CSV판) + 계획서 4-4절 「건너뛴 행」 표 — (사유, 고치는 법)
@@ -72,7 +76,13 @@ private let skipTable: [(SkipReason, String, String)] = [
     (.triggerTooLong, "단축어가 너무 길어요", "단축어 하나는 40자까지예요"),
     (.emptyBody, "본문이 비어 있어요", "본문을 채워 주세요"),
     (.titleTooLong, "제목이 너무 길어요", "제목은 60자까지예요"),
-    (.bodyTooLong, "본문이 너무 길어요", "본문은 한 칸에 3,000자까지예요")
+    (.bodyTooLong, "본문이 너무 길어요", "본문은 한 칸에 3,000자까지예요"),
+    // 1-e ③ — 6-4 사유 5종(엑셀만 낸다, 문구에 xlsx 말이 없다)
+    (.formula, "수식이에요", "「값만 붙여넣기」로 바꿔 주세요"),
+    (.dateFormat, "날짜 서식이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
+    (.booleanOrError, "TRUE·FALSE나 오류 값이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
+    (.numberCell, "숫자로 저장된 칸이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
+    (.merged, "병합한 칸이 있어요", "병합을 풀어 주세요")
 ]
 
 private func review(selected: PackEncodingReview.Encoding, utf8Failed: Int, cp949Failed: Int) -> PackEncodingReview {
@@ -408,6 +418,24 @@ var stage4Copy: [String] {
     return texts
 }
 
+/// xlsx 중심판에서만 나오는 문구(1-e ③) — 엑셀 컨테이너·XML 거부(4-G 엑셀 행) · 4-D 시트 고르기 · 「n번째 행」 · 숨김 줄.
+/// CSV 전용판은 xlsx를 받지 않으므로 이 문구에 닿지 않는다(AC-35 — `PackImportSession.acceptsWorkbookFiles`). `allScreenCopy`가 판을 보고 넣는다
+var workbookOnlyCopy: [String] {
+    let failures: [XLSXWorkbookFailure] = [
+        .archive(.legacyOrProtectedWorkbook), .macroEnabled, .archive(.fileTooLarge), .archive(.partTooLarge), .tooManyRows, .noVisibleSheet,
+        .textTooLong, .malformedXML, .archive(.notZip)
+    ]
+    var texts = failures.flatMap { failure -> [String] in
+        let problem = PackImportProblem.structural(.workbook(failure))
+        return [PackImportCopy.failureMessage(problem, source: .file), PackImportCopy.failureFooter(problem, source: .file)]
+    }
+    texts += [PackImportCopy.sheetTitle, PackImportCopy.sheetHeader, PackImportCopy.sheetFooter, PackImportCopy.reviewSheetAgain,
+              PackImportCopy.chooseAnotherSheet, PackImportCopy.hiddenRows(37), PackImportCopy.hiddenColumns(37)]
+    texts += [PackImportCopy.sheetRowCount(37), PackImportCopy.sheetRowCount(0)].compactMap { $0 }
+    texts += skipTable.flatMap { [PackImportCopy.skipTitle(SkippedRecord(row: 12, reason: $0.0)), PackImportCopy.skipFix(SkippedRecord(row: 12, reason: $0.0))] }
+    return texts
+}
+
 /// 숫자 검사가 지우는 것 — 글자 방식 이름 · 시안 예시(사자성어 12번 · 007 · 1-2) · 표시 위치·개수(12번째·40번째·37·41·57%) ·
 /// 편집기·파일 형식이 이미 사용자에게 보이는 **필드 상한**(단축어 10개·40자, 제목 60자, 본문 3,000자 — P-8 잠정, 번호 1~9999, #틀 1~8개).
 /// 예산 한도(R2) 숫자는 여기에 없다 — 들어가면 검사에 걸린다
@@ -424,6 +452,16 @@ struct PackImportCopyLintTests {
     func onlyAllowedNumbers() {
         for text in stage4Copy {
             var rest = countPatterns.reduce(text) { $0.replacingOccurrences(of: $1, with: "", options: .regularExpression) }
+            for allowed in stage4AllowedNumbers { rest = rest.replacingOccurrences(of: allowed, with: "") }
+            #expect(!rest.contains { $0.isNumber }, "\(text)")
+        }
+    }
+
+    @Test("★ 1-e ③ — xlsx 중심판에서만 나오는 문구도 숫자는 허용 목록뿐")
+    func workbookCopyOnlyAllowedNumbers() {
+        #expect(workbookOnlyCopy.count > 30)
+        for text in workbookOnlyCopy {
+            var rest = text
             for allowed in stage4AllowedNumbers { rest = rest.replacingOccurrences(of: allowed, with: "") }
             #expect(!rest.contains { $0.isNumber }, "\(text)")
         }

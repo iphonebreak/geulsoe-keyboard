@@ -18,6 +18,7 @@ var setDependentCopy: [String] {
     texts += PackImportCopy.guideCells.flatMap { $0 } + PackImportCopy.guideSave   // 3-B 3·4절 — 문장마다 한 줄(R30)
     if let footer = PackImportCopy.startFooter { texts.append(footer) }   // 3-A 받지 않는 형식(xlsx판만 — CSV판은 풋터 없음)
     if let row = PackImportCopy.otherFileRow { texts += [row.title, row.detail] }   // 3-A 그 밖의 방법(xlsx판만)
+    if PackCopySet.current.acceptsWorkbookFiles { texts += workbookOnlyCopy }   // 엑셀 사유·시트 고르기(1-e ③ — xlsx를 받는 판만)
     for kind in PackSample.Kind.allCases {                                // 3-A·3-C 샘플(판마다 형식)
         texts += PackSample.files(kind).flatMap { [PackImportCopy.sampleFormatLabel($0.format), PackImportCopy.sampleShareLabel($0), $0.displayName] }
     }

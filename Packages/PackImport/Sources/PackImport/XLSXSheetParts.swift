@@ -35,6 +35,9 @@ final class SharedStringsHandler: XLSXXMLHandler {
     private var path: [String] = []
     private var item: String?
     private var piece: String?
+    /// 지금 `<si>`·`<r>` 안에서 `<t>`를 이미 봤나 — 스키마상 하나뿐이다. 둘이면 독자마다 다르게 읽는다(이어 붙임·앞 것 버림 — S6, 거부)
+    private var sawItemText = false
+    private var sawRunText = false
     private(set) var strings: [String] = []
 
     init(limits: XLSXWorkbookLimits) {
@@ -50,10 +53,17 @@ final class SharedStringsHandler: XLSXXMLHandler {
             case ("sst", "si"):
                 guard strings.count < limits.sharedStrings else { throw .tooManySharedStrings }
                 item = ""
-            case ("si", "t"), ("r", "t"):
+                sawItemText = false
+            case ("si", "t"):
+                guard !sawItemText else { throw .malformedPart }
+                sawItemText = true
+                piece = ""
+            case ("r", "t"):
+                guard !sawRunText else { throw .malformedPart }
+                sawRunText = true
                 piece = ""
             case ("si", "r"):
-                break
+                sawRunText = false
             default:
                 return false
             }
@@ -111,9 +121,14 @@ final class StylesHandler: XLSXXMLHandler {
     private var sawCellFormats = false
 
     func result() -> XLSXCellStyles {
-        // 재정의가 우선 — 엑셀은 내장 6을 ₩ 통화 서식으로 다시 적어 저장한다(P-10)
-        XLSXCellStyles(dateFlags: formatIDs.map { id in
-            formats[id].map(XLSXNumberFormat.isDateFormat) ?? XLSXNumberFormat.isBuiltInDate(id)
+        // 재정의가 우선 — 엑셀은 내장 6을 ₩ 통화 서식으로 다시 적어 저장한다(P-10).
+        // 서식 번호마다 **한 번만** 판정한다(보안 검토 S1 — xf마다 다시 판정하면 긴 서식 하나 × xf 수만 개가 수십 분이 됐다)
+        var verdicts: [Int: Bool] = [:]
+        return XLSXCellStyles(dateFlags: formatIDs.map { id in
+            if let known = verdicts[id] { return known }
+            let verdict = formats[id].map(XLSXNumberFormat.isDateFormat) ?? XLSXNumberFormat.isBuiltInDate(id)
+            verdicts[id] = verdict
+            return verdict
         })
     }
 
@@ -127,6 +142,8 @@ final class StylesHandler: XLSXXMLHandler {
                 break
             case ("numFmts", "numFmt"):
                 guard let id = attributes["numFmtId"].flatMap({ digits($0) }), let code = attributes["formatCode"] else { throw .malformedPart }
+                // 엑셀 사용자 서식은 255자까지 — 그보다 긴 서식은 엑셀이 만든 것이 아니다(S1, `[판단]`)
+                guard code.unicodeScalars.count <= XLSXNumberFormat.maxCodeLength else { throw .malformedPart }
                 guard formats.updateValue(code, forKey: id) == nil else { throw .malformedPart }
             case ("styleSheet", "cellXfs"):
                 guard !sawCellFormats else { throw .malformedPart }
@@ -148,6 +165,9 @@ final class StylesHandler: XLSXXMLHandler {
 
 /// 숫자 서식이 날짜·시간인가(6-4)
 enum XLSXNumberFormat {
+
+    /// `formatCode` 길이 상한(유니코드 스칼라) — 엑셀 사용자 서식 255자(보안 검토 S1)
+    static let maxCodeLength = 255
 
     /// 내장 번호(정의 없이 번호만 쓰는 서식) — PDR 14~22·45~47 + **한국어·동아시아 로캘 내장 날짜 27~36·50~58**과 태국어 71~81 `[판단]`
     /// (한국어 엑셀은 `yyyy"년" m"월" d"일"` 등을 이 번호로 정의 없이 쓴다 — 놓치면 날짜 일련번호가 숫자로 들어온다)
@@ -212,6 +232,9 @@ final class WorksheetHandler: XLSXXMLHandler {
         var value: String?
         var inline: String?
         var piece: String?
+        /// `<is>` 안 `<t>`·지금 `<r>` 안 `<t>`를 봤나 — 스키마상 하나뿐(S6)
+        var sawInlineText = false
+        var sawRunText = false
     }
 
     private let limits: XLSXWorkbookLimits
@@ -230,6 +253,8 @@ final class WorksheetHandler: XLSXXMLHandler {
     private var hiddenColumns = Set<Int>()
     /// 병합 범위의 행 구간
     private var merges: [ClosedRange<Int>] = []
+    /// 표에 실은 글·숫자 칸의 UTF-8 합 — 공유 문자열 증폭 상한(S3)
+    private var tableTextBytes = 0
 
     init(limits: XLSXWorkbookLimits, sharedStrings: [String], styles: XLSXCellStyles) {
         self.limits = limits
@@ -274,11 +299,19 @@ final class WorksheetHandler: XLSXXMLHandler {
                 cell?.hasFormula = true
                 return false
             case ("c", "is"):
+                // `<is>` 두 번 — 앞 것을 버릴지 이어 붙일지 독자마다 다르다(S6)
+                guard cell?.inline == nil else { throw .malformedPart }
                 cell?.inline = ""
-            case ("is", "t"), ("r", "t"):
+            case ("is", "t"):
+                guard cell?.sawInlineText == false else { throw .malformedPart }
+                cell?.sawInlineText = true
+                cell?.piece = ""
+            case ("r", "t"):
+                guard cell?.sawRunText == false else { throw .malformedPart }
+                cell?.sawRunText = true
                 cell?.piece = ""
             case ("is", "r"):
-                break
+                cell?.sawRunText = false
             case ("worksheet", "cols"), ("worksheet", "mergeCells"):
                 break
             case ("cols", "col"):
@@ -302,7 +335,7 @@ final class WorksheetHandler: XLSXXMLHandler {
             cell?.inline?.append(piece)
             cell?.piece = nil
         case "c":
-            if let built = cell { place(try finish(built), at: built.column) }
+            if let built = cell { try place(try finish(built), at: built.column) }
             cell = nil
         case "row":
             if !cells.isEmpty { rows.append(RawRow(number: rowNumber, cells: cells, isHidden: rowHidden)) }
@@ -382,14 +415,23 @@ final class WorksheetHandler: XLSXXMLHandler {
         }
     }
 
-    /// 빈 셀은 두지 않는다(끝 빈 칸이 생기지 않는다). 열 상한 밖은 마지막 칸으로 접고, 그 칸이 이미 차 있으면 먼저 온 것이 남는다
-    private func place(_ value: RawCell, at column: Int) {
+    /// 빈 셀은 두지 않는다(끝 빈 칸이 생기지 않는다). 열 상한 밖은 마지막 칸으로 접고, 그 칸이 이미 차 있으면 먼저 온 것이 남는다.
+    /// 실은 글·숫자의 합이 상한을 넘으면 거부한다(S3 — 공유 문자열 하나를 수만 칸이 가리키는 증폭. 버린 칸은 세지 않는다)
+    private func place(_ value: RawCell, at column: Int) throws(XLSXWorkbookFailure) {
         guard value != .blank else { return }
         let slot = min(column, RawTable.columnLimit - 1)
+        guard slot >= cells.count || cells[slot] == .blank else { return }
+        switch value {
+        case .text(let text), .number(let text):
+            tableTextBytes += text.utf8.count
+            guard tableTextBytes <= limits.tableTextBytes else { throw .tooMuchText }
+        case .blank, .unsupported:
+            break
+        }
         if slot >= cells.count {
             cells.append(contentsOf: repeatElement(.blank, count: slot - cells.count))
             cells.append(value)
-        } else if cells[slot] == .blank {
+        } else {
             cells[slot] = value
         }
     }
