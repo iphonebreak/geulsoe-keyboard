@@ -1831,4 +1831,21 @@ struct PackImpactStoreTests {
         #expect(detail.summary.status == .unavailable && detail.summary.name == "회사 상용구")
         #expect(detail.license == nil && detail.examples.isEmpty && detail.standing == nil)
     }
+
+    @Test("★ R31 packEntries — 꺼진 팩도 모든 항목(상세의 항목 수와 같다), 읽을 수 없는 팩·없는 팩은 nil(전체 보기가 없다)")
+    func packEntries() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let off = try h.importedID(h.store.importPack(numbered("사자성어 예시 팩", count: 12), source: .csv, enabled: false))
+        let list = try #require(h.store.packEntries(off))
+        #expect(list.rows.map(\.trigger) == (1...12).map { "사자성어 \($0)번" })
+        #expect(list.rows.map(\.result) == (1...12).map { "→ 예시 본문 \($0)" })
+        #expect(list.rows.count == h.store.packDetail(off)?.summary.itemCount, "「전체 보기 (n개)」의 n과 줄 수가 같다")
+        #expect(h.store.packDetail(off)?.summary.status == .off)
+
+        let unreadable = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        try removePackFiles(h, of: unreadable)
+        #expect(h.store.packEntries(unreadable) == nil)
+        #expect(h.store.packEntries("없는 팩") == nil)
+    }
 }

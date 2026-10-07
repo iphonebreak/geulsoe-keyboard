@@ -215,6 +215,17 @@ public final class PackStore: @unchecked Sendable {
         }
     }
 
+    /// 팩 상세 「전체 보기」(R31) — 그 팩의 모든 항목. 켬/끔·쉬는 중과 무관하게 읽는다. 없는 팩·목록을 못 읽으면·**읽을 수 없는 팩**이면
+    /// nil(상세가 「전체 보기」를 두지 않는 팩 — 코디네이터 결정 2026-10-07). 변환본 하나만 연다(최대 3MB 디코드 — 메인에서 부르지 않는다).
+    /// 줄·검색 키 만들기(수천 개면 수백 ms)는 **큐 밖**에서 한다 — 그동안 켬/끔 같은 커밋이 이 읽기 뒤에 줄 서지 않게
+    public func packEntries(_ id: String) -> PackEntryList? {
+        let pack: ExternalPack? = queue.sync {
+            guard let library = readLibrary(), let entry = library.packs[id], !unavailablePackIDs(in: library).contains(id) else { return nil }
+            return autoreleasepool { readStoredPack(file: entry.file)?.pack }
+        }
+        return pack.map(PackEntryList.init)
+    }
+
     // MARK: - 목록 복구 (R24)
 
     /// 복구하면 불러올 팩 수(읽을 수 없는 변환본 포함) — 확인 시트의 「가져온 팩 N개를 찾았어요」. 목록이 읽히면 nil(복구할 것이 없다)

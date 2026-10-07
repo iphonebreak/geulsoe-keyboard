@@ -337,6 +337,26 @@ public enum PackNoticeCopy {
     /// 사용법 결과 줄에 보일 본문 글자 수 — 넘으면 자르고 「…」
     static let usageResultLength = 30
 
+    // MARK: 전체 보기 (R31)
+
+    /// 「사용법」 예시 아래 줄 — 개수는 팩 항목 수(`PackSummary.itemCount`, 화면 확인 S-4처럼 쉼표)
+    public static func allEntriesRow(count: Int) -> String { "전체 보기 (\(number(count))개)" }
+    /// 전체 보기 화면 머리 — 꺼진 팩. 목록 행 보조줄(`statusLine`)은 끔에 배지가 없어 따로 둔다
+    public static let allEntriesOffLine = "꺼져 있어서 지금은 안 떠요"
+
+    /// 전체 보기 화면 머리 한 줄 — 꺼짐은 위 문구, 쉬는 중은 목록 행 보조줄 그대로(`statusLine`), 켬은 없다(nil)
+    public static func allEntriesStatusLine(_ status: PackSummary.Status) -> String? {
+        status == .off ? allEntriesOffLine : statusLine(status)
+    }
+
+    /// 목록 절 머리 — 찾는 중이면 찾은 수
+    public static func allEntriesHeader(count: Int, isSearching: Bool) -> String {
+        isSearching ? "찾은 채움글 \(number(count))개" : "채움글 \(number(count))개"
+    }
+    public static let allEntriesSearchPrompt = "단축어나 문구로 찾기"
+    /// 찾은 것이 없을 때 한 줄
+    public static let allEntriesNoMatch = "맞는 채움글이 없어요. 다른 말로 찾아 보세요."
+
     public static let deletePackButton = "팩 삭제"
 
     // MARK: 삭제 확인 (2-F)

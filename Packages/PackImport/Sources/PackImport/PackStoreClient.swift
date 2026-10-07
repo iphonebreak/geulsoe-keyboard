@@ -37,6 +37,8 @@ public struct PackStoreClient: Sendable {
     public func impactLibrary() async -> PackImpact.Library? { await run { $0.impactLibrary() } }
     /// 팩 상세(2-E·U1) — 없는 팩·목록을 못 읽으면 nil
     public func packDetail(_ id: String) async -> PackDetail? { await run { $0.packDetail(id) } }
+    /// 팩 상세 「전체 보기」(R31) — 줄·검색 키까지 여기(메인 밖)서 만든다. 읽을 수 없는 팩이면 nil
+    public func packEntries(_ id: String) async -> PackEntryList? { await run { $0.packEntries(id) } }
     /// 앱 실행 때 한 번(옛 세대·안 쓰는 변환본 정리 · 내 채움글 세대 올림 · 변환본 내용 검사 — 1-c G6·G9)
     public func maintain() async { await run { $0.maintain() } }
 

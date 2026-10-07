@@ -165,8 +165,12 @@ var stage3Copy: [String] {
         PackNoticeCopy.templatesHeader, PackNoticeCopy.templatesFooter, PackNoticeCopy.hiddenTriggersHeader(count: 37),
         PackNoticeCopy.hiddenTriggerBadge, PackNoticeCopy.usageHeader, PackNoticeCopy.usageFooter, PackNoticeCopy.deletePackButton,
         PackNoticeCopy.usageResult("예시 제목 둘"), PackNoticeCopy.usageResult(body: "예시 본문 첫 줄\n둘째 줄"),
-        PackNoticeCopy.deleteTitle(name: "회사 상용구"), PackNoticeCopy.deleteMessage(itemCount: 37), PackNoticeCopy.deleteMessage(itemCount: 0)
+        PackNoticeCopy.deleteTitle(name: "회사 상용구"), PackNoticeCopy.deleteMessage(itemCount: 37), PackNoticeCopy.deleteMessage(itemCount: 0),
+        // R31 전체 보기 — 줄·머리 한 줄(꺼짐·쉬는 중)·절 머리·검색 칸·빈 상태
+        PackNoticeCopy.allEntriesRow(count: 37), PackNoticeCopy.allEntriesHeader(count: 37, isSearching: false),
+        PackNoticeCopy.allEntriesHeader(count: 37, isSearching: true), PackNoticeCopy.allEntriesSearchPrompt, PackNoticeCopy.allEntriesNoMatch
     ]
+    texts += [PackSummary.Status.off, .restingOverLimit, .restingForUserSnippets].compactMap(PackNoticeCopy.allEntriesStatusLine)
     texts += [sajaseongeo, examplePack, company].compactMap(PackNoticeCopy.packRowDetail)
     let statuses: [PackStanding.PatternStatus] = [.owned(sharedWith: []), .owned(sharedWith: ["b"]), .owned(sharedWith: ["b", "c"]),
                                                   .outranked(by: "a"), .shadowed(by: ["장"]), .shadowed(by: ["장", "번"])]

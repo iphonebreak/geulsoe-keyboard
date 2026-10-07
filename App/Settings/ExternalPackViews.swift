@@ -276,6 +276,12 @@ struct ExternalPackDetailView: View {
                     }
                     .accessibilityElement(children: .combine)
                 }
+                // R31 — 예시 아래 「전체 보기 (n개)」 → 그 팩의 모든 항목·검색. 읽을 수 없는 팩은 예시가 없어 이 절이 없다(전체 보기도 없다)
+                NavigationLink {
+                    PackEntryListView(packID: packID, name: name(detail), status: detail.summary.status)
+                } label: {
+                    Text(PackNoticeCopy.allEntriesRow(count: detail.summary.itemCount))
+                }
             } header: {
                 Text(PackNoticeCopy.usageHeader)
             } footer: {
@@ -368,5 +374,80 @@ struct ExternalPackDetailView: View {
         case .recoverLibrary: showsRecovery = true
         default: break
         }
+    }
+}
+
+// MARK: - 전체 보기 (R31)
+
+/// 팩 상세 「전체 보기」(PDR R31) — 그 팩의 **모든 항목**을 「단축어 → 들어가는 문구」로(사용법 줄과 같은 모양), 검색(띄어쓰기·대소문자 무시).
+/// 수천 개여도 매끄럽게 — 줄은 `List`가 보이는 만큼만 그리고, 줄·검색 키 만들기(`PackStoreClient.packEntries`)와 거르기는 메인 밖에서 한다.
+/// 꺼진·쉬는 팩도 볼 수 있다(머리에 그 상태 한 줄). 단축어·본문은 사용자 입력이다 — 화면에 표시만 하고 로그로 내보내지 않는다(보안 규칙)
+struct PackEntryListView: View {
+    let packID: String
+    let name: String
+    let status: PackSummary.Status
+
+    /// nil = 아직 읽는 중 · `.some(nil)` = 그 사이 읽을 수 없게 됨(지워짐 등)
+    @State private var list: PackEntryList??
+    @State private var query = ""
+    /// 지금 보이는 줄 — 찾는 말로 거른 결과(메인 밖에서 거른 뒤 받는다)
+    @State private var shown: [PackEntryList.Row] = []
+
+    var body: some View {
+        List {
+            if let line = PackNoticeCopy.allEntriesStatusLine(status) {
+                Section {
+                    Text(line)
+                        .font(.subheadline)
+                        .foregroundStyle(.orange)
+                }
+            }
+            switch list {
+            case nil:
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+            case .some(nil):
+                Text(PackNoticeCopy.unavailablePackDetail)
+                    .foregroundStyle(.secondary)
+            case .some(.some):
+                Section {
+                    ForEach(shown) { row in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(row.trigger)
+                                .font(.body.monospacedDigit())
+                            Text(row.result)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                    if shown.isEmpty, PackEntryList.isSearching(query) {
+                        Text(PackNoticeCopy.allEntriesNoMatch)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text(PackNoticeCopy.allEntriesHeader(count: shown.count, isSearching: PackEntryList.isSearching(query)))
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .settingsFormWidth()
+        .navigationTitle(name)
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: PackNoticeCopy.allEntriesSearchPrompt)
+        .task {
+            list = .some(await PackStoreClient.live.packEntries(packID))
+            await refilter()
+        }
+        .task(id: query) { await refilter() }
+    }
+
+    /// 찾는 말로 거른다(메인 밖). 거르는 사이 찾는 말이 또 바뀌었으면 버린다 — 늦게 끝난 옛 결과가 새 결과를 덮지 않게
+    private func refilter() async {
+        guard case .some(.some(let list)) = list else { return }
+        let current = query
+        let found = await Task.detached(priority: .userInitiated) { list.rows(matching: current) }.value
+        if current == query { shown = found }
     }
 }
