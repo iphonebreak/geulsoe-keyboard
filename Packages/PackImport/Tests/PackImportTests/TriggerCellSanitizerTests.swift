@@ -99,7 +99,7 @@ struct PackTextSanitizerTimeTests {
     private let leadingZWJ = 999_000
     private var pasted: String { "본문,번호\n" + String(repeating: "\u{200D}", count: leadingZWJ) + "가,1\n" }
 
-    @Test("★ 3MB 붙여넣기(본문 앞 ZWJ 99.9만 개) — 1초 안에 초안, 본문은 「가」, 정리 99.9만 건", .timeLimit(.minutes(1)))
+    @Test("★ 3MB 붙여넣기(본문 앞 ZWJ 99.9만 개) — 5초 안에 초안, 본문은 「가」, 정리 99.9만 건", .timeLimit(.minutes(1)))
     func pastedLeadingZWJ() throws {
         let text = pasted
         #expect(text.utf8.count <= PackLimits.fileBytes)
@@ -107,25 +107,25 @@ struct PackTextSanitizerTimeTests {
         let elapsed = seconds { outcome = try? PackImporter.read(text: text) }
         guard case .draft(let draft)? = outcome else { Issue.record("초안이 아니다: \(String(describing: outcome))"); return }
         #expect(draft.items.map(\.body) == ["가"] && draft.sanitizedCharacterCount == leadingZWJ)
-        #expect(elapsed < 1, "\(elapsed)초")
+        #expect(elapsed < 5, "\(elapsed)초")   // 상한 5초 — 고치기 전 꼴은 33~117초라 여유가 크다. 1초는 CPU 부하에서 흔들렸다(검증 G1)
     }
 
-    @Test("★ 같은 글을 파일로(UTF-8) — 디코드 뒤 같은 함수라 1초 안", .timeLimit(.minutes(1)))
+    @Test("★ 같은 글을 파일로(UTF-8) — 디코드 뒤 같은 함수라 5초 안", .timeLimit(.minutes(1)))
     func fileLeadingZWJ() throws {
         let data = Data(pasted.utf8)
         var outcome: PackImportOutcome?
         let elapsed = seconds { outcome = try? PackImporter.read(data) }
         guard case .draft(let draft)? = outcome else { Issue.record("초안이 아니다: \(String(describing: outcome))"); return }
         #expect(draft.items.map(\.body) == ["가"] && draft.sanitizedCharacterCount == leadingZWJ)
-        #expect(elapsed < 1, "\(elapsed)초")
+        #expect(elapsed < 5, "\(elapsed)초")   // 상한 5초 — 고치기 전 꼴은 33~117초라 여유가 크다. 1초는 CPU 부하에서 흔들렸다(검증 G1)
     }
 
-    @Test("함수 자체 — 앞 ZWJ 100만 개 + 뒤 ZWJ 100만 개도 1초 안")
+    @Test("함수 자체 — 앞 ZWJ 100만 개 + 뒤 ZWJ 100만 개도 5초 안")
     func sanitizeDirectly() {
         let zwj = String(repeating: "\u{200D}", count: 1_000_000)
         var result: (text: String, removed: Int)?
         let elapsed = seconds { result = PackTextSanitizer.sanitize(zwj + "가" + zwj) }
         #expect(result?.text == "가" && result?.removed == 2_000_000)
-        #expect(elapsed < 1, "\(elapsed)초")
+        #expect(elapsed < 5, "\(elapsed)초")   // 상한 5초 — 고치기 전 꼴은 33~117초라 여유가 크다. 1초는 CPU 부하에서 흔들렸다(검증 G1)
     }
 }
