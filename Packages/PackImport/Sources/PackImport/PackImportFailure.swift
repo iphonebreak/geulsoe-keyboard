@@ -40,15 +40,15 @@ public enum PackImportFailure: Error, Equatable, Sendable {
     case missingRequiredColumn
     /// 머리글 실효 폭이 `PackLimits.dataColumns`를 넘는다 — 4-G 「칸이 너무 많아요」(⑪, 문구는 1-c)
     case tooManyColumns
-    /// 예약 메타 키(`#이름`·`#틀`·`#권리`·`#escape`)가 머리글 **뒤**에 있다 — 엑셀 정렬 사고(5-3)
+    /// 예약 메타 키(`#이름`·`#틀`·`#출처`(옛 `#권리`)·`#escape`)가 머리글 **뒤**에 있다 — 엑셀 정렬 사고(5-3)
     case metaAfterHeader(record: Int, line: Int)
-    /// 같은 메타 키가 두 번
+    /// 같은 메타 칸이 두 번 — `#출처`와 옛 `#권리`는 한 칸이라 함께 있어도 여기다(R27)
     case duplicateMeta(record: Int, line: Int)
     /// 알 수 없는 `#` 키
     case unknownMeta(record: Int, line: Int)
     /// `#escape` — 가역 escape(R6·13-2)는 내보내기·왕복 단계(후속)라 아직 받지 않는다
     case unsupportedEscapeMeta(record: Int, line: Int)
-    /// 값 개수 위반 — `#이름`·`#권리` 1개, `#틀` 1~8개(trailing 빈 셀만 허용)
+    /// 값 개수 위반 — `#이름`·`#출처` 1개, `#틀` 1~8개(trailing 빈 셀만 허용)
     case metaValueCount(record: Int, line: Int)
     /// 메타 레코드 실효 셀이 `PackLimits.metaCells`를 넘는다
     case metaTooManyCells(record: Int, line: Int)

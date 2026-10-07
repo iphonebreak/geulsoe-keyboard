@@ -38,6 +38,19 @@ private func started(_ source: PackImportSource, library: PackImpact.Library? = 
     return session
 }
 
+/// 칸 나누기 되돌릴 곳 — 읽지 못한 것 · 돌아갈 곳(nil = 고르기 화면)
+private func fallback(_ failed: CSVDelimiter, back previous: CSVDelimiter?) -> PackImportSession.DelimiterFallback {
+    PackImportSession.DelimiterFallback(failed: failed, previous: previous)
+}
+
+/// 표본의 칸 글자만 — 정보 줄 여부는 따로 본다
+extension PackEncodingReview.Reading {
+    var texts: [String?] { samples.map { $0?.text } }
+}
+
+private func cell(_ text: String) -> PackEncodingReview.Sample? { PackEncodingReview.Sample(meta: nil, text: text) }
+private func meta(_ field: PackMetaField, _ text: String) -> PackEncodingReview.Sample? { PackEncodingReview.Sample(meta: field, text: text) }
+
 private extension PackImportSession {
     var preview: PackImportPreview? {
         if case .preview(let preview) = phase { return preview }
@@ -115,7 +128,7 @@ struct PackImportSessionTransitionTests {
         #expect(review.cp949.isReadable)
         #expect(!review.utf8.isReadable)
         #expect(review.utf8.failedLines == 3)                 // 머리글·두 행 — 셋 다 한글
-        #expect(review.cp949.samples.first == "단축어")
+        #expect(review.cp949.texts.first == "단축어")
         session.confirmEncoding()
         #expect(session.preview?.draft.entries.map(\.title) == ["회사 주소", "새해 인사"])
     }
@@ -255,6 +268,167 @@ struct PackImportSessionTransitionTests {
     }
 }
 
+// MARK: - R29 칸 나누기 — 애매할 때만 고르기, 실패하면 그 자리에서 되돌리기
+
+/// 쉼표·세미콜론 둘 다 채택되는 표인데 **세미콜론으로 끝까지 읽으면 받을 행이 0**(본문이 빈다) — 후보 시험은 통과하고 본 읽기에서 실패한다
+private let semicolonEmptiesBodies = "단축어,본문,z;trigger;body\r\na,b,c;d;"
+
+/// 쉼표·세미콜론 둘 다 채택되는데 **세미콜론으로는 시험 창(비지 않은 32개) 밖에서 따옴표 오류** — 본 읽기에서 구조 오류로 전체 거부
+private let semicolonQuoteErrorLate: String = {
+    var lines = ["단축어,본문,z;trigger;body"]
+    for index in 1...40 { lines.append("a\(index),b\(index),c;d\(index);e\(index)") }
+    lines.append("a41,b41,c;\"q\"x;e41")       // 쉼표로는 셋째 칸 가운데의 따옴표(글자), 세미콜론으로는 닫는 따옴표 뒤 글자
+    return lines.joined(separator: "\r\n")
+}()
+
+@Suite("외부 채움글 1-c 4단계 — R29 칸 나누기: 애매할 때만 고르기 · 실패하면 그 자리에서 되돌리기")
+struct PackImportDelimiterFallbackTests {
+
+    @Test("★ 시험 표가 뜻대로다 — 두 표 모두 자동 판정은 쉼표·세미콜론 둘, 쉼표로는 읽히고 세미콜론으로는 실패한다")
+    func fixturesBehave() throws {
+        for text in [semicolonEmptiesBodies, semicolonQuoteErrorLate] {
+            #expect(try PackImporter.read(text: text) == .chooseDelimiter([.comma, .semicolon]))
+            #expect(try ImportHelper.draft(text, delimiter: .comma).isImportable)
+        }
+        #expect(try ImportHelper.draft(semicolonEmptiesBodies, delimiter: .semicolon).isImportable == false)
+        #expect(throws: PackImportFailure.quote(CSVQuoteError(kind: .characterAfterClosingQuote, record: 42, line: 42))) {
+            try PackImporter.read(text: semicolonQuoteErrorLate, delimiter: .semicolon)
+        }
+    }
+
+    @Test("★ 하나로 정해지는 표 — 미리보기의 칸 나누기 후보가 하나뿐(화면은 고르기를 보이지 않는다)", arguments: [
+        PackImportSource.paste("단축어,본문\n인사,안녕하세요\n"), .paste("단축어\t본문\n인사\t안녕, 반가워요\n"), .file(cafeBytes)
+    ])
+    func unambiguousHidesChoice(_ source: PackImportSource) throws {
+        var session = started(source)
+        session.confirmEncoding()                                   // 글자 확인이 있는 파일이면 넘긴다(없으면 아무 일 없음)
+        let preview = try #require(session.preview)
+        #expect(preview.draft.delimiterCandidates == [preview.draft.delimiter])
+        #expect(!preview.offersDelimiterChoice)
+    }
+
+    @Test("★ 애매한 표 — 고르기 화면에서 고른 뒤 미리보기에도 고르기가 있다(후보 둘만)")
+    func ambiguousKeepsChoice() throws {
+        var session = started(.paste(ambiguousText))
+        drive(&session, session.chooseDelimiter(.semicolon))
+        let preview = try #require(session.preview)
+        #expect(preview.draft.delimiter == .semicolon)
+        #expect(preview.draft.delimiterCandidates == [.comma, .semicolon] && preview.offersDelimiterChoice)
+    }
+
+    @Test("★ 미리보기에서 바꾼 구분자로 실패 → 거부 화면이지만 원본을 지니고, 직전 구분자로 되돌리면 원본에서 다시 읽어 같은 미리보기 (AC-18)",
+          arguments: [semicolonEmptiesBodies, semicolonQuoteErrorLate])
+    func failedChangeFromPreviewReverts(_ text: String) throws {
+        var session = started(.paste(text))
+        drive(&session, session.chooseDelimiter(.comma))
+        let before = try #require(session.preview)
+
+        drive(&session, session.chooseDelimiter(.semicolon))
+        #expect(session.problem != nil)
+        #expect(session.hasSource, "되돌릴 수 있으니 원본을 비우지 않는다")
+        #expect(session.delimiterFallback == fallback(.semicolon, back: .comma))
+        #expect(!session.canProceed)
+
+        let revert = try required(session.revertDelimiter())
+        #expect(run(revert, carries: text, delimiter: .comma))
+        // 일하는 동안 화면은 그대로(버튼이 사라지지 않고 꺼진다) — 두 번 누르면 무시
+        #expect(session.isWorking && session.delimiterFallback == fallback(.semicolon, back: .comma))
+        let again = session.revertDelimiter()
+        #expect(again == nil)
+        drive(&session, revert)
+        #expect(session.preview == before, "되돌린 결과 = 원본을 쉼표로 처음부터 읽은 것")
+        #expect(session.delimiterFallback == nil && session.hasSource)
+    }
+
+    @Test("★ 고르기 화면에서 고른 구분자로 실패 → 되돌리면 고르기 화면으로(자동 판정부터 다시)")
+    func failedChoiceRevertsToChooser() throws {
+        var session = started(.paste(semicolonEmptiesBodies))
+        #expect(session.phase == .delimiter([.comma, .semicolon]))
+        drive(&session, session.chooseDelimiter(.semicolon))
+        #expect(session.problem == .noValidRecords([SkippedRecord(record: 2, line: 2, reason: .emptyBody)]))
+        #expect(session.delimiterFallback == fallback(.semicolon, back: nil) && session.hasSource)
+
+        let revert = try required(session.revertDelimiter())
+        #expect(revert.options == PackImportOptions(encoding: .automatic, delimiter: nil))
+        drive(&session, revert)
+        #expect(session.phase == .delimiter([.comma, .semicolon]))
+        drive(&session, session.chooseDelimiter(.comma))
+        #expect(session.preview?.draft.delimiter == .comma)
+    }
+
+    @Test("★ 고른 글자 방식은 되돌려도 그대로 — CP949로 확정한 파일의 칸 나누기 실패를 되돌리면 CP949로 원본에서 다시 읽는다")
+    func revertKeepsChosenEncoding() throws {
+        // 두 방식 모두 읽히고(é/챕) 쉼표·세미콜론 둘 다 채택 — 세미콜론으로는 본문이 빈다. UTF-8이 자동이라 CP949는 사용자가 고른 값이다
+        let bytes = Data("trigger,body,z;trigger;body\r\ncafe,Caf\u{E9},c;cafe;\r\n".utf8)
+        var session = started(.file(bytes))
+        drive(&session, session.chooseEncoding(.cp949))
+        session.confirmEncoding()
+        #expect(session.phase == .delimiter([.comma, .semicolon]))
+        drive(&session, session.chooseDelimiter(.comma))
+        drive(&session, session.chooseDelimiter(.semicolon))
+        #expect(session.delimiterFallback == fallback(.semicolon, back: .comma))
+        let revert = try required(session.revertDelimiter())
+        #expect(revert.options == PackImportOptions(encoding: .cp949, delimiter: .comma))
+        #expect(revert.source == .file(bytes))
+        drive(&session, revert)
+        #expect(session.preview?.draft.entries.map(\.body) == ["Caf챕"], "UTF-8로 조용히 돌아가면 「Café」가 된다")
+    }
+
+    @Test("★ 칸 나누기를 바꾼 것이 아닌 거부는 지금처럼 끝 — 되돌릴 것이 없고 원본을 비운다", arguments: [
+        "번호,제목,본문\n1,\"닫지 않음,본문\n", "번호,제목,본문\n0,제목,본문\n", "foo,bar\n1,2\n"
+    ])
+    func otherFailuresHaveNoFallback(_ text: String) {
+        var session = started(.paste(text))
+        #expect(session.problem != nil)
+        #expect(session.delimiterFallback == nil && !session.hasSource)
+        let revert = session.revertDelimiter()
+        #expect(revert == nil)
+    }
+
+    @Test("되돌릴 수 있는 거부에서도 취소하면 원본·되돌릴 곳을 비운다 · 새로 시작해도 비운다")
+    func cancelClearsFallback() throws {
+        var session = started(.paste(semicolonEmptiesBodies))
+        drive(&session, session.chooseDelimiter(.semicolon))
+        #expect(session.delimiterFallback == fallback(.semicolon, back: nil))
+        session.cancel()
+        #expect(session.delimiterFallback == nil && !session.hasSource && session.phase == .idle)
+
+        session = started(.paste(semicolonEmptiesBodies))
+        drive(&session, session.chooseDelimiter(.semicolon))
+        _ = session.begin(.paste)
+        #expect(session.delimiterFallback == nil && !session.hasSource)
+    }
+
+    @Test("되돌리기는 그 거부 화면에서만 — 미리보기·고르기·글자 확인에서는 아무 일도 없다")
+    func revertOnlyFromFallbackFailure() throws {
+        var session = started(.paste(ambiguousText))
+        let fromChooser = session.revertDelimiter()
+        #expect(fromChooser == nil)
+        drive(&session, session.chooseDelimiter(.comma))
+        let fromPreview = session.revertDelimiter()
+        #expect(fromPreview == nil)
+        var encoding = started(.file(cafeBytes))
+        let fromEncoding = encoding.revertDelimiter()
+        #expect(fromEncoding == nil)
+    }
+
+    @Test("늦게 온 실패는 받지 않는다 — 바꾼 뒤 곧바로 취소하면 되돌릴 곳도 생기지 않는다")
+    func staleFailureIgnored() throws {
+        var session = started(.paste(semicolonEmptiesBodies))
+        drive(&session, session.chooseDelimiter(.comma))
+        let toSemicolon = try required(session.chooseDelimiter(.semicolon))
+        session.cancel()
+        let received = session.receive(PackImportSession.compute(toSemicolon, library: nil))
+        #expect(!received)
+        #expect(session.delimiterFallback == nil && session.phase == .idle)
+    }
+
+    /// 되돌리기 Run이 **처음 받은 원본 그대로**와 그 구분자를 들었는지
+    private func run(_ run: PackImportSession.Run, carries text: String, delimiter: CSVDelimiter) -> Bool {
+        run.source == .paste(text) && run.options.delimiter == delimiter
+    }
+}
+
 // MARK: - AC-18 원본에서 다시
 
 @Suite("외부 채움글 1-c 4단계 — 인코딩·구분자를 바꾸면 원본에서 전부 다시 (AC-18)")
@@ -266,8 +440,8 @@ struct PackImportSessionRerunTests {
         let review = try #require(session.review)
         #expect(review.selected == .utf8)
         #expect(review.utf8.isReadable && review.cp949.isReadable)
-        #expect(review.utf8.samples == ["Caf\u{E9} meeting"])
-        #expect(review.cp949.samples == ["Caf챕 meeting"])
+        #expect(review.utf8.texts == ["Caf\u{E9} meeting"])
+        #expect(review.cp949.texts == ["Caf챕 meeting"])
     }
 
     @Test("★ 고를 때마다 Run은 **처음 받은 원본 바이트 그대로**를 들고, 결과는 그 바이트를 새로 읽은 것과 같다")
@@ -508,9 +682,61 @@ struct PackEncodingReviewTests {
         let text = "trigger,body\nhi,\" 새해 인사 \"\nyo,회사 주소\nok,\(long)\nno,또 하나\n"
         let review = try #require(started(.file(Data(text.utf8))).review)
         #expect(review.utf8.samples.count == 3)
-        #expect(review.utf8.samples[0] == "새해 인사")
-        #expect(review.utf8.samples[1] == "회사 주소")
-        #expect(review.utf8.samples[2] == String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…")
+        #expect(review.utf8.texts[0] == "새해 인사")
+        #expect(review.utf8.texts[1] == "회사 주소")
+        #expect(review.utf8.texts[2] == String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…")
+        #expect(review.utf8.samples.allSatisfy { $0?.meta == nil }, "데이터 칸은 정보 줄이 아니다")
+    }
+
+    // MARK: R29 — 정보 줄은 「이름 : …」 꼴로, 한 줄이 표본 하나
+
+    @Test("★ R29 — 머리글 위 정보 줄은 원문(`#이름,…,`)이 아니라 칸과 값으로: 한 줄 = 표본 하나(줄을 더 만들지 않는다)")
+    func metaLinesBecomeLabeledSamples() throws {
+        let text = "#이름,사자성어 넘버스,\n#틀,넘버스성어 {n}번\n#출처,자체 작성\n번호,제목,본문\n1,가나,다라\n"
+        let review = try #require(started(.file(Data(text.utf8))).review)
+        #expect(review.utf8.samples == [meta(.name, "사자성어 넘버스"), meta(.template, "넘버스성어 {n}번"), meta(.license, "자체 작성")])
+        #expect(review.utf8.samples.map(PackImportCopy.sampleLine) == ["이름 : 사자성어 넘버스", "틀 : 넘버스성어 {n}번", "출처 : 자체 작성"])
+    }
+
+    @Test("★ R29 — 옛 `#권리` 줄도 「출처 : …」 · 따옴표로 감싼 키·값 · 틀 별칭은 「, 」로 잇는다 · 끝의 빈 칸(시트 폭 패딩)은 뺀다")
+    func metaLineVariants() throws {
+        let text = "\"#권리\",\"글쇠, 자체 작성\",,\n#틀,사자성어 {n}번,성어 {n}번,,\n단축어,본문\n가,나\n"
+        let review = try #require(started(.file(Data(text.utf8))).review)
+        #expect(review.utf8.samples.map(PackImportCopy.sampleLine)
+                    == ["출처 : 글쇠, 자체 작성", "틀 : 사자성어 {n}번, 성어 {n}번", "단축어"])
+    }
+
+    @Test("R29 — 정보 줄은 키 뒤의 첫 구분자로만 나눈다 — 값 안의 다른 기호(`;`·쉼표)는 글자 그대로")
+    func metaLineOwnSeparator() throws {
+        let comma = try #require(started(.file(Data("#출처,가; 나\n단축어,본문\n".utf8))).review)
+        #expect(comma.utf8.samples.first == meta(.license, "가; 나"))
+        let semicolon = try #require(started(.file(Data("#출처;가, 나;;\n단축어;본문\n".utf8))).review)
+        #expect(semicolon.utf8.samples.first == meta(.license, "가, 나"))
+    }
+
+    @Test("R29 — 정보 줄 표본 한 줄과 데이터 칸이 섞여 처음 세 개 · 값이 길면 값을 자른다")
+    func metaAndCellsMixed() throws {
+        let long = String(repeating: "긴", count: 60)
+        let text = "#이름,\(long)\n단축어,본문\n가나,다라\n마바,사아\n"
+        let review = try #require(started(.file(Data(text.utf8))).review)
+        #expect(review.utf8.samples == [meta(.name, String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…"), cell("단축어"), cell("본문")])
+    }
+
+    @Test("R29 — 머리글 뒤의 `#`(본문 칸)는 정보 줄이 아니다 · 모르는 `#` 키는 칸 이름 없이 원문 그대로(파서가 따로 거부한다)")
+    func notMetaLines() throws {
+        let afterHeader = try #require(started(.file(Data("trigger,body\nhi,#해시 본문\n".utf8))).review)
+        #expect(afterHeader.utf8.samples == [cell("#해시 본문")])
+        let unknown = try #require(started(.file(Data("#메모,값 하나,,\n단축어,본문\n가,나\n".utf8))).review)
+        #expect(unknown.utf8.samples.first == cell("#메모,값 하나"))
+    }
+
+    @Test("★ R29 — 같은 자리를 두 방식으로(4-C): CP949 파일의 정보 줄은 한국어(CP949)로 「이름 : …」, UTF-8로는 읽을 수 없는 칸")
+    func metaLineSamePlaceBothEncodings() throws {
+        let review = try #require(started(.file(cp949("#이름,사자성어 넘버스\n번호,제목,본문\n1,가,나\n"))).review)
+        #expect(review.selected == .cp949)
+        #expect(review.cp949.samples.first == meta(.name, "사자성어 넘버스"))
+        #expect(review.utf8.samples.first == .some(nil))
+        #expect(PackImportCopy.sampleLine(nil) == PackImportCopy.unreadableSample)
     }
 
     @Test("NUL이 든 파일·두 방식 모두 못 읽는 파일은 확인 화면 없이 거부(지원하지 않는 인코딩)",

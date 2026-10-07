@@ -68,7 +68,7 @@ public enum PackImportCopy {
     public static let guideSheet: [[String]] = [
         ["#이름", "사자성어 예시 팩", ""],
         ["#틀", "사자성어 {n}번", "성어 {n}번"],
-        ["#권리", "제작자 자체 작성", ""],
+        ["#출처", "제작자 자체 작성", ""],
         ["번호", "제목", "본문"],
         ["1", "예시 제목 하나", "예시 본문 첫 줄…"],
         ["12", "예시 제목 둘", "예시 본문 한 줄"]
@@ -77,7 +77,7 @@ public enum PackImportCopy {
     public static let guideSheetHeaderRow = 3
     public static let guideColumns = "번호형은 번호 · 제목 · 본문, 문구형은 단축어 · 제목 · 본문. 열 순서는 상관없고 영어 이름(number·trigger·title·body)도 돼요. 제목은 비워도 돼요."
     public static let guideMetaSection = "팩 정보 줄(선택)"
-    public static let guideMeta = "머리글 위에 #이름 · #틀 · #권리 줄을 두면 가져올 때 미리 채워져요. 정렬하다 아래로 내려가지 않게 해 주세요."
+    public static let guideMeta = "머리글 위에 #이름 · #틀 · #출처 줄을 두면 가져올 때 미리 채워져요. 정렬하다 아래로 내려가지 않게 해 주세요."
     /// CSV에는 셀 타입이 없어 바뀐 값을 파서가 알 수 없다 — 안내로만 다룬다(PDR 6-7, R20 「가 — 안내 문구만」). 판마다 다르다
     public static var guideCellsSection: String { lines.guideCellsSection }
     public static var guideCells: [String] { lines.guideCells }
@@ -118,6 +118,8 @@ public enum PackImportCopy {
     public static let encodingTitle = "글자 확인"
     public static let encodingQuestion = "이 파일의 글자가 맞게 보이나요?"
     public static let encodingLabel = "글자 방식"
+    /// 「행 · 여러 줄 본문 · 읽기 실패」 절의 머리(R29)
+    public static let countsHeader = "불러온 개수"
     public static let rowsLabel = "행"
     public static let multilineLabel = "여러 줄 본문"
     public static let failedLabel = "읽기 실패"
@@ -152,8 +154,24 @@ public enum PackImportCopy {
         return "한국어(CP949)로 저장한 파일은 일부 기호(예: —)가 저장할 때 이미 바뀌었을 수 있어요. 엑셀에서 「CSV UTF-8」로 다시 저장하면 바뀌지 않아요."
     }
 
+    /// 표본 절 머리(R29 — 예전 「파일에서 찾은 표본」)
     public static func samplesHeader(_ review: PackEncodingReview) -> String {
-        review.bothReadable ? "파일에서 찾은 표본 — \(encodingName(review.selected))" : "파일에서 찾은 표본"
+        review.bothReadable ? "불러온 글자 — \(encodingName(review.selected))" : "불러온 글자"
+    }
+
+    /// 표본 한 줄 — 정보 줄은 원문(`#이름,값,`)이 아니라 「이름 : 값」(R29), 데이터 칸은 글자 그대로, 그 방식으로 못 읽은 자리는 안내
+    public static func sampleLine(_ sample: PackEncodingReview.Sample?) -> String {
+        guard let sample else { return unreadableSample }
+        return sample.meta.map { "\(metaLabel($0)) : \(sample.text)" } ?? sample.text
+    }
+
+    /// 정보 줄 칸 이름 — 옛 `#권리`도 「출처」다(R27)
+    public static func metaLabel(_ field: PackMetaField) -> String {
+        switch field {
+        case .name: "이름"
+        case .template: "틀"
+        case .license: "출처"
+        }
     }
 
     /// 4-C — 고르지 않은 쪽 표본(흐리게)
@@ -172,6 +190,25 @@ public enum PackImportCopy {
         case .semicolon: "세미콜론"
         case .tab: "탭"
         }
+    }
+
+    // MARK: 칸 나누기 되돌리기 (R29 — 바꾼 구분자로 읽지 못한 거부 화면)
+
+    /// 거부 화면 제목 — 파일이 아니라 **고른 칸 나누기**가 맞지 않는다(그 아래 사유 한 줄은 4-G 그대로)
+    public static func delimiterFailureTitle(_ delimiter: CSVDelimiter) -> String {
+        let name = delimiterName(delimiter)
+        return "칸을 \(name)\(PackNoticeCopy.directionParticle(after: name)) 나누면 읽을 수 없어요"
+    }
+
+    /// 되돌리기 버튼 — 미리보기에서 바꿨으면 직전 구분자로, 고르기 화면에서 골랐으면 고르기 화면으로
+    public static func revertDelimiter(_ fallback: PackImportSession.DelimiterFallback) -> String {
+        guard let previous = fallback.previous else { return "칸 나누기 다시 고르기" }
+        let name = delimiterName(previous)
+        return "\(name)\(PackNoticeCopy.directionParticle(after: name)) 되돌리기"
+    }
+
+    public static func revertDelimiterFooter(_ kind: PackImportSource.Kind) -> String {
+        kind == .file ? "되돌리면 파일을 처음부터 다시 읽어요." : "되돌리면 붙여 넣은 표를 처음부터 다시 읽어요."
     }
 
     // MARK: - 4-E·4-F·4-H 미리보기
@@ -415,13 +452,13 @@ public enum PackImportCopy {
         case .metaAfterHeader:
             "「#이름」 같은 정보 줄은 머리글 위에 있어야 해요. 정렬하다 아래로 내려갔는지 확인해 주세요."
         case .duplicateMeta:
-            "같은 정보 줄(#이름·#틀·#권리)이 두 번 있어요. 하나만 남겨 주세요."
+            "같은 정보 줄(#이름·#틀·#출처)이 두 번 있어요. 하나만 남겨 주세요."
         case .unknownMeta:
-            "모르는 정보 줄(#…)이 있어요. 정보 줄은 「#이름」·「#틀」·「#권리」만 쓸 수 있어요."
+            "모르는 정보 줄(#…)이 있어요. 정보 줄은 「#이름」·「#틀」·「#출처」만 쓸 수 있어요."
         case .unsupportedEscapeMeta:
             "「#escape」 줄은 아직 쓸 수 없어요. 그 줄을 지우고 다시 가져와 주세요."
         case .metaValueCount, .metaTooManyCells:
-            "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#권리」는 값 하나, 「#틀」은 1~\(PackNoticeCopy.number(PackLimits.templatePatterns))개예요."
+            "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~\(PackNoticeCopy.number(PackLimits.templatePatterns))개예요."
         case .templateInPhrasesMode:
             "단축어 열이 있는 \(kind == .file ? "파일" : "표")에는 「#틀」 줄을 쓸 수 없어요."
         }

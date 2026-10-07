@@ -2,17 +2,18 @@ import TadakDomain
 
 /// 가져오기 폼(시안 5-A 번호형 · 5-B 문구형 — PDR `external-snippet-packs.md` 5-6·R7, AC-20, 계획서 5절 5행 ①).
 ///
-/// - **모드별 필수 칸이 다르다(AC-20):** 번호형 = 이름 · 틀(별칭 포함, 첫 칸이 칩 제목) · 권리, 문구형 = 이름 · 권리(**틀 칸이 아예 없다**).
+/// - **모드별 필수 칸이 다르다(AC-20):** 번호형 = 이름 · 틀(별칭 포함, 첫 칸이 칩 제목) · 출처, 문구형 = 이름 · 출처(**틀 칸이 아예 없다**).
 /// - **파일의 `#` 줄은 미리 채움, 폼이 최종 권위(5-6).** 파일명은 쓰지 않는다. 상한을 넘은 파일 값은 채우지 않고 빈칸으로 시작한다(`meta.issues`).
-/// - **권리 표기는 필수이고 미리 고르지 않는다**(시안 리뷰 수정 1 — 「사용자가 최종 확인」). 고르지 않으면 「가져오기」가 꺼진다.
-///   선택지는 **권리 증명이 아니다**(R7). 파일에 적힌 제작자 문구는 선택지로 덮지 않고 원문 그대로 첫 선택지로 보인다.
+/// - **출처는 필수다**(화면 이름 「출처」 — R27, 코드 식별자는 `license` 그대로). **파일에 `#출처`(옛 `#권리`)가 있으면 그 원문을 미리 골라 둔다**
+///   (R28 — 시안 리뷰 수정 1 「미리 고르지 않는다」를 바꿨다). 파일에 없거나 상한을 넘어 미리 채우지 않았으면 비어 있고 「가져오기」가 꺼진다(AC-20).
+///   선택지는 **증명이 아니다**(R7). 파일에 적힌 제작자 문구는 선택지로 덮지 않고 원문 그대로 첫 선택지로 보인다. 폼이 최종 권위라 바꿀 수 있다.
 /// - 칸 검사는 `PackCompiler`의 같은 함수(`nameFailure`·`licenseFailure`·`cleanedTemplate` + `TemplatePatternSpec.parse`)다 —
 ///   「가져오기」가 켜졌는데 최종 컴파일이 거부하는 칸이 없다. 성경 전체 n 검사(10-2)만 비싸서 `PackTemplateReview`가 메인 밖에서 한다.
 ///
-/// 이름·권리·틀은 사용자 입력이다 — 메모리에만 있고 로그·분석 이벤트로 내보내지 않는다(보안 규칙).
+/// 이름·출처·틀은 사용자 입력이다 — 메모리에만 있고 로그·분석 이벤트로 내보내지 않는다(보안 규칙).
 public struct PackImportForm: Equatable, Sendable {
 
-    /// 권리 선택지(R7) — 「파일에 적힌 표기」는 파일에 `#권리`가 있을 때만
+    /// 출처 선택지(R7) — 「파일에 적힌 출처」는 파일에 `#출처`(옛 `#권리`)가 있을 때만
     public enum LicenseChoice: Hashable, Sendable, CaseIterable {
         case fromFile
         case selfWritten
@@ -23,12 +24,12 @@ public struct PackImportForm: Equatable, Sendable {
     }
 
     public let mode: ExternalPack.Mode
-    /// 파일에서 읽은 미리 채움 — 「파일에서」 꼬리표와 제작자 권리 문구
+    /// 파일에서 읽은 미리 채움 — 「파일에서」 꼬리표와 제작자 출처 문구
     public let meta: PackMetaPrefill
     public var name: String
     /// 번호형 틀 칸(별칭 순서) — 문구형은 언제나 비었다
     public private(set) var templates: [String]
-    /// 고른 권리 — nil이면 아직 고르지 않았다(가져오기 꺼짐)
+    /// 고른 출처 — nil이면 아직 고르지 않았다(가져오기 꺼짐). 파일에 출처가 있으면 처음부터 `.fromFile`(R28)
     public var licenseChoice: LicenseChoice?
     /// 「그 밖(직접 입력)」 칸 — 다른 선택지로 옮겨도 남겨 둔다(돌아오면 다시 보인다)
     public var customLicense: String
@@ -44,17 +45,17 @@ public struct PackImportForm: Equatable, Sendable {
         case .phrases: templates = []
         case .numbered: templates = draft.meta.templateSpecs.isEmpty ? [""] : Array(draft.meta.templateSpecs.prefix(PackLimits.templatePatterns))
         }
-        licenseChoice = nil
+        licenseChoice = draft.meta.license == nil ? nil : .fromFile
         customLicense = ""
     }
 
-    // MARK: - 권리
+    // MARK: - 출처
 
     public var licenseChoices: [LicenseChoice] {
         LicenseChoice.allCases.filter { $0 != .fromFile || meta.license != nil }
     }
 
-    /// 저장될 권리 표기 — 고른 선택지의 문구(파일 문구는 원문, 「그 밖」은 직접 입력). 고르지 않았으면 nil
+    /// 저장될 출처 — 고른 선택지의 문구(파일 문구는 원문, 「그 밖」은 직접 입력). 고르지 않았으면 nil
     public var license: String? {
         switch licenseChoice {
         case nil: nil
@@ -89,7 +90,7 @@ public struct PackImportForm: Equatable, Sendable {
     /// 이름 칸 사유 — `nameMissing`·`nameTooLong`
     public var nameIssue: PackCompileFailure? { PackCompiler.nameFailure(name) }
 
-    /// 권리 사유 — 고르지 않았거나 직접 입력이 비면 `licenseMissing`, 직접 입력이 120자를 넘으면 `licenseTooLong`
+    /// 출처 사유 — 고르지 않았거나 직접 입력이 비면 `licenseMissing`, 직접 입력이 120자를 넘으면 `licenseTooLong`
     public var licenseIssue: PackCompileFailure? {
         guard let license else { return .licenseMissing }
         return PackCompiler.licenseFailure(license)

@@ -16,6 +16,20 @@ public struct PackEncodingReview: Equatable, Sendable {
         var choice: PackEncodingChoice { self == .utf8 ? .utf8 : .cp949 }
     }
 
+    /// 표본 하나 — 데이터 칸 하나, 또는 머리글 위 정보 줄 **한 줄**(R29 — 원문 `#이름,값,` 대신 화면이 「이름 : 값」으로 보인다.
+    /// 줄을 더 만들지 않는다). 문구(「이름」·「출처」…)는 화면 쪽 문구 표(`PackImportCopy.sampleLine`)가 붙인다
+    public struct Sample: Equatable, Sendable {
+        /// 정보 줄이면 그 칸(이름·틀·출처 — 옛 `#권리`도 출처), 데이터 칸·모르는 `#` 키면 nil
+        public var meta: PackMetaField?
+        /// 칸 글자(앞뒤 공백·감싼 따옴표를 떼고 길면 자른 것). 정보 줄이면 값들을 「, 」로 이은 것(끝의 빈 칸 제외)
+        public var text: String
+
+        public init(meta: PackMetaField?, text: String) {
+            self.meta = meta
+            self.text = text
+        }
+    }
+
     /// 한 방식으로 읽어 본 결과
     public struct Reading: Equatable, Sendable {
         /// 파일 전체가 이 방식으로 엄격하게 읽힌다(`PackTextDecoder`와 같은 판정)
@@ -23,9 +37,9 @@ public struct PackEncodingReview: Equatable, Sendable {
         /// 이 방식으로 읽히지 않는 줄 수(4-B 「깨진 글자 n행」) — 읽히면 0
         public var failedLines: Int
         /// 표본 — 두 방식이 **같은 자리**(같은 바이트 구간)를 읽은 것. 그 자리를 이 방식으로 못 읽으면 nil
-        public var samples: [String?]
+        public var samples: [Sample?]
 
-        public init(isReadable: Bool, failedLines: Int, samples: [String?]) {
+        public init(isReadable: Bool, failedLines: Int, samples: [Sample?]) {
             self.isReadable = isReadable
             self.failedLines = failedLines
             self.samples = samples
@@ -80,40 +94,94 @@ public struct PackEncodingReview: Equatable, Sendable {
         case .utf8: .utf8
         case .cp949: .cp949
         }
-        let segments = sampleSegments(bytes)
+        let units = sampleUnits(bytes)
         func reading(_ readable: Bool, _ decode: (ArraySlice<UInt8>) -> String?) -> Reading {
             Reading(isReadable: readable, failedLines: readable ? 0 : failedLineCount(bytes, decode: decode),
-                    samples: segments.map { decode($0).map(trimmedSample) })
+                    samples: units.map { sample($0, decode: decode) })
         }
         return PackEncodingReview(selected: selected, utf8: reading(utf8Readable, strictUTF8), cp949: reading(cp949Readable, strictCP949),
                                   recordCount: nil, multilineBodyCount: nil)
     }
 
-    /// 비ASCII가 든 **칸 모양 구간**의 처음 몇 개 — 줄(LF·CR)과 흔한 구분자(`,`·`;`·탭)로 자른다. 모두 ASCII라 CP949의 둘째 바이트
-    /// (0x41 이상)와 겹치지 않아, 같은 구간을 두 방식으로 읽으면 같은 자리가 나온다(4-C의 é / 챕)
-    static func sampleSegments(_ bytes: [UInt8]) -> [ArraySlice<UInt8>] {
-        var segments: [ArraySlice<UInt8>] = []
-        var start = 0
-        for index in 0...bytes.count {
-            let isEnd = index == bytes.count
-            guard isEnd || [0x0A, 0x0D, 0x2C, 0x3B, 0x09].contains(bytes[index]) else { continue }
-            let segment = bytes[start..<index]
-            if segment.contains(where: { $0 >= 0x80 }) {
-                segments.append(segment)
-                if segments.count == sampleCount { break }
+    /// 표본 자리 하나 — 같은 바이트 구간을 두 방식이 각자 읽는다(4-C)
+    struct SampleUnit: Equatable {
+        /// 칸 구간들 — 데이터 칸이면 하나, 정보 줄이면 그 줄의 칸 전부(끝의 빈 칸 제외)
+        var cells: [ArraySlice<UInt8>]
+        /// 머리글 위 `#` 줄(첫 칸이 `#`·`"#`로 시작)이면 그 줄을 나눈 구분자 — 칸 이름은 읽은 글자로 정한다(방식마다 다를 수 있다). 데이터 칸이면 nil
+        var metaSeparator: UInt8?
+    }
+
+    /// 비ASCII가 든 표본 자리의 처음 몇 개. 칸은 줄(LF·CR)과 흔한 구분자(`,`·`;`·탭)로 자른다 — 모두 ASCII라 CP949의 둘째 바이트
+    /// (0x41 이상)와 겹치지 않아, 같은 구간을 두 방식으로 읽으면 같은 자리가 나온다(4-C의 é / 챕).
+    /// **머리글 위의 `#` 줄은 그 줄 전체가 자리 하나**다(R29 — 「이름 : 값」으로 보인다). 머리글 뒤(첫 `#` 아닌 줄 다음)의 `#`는 본문 글자다(5-3)
+    static func sampleUnits(_ bytes: [UInt8]) -> [SampleUnit] {
+        var units: [SampleUnit] = []
+        var beforeHeader = true
+        var lineStart = 0
+        for index in 0...bytes.count where index == bytes.count || bytes[index] == 0x0A || bytes[index] == 0x0D {
+            let line = bytes[lineStart..<index]
+            lineStart = index + 1
+            let cells = line.split(omittingEmptySubsequences: false, whereSeparator: separators.contains)
+            guard cells.contains(where: { !$0.isEmpty }) else { continue }   // 빈 줄·구분자만 — 머리글 앞이어도 그대로
+            if beforeHeader, startsWithHash(cells[0]) {
+                guard line.contains(where: { $0 >= 0x80 }) else { continue }
+                // 정보 줄은 키 뒤의 첫 구분자 하나로만 나눈다 — 값 안의 다른 기호(`;`·탭)는 글자다
+                let separator = line.first(where: separators.contains) ?? 0x2C
+                var metaCells = line.split(omittingEmptySubsequences: false) { $0 == separator }
+                while metaCells.last?.isEmpty == true { metaCells.removeLast() }   // 끝의 빈 칸(시트 폭 패딩)
+                units.append(SampleUnit(cells: metaCells, metaSeparator: separator))
+            } else {
+                beforeHeader = false
+                for cell in cells where cell.contains(where: { $0 >= 0x80 }) {
+                    units.append(SampleUnit(cells: [cell], metaSeparator: nil))
+                    if units.count == sampleCount { break }
+                }
             }
-            start = index + 1
+            if units.count == sampleCount { break }
         }
-        return segments
+        return units
+    }
+
+    /// 칸을 자르는 흔한 구분자 `,`·`;`·탭 — 따옴표는 보지 않는다(보여 주기용, 본 읽기는 `CSVRecordParser`)
+    static let separators: Set<UInt8> = [0x2C, 0x3B, 0x09]
+
+    /// 앞 공백과 여는 따옴표 하나를 건너 `#`로 시작하나(ASCII — 두 방식이 같게 본다)
+    static func startsWithHash(_ cell: ArraySlice<UInt8>) -> Bool {
+        var rest = cell.drop { $0 == 0x20 }
+        if rest.first == 0x22 { rest = rest.dropFirst() }
+        return rest.first == 0x23
+    }
+
+    /// 표본 자리 하나를 한 방식으로 — 그 자리의 칸 하나라도 이 방식으로 못 읽으면 nil
+    static func sample(_ unit: SampleUnit, decode: (ArraySlice<UInt8>) -> String?) -> Sample? {
+        var texts: [String] = []
+        for cell in unit.cells {
+            guard let text = decode(cell) else { return nil }
+            texts.append(text)
+        }
+        guard let separator = unit.metaSeparator else { return texts.first.map { Sample(meta: nil, text: trimmedSample($0)) } }
+        let key = unquoted(texts[0])
+        guard let field = PackMetaField.field(forKey: key) else {
+            // 모르는 키 — 칸 이름 없이 그 줄 원문(파서가 따로 거부한다). 이 방식으로 읽은 글자가 키가 아닐 때도 여기다(4-C의 다른 쪽)
+            return Sample(meta: nil, text: trimmedSample(texts.joined(separator: String(UnicodeScalar(separator)))))
+        }
+        let values = texts.dropFirst().map(unquoted).filter { !$0.isEmpty }
+        return Sample(meta: field, text: truncated(values.joined(separator: ", ")))
     }
 
     /// 앞뒤 공백·감싼 따옴표를 떼고 길면 자른다
-    static func trimmedSample(_ text: String) -> String {
+    static func trimmedSample(_ text: String) -> String { truncated(unquoted(text)) }
+
+    /// 앞뒤 공백과 감싼 따옴표(한쪽만 있어도)를 뗀다
+    static func unquoted(_ text: String) -> String {
         var sample = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if sample.hasPrefix("\"") { sample.removeFirst() }
         if sample.hasSuffix("\"") { sample.removeLast() }
-        sample = sample.trimmingCharacters(in: .whitespacesAndNewlines)
-        return sample.count > sampleLength ? String(sample.prefix(sampleLength)) + "…" : sample
+        return sample.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func truncated(_ text: String) -> String {
+        text.count > sampleLength ? String(text.prefix(sampleLength)) + "…" : text
     }
 
     /// 비ASCII가 든 줄 가운데 이 방식으로 엄격하게 읽히지 않는 줄 수. LF는 두 방식 모두 다른 글자의 일부가 될 수 없다

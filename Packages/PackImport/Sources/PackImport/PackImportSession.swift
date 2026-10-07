@@ -52,6 +52,9 @@ public struct PackImportPreview: Equatable, Sendable {
     /// 가져올 항목 — 같은 번호·단축어를 뒤가 이긴 **뒤**의 수(팩에 실제로 들어가는 수)
     public var importCount: Int { draft.mode == .numbered ? draft.items.count : draft.entries.count }
 
+    /// 「칸 나누기」 고르기를 보이나 — 자동 판정(5-2)이 **둘 이상**으로 읽을 때만(R29). 하나로 정해지면 숨긴다(바꿀 까닭이 없고, 바꾸면 거의 실패한다)
+    public var offersDelimiterChoice: Bool { draft.delimiterCandidates.count > 1 }
+
     /// 4-H 「건너뜀 (57%)」 — 분모는 데이터 논리 레코드(R10)
     public var skippedPercent: Int { Self.percent(skipped: draft.skipped.count, of: draft.dataRecordCount) }
 
@@ -72,6 +75,7 @@ public struct PackImportPreview: Equatable, Sendable {
 ///                                            └─▶ failed(4-G — 구조 오류·파일 못 엶·유효 0) ◀───────────┘
 /// encoding ─chooseEncoding─▶ (일하는 중) ─receive─▶ encoding(새 값)
 /// delimiter·preview ─chooseDelimiter─▶ (일하는 중) ─receive─▶ preview …   preview ─reviewEncodingAgain─▶ encoding
+/// delimiter·preview ─chooseDelimiter─▶ … ─receive(읽기 실패)─▶ failed + delimiterFallback ─revertDelimiter─▶ (일하는 중) ─receive─▶ 직전 화면
 /// 어디서든 ─cancel─▶ idle(원본을 비운다)
 /// ```
 ///
@@ -79,6 +83,8 @@ public struct PackImportPreview: Equatable, Sendable {
 ///   재사용하지 않는다. 인코딩을 바꾸면 고른 구분자도 버린다(구분자 판정부터 다시, 5-3b #6).
 /// - **메인 밖**: 상태기계는 값이고 무거운 일은 `Run`으로 꺼내 `compute`(순수)·`perform`(전역 큐)이 한다. 결과는 `receive`로 돌려준다.
 /// - **취소·늦은 결과**: 새로 시작하거나 선택을 바꾸거나 취소하면 세대가 오른다 — 옛 세대의 결과는 받지 않는다. 취소하면 원본을 비운다.
+/// - **칸 나누기 되돌리기(R29)**: 칸 나누기를 바꿔 읽기가 실패하면(구조 오류·유효 0) 거부 화면이지만 **원본을 비우지 않고** 직전으로 돌아갈 곳
+///   (`delimiterFallback`)을 둔다 — 「가져올 수 없어요」 뒤에 길이 없던 것. 되돌리기도 원본에서 다시 읽는다(AC-18). 그 밖의 거부는 지금처럼 끝이다.
 /// - **상한**: 원본이 바이트 상한을 넘으면 계산 없이 거부하고 원본을 들고 있지 않는다. 행·줄 상한은 파서가 전체 거부로 낸다.
 /// - **R10**: 건너뜀 50% 이상이면 명시 확인(`confirmPartialImport`) 전에는 진행하지 않는다(`canProceed`). 유효 0은 거부다.
 ///
@@ -95,6 +101,20 @@ public struct PackImportSession: Equatable, Sendable {
         case delimiter([CSVDelimiter])
         case preview(PackImportPreview)
         case failed(PackImportProblem)
+    }
+
+    /// 칸 나누기를 바꿔 읽기가 실패했을 때 그 자리에서 돌아갈 곳(R29) — 거부 화면이 「되돌리기」를 보인다
+    public struct DelimiterFallback: Equatable, Sendable {
+        /// 읽지 못한 칸 나누기(고른 것) — 거부 화면 제목이 말한다. 되돌리는 동안에도 그대로다
+        public let failed: CSVDelimiter
+        /// 돌아갈 곳 — 미리보기에서 바꿨으면 **직전 구분자**(원본에서 그것으로 다시 읽는다), 고르기 화면(후보 둘 이상)에서 골랐으면 nil
+        /// (고르기 화면으로 — 자동 판정부터 다시)
+        public let previous: CSVDelimiter?
+
+        public init(failed: CSVDelimiter, previous: CSVDelimiter?) {
+            self.failed = failed
+            self.previous = previous
+        }
     }
 
     /// 메인 밖에서 할 일 한 번 — `compute`·`perform`에 넘긴다
@@ -129,6 +149,8 @@ public struct PackImportSession: Equatable, Sendable {
     public private(set) var sourceKind: PackImportSource.Kind?
     /// 이 원본이 거친 글자 확인의 마지막 값 — 미리보기의 「글자 방식 다시 고르기」가 쓴다. 확인이 없던 원본이면 nil
     public private(set) var lastReview: PackEncodingReview?
+    /// 칸 나누기를 바꿔 실패한 거부 화면에서 돌아갈 곳(R29) — 이것이 있으면 원본을 지니고 있다. 그 밖의 단계·거부에서는 nil
+    public private(set) var delimiterFallback: DelimiterFallback?
 
     private var source: PackImportSource?
     private var generation = 0
@@ -136,6 +158,8 @@ public struct PackImportSession: Equatable, Sendable {
     private var encodingConfirmed = false
     /// 글자 확인 화면 뒤에서 기다리는 결과
     private var pending: Computation?
+    /// 지금 도는 칸 나누기 변경이 실패하면 돌아갈 곳 — 결과를 받을 때 `delimiterFallback`이 되거나 버려진다
+    private var pendingFallback: DelimiterFallback?
 
     public init() {}
 
@@ -188,13 +212,15 @@ public struct PackImportSession: Equatable, Sendable {
     public mutating func receive(_ computation: Computation) -> Bool {
         guard computation.generation == generation, isWorking, source != nil else { return false }
         isWorking = false
+        let fallback = pendingFallback
+        pendingFallback = nil
         guard let review = computation.review else {
-            apply(computation.outcome)
+            apply(computation.outcome, fallback: fallback)
             return true
         }
         lastReview = review
         if encodingConfirmed {
-            apply(computation.outcome)
+            apply(computation.outcome, fallback: fallback)
         } else {
             pending = computation
             phase = .encoding(review)
@@ -208,7 +234,7 @@ public struct PackImportSession: Equatable, Sendable {
     public mutating func chooseEncoding(_ encoding: PackEncodingReview.Encoding) -> Run? {
         guard !isWorking, case .encoding(let review) = phase, review.selected != encoding else { return nil }
         options = PackImportOptions(encoding: encoding.choice, delimiter: nil)
-        return rerun()
+        return rerun(fallback: nil)
     }
 
     /// 4-B·4-C 「다음」 — 고른 방식으로 파일 전체가 읽힐 때만
@@ -234,15 +260,28 @@ public struct PackImportSession: Equatable, Sendable {
     }
 
     /// 구분자를 고르거나(5-2 #3) 미리보기에서 바꾼다(5-2 #4) — 원본에서 전부 다시, 인코딩 선택은 그대로
+    /// 이 원본으로 읽기가 실패하면(구조 오류·유효 0) 거부 화면에 **직전으로 돌아갈 곳**을 둔다(R29 — 원본을 비우지 않는다)
     public mutating func chooseDelimiter(_ delimiter: CSVDelimiter) -> Run? {
         guard !isWorking else { return nil }
+        let previous: CSVDelimiter?
         switch phase {
-        case .delimiter: break
-        case .preview(let preview): guard preview.draft.delimiter != delimiter else { return nil }
+        case .delimiter: previous = nil
+        case .preview(let preview):
+            guard preview.draft.delimiter != delimiter else { return nil }
+            previous = preview.draft.delimiter
         default: return nil
         }
+        let fallback = DelimiterFallback(failed: delimiter, previous: previous)
         options.delimiter = delimiter
-        return rerun()
+        return rerun(fallback: fallback)
+    }
+
+    /// R29 — 칸 나누기를 바꿔 실패한 거부 화면에서 **직전 구분자로**(고르기 화면에서 골랐으면 고르기 화면으로) 돌아간다.
+    /// 앞 결과를 꺼내 쓰지 않고 원본에서 다시 읽는다(AC-18). 고른 글자 방식은 그대로다. 일하는 동안 거부 화면과 돌아갈 곳은 그대로 둔다
+    public mutating func revertDelimiter() -> Run? {
+        guard !isWorking, case .failed = phase, let fallback = delimiterFallback else { return nil }
+        options.delimiter = fallback.previous
+        return rerun(fallback: nil)
     }
 
     /// 4-H — 절반 넘게 건너뛰어도 받을 수 있는 것만 가져오겠다고 **명시** 확인(R10). 유효 0은 거부라 해당 없다
@@ -263,32 +302,44 @@ public struct PackImportSession: Equatable, Sendable {
         source = nil
         encodingConfirmed = false
         pending = nil
+        delimiterFallback = nil
+        pendingFallback = nil
     }
 
     // MARK: - 안
 
-    private mutating func rerun() -> Run? {
+    /// - Parameter fallback: 이 읽기가 실패하면 돌아갈 곳(칸 나누기 변경만). nil이면 실패는 끝이다
+    private mutating func rerun(fallback: DelimiterFallback?) -> Run? {
         guard let source else { return nil }
         generation += 1
         isWorking = true
+        pendingFallback = fallback
         return Run(generation: generation, source: source, options: options)
     }
 
-    private mutating func apply(_ outcome: Computation.Outcome) {
+    private mutating func apply(_ outcome: Computation.Outcome, fallback: DelimiterFallback? = nil) {
         partialImportConfirmed = false
+        delimiterFallback = nil
         switch outcome {
         case .preview(let preview): phase = .preview(preview)
         case .chooseDelimiter(let candidates): phase = .delimiter(candidates)
-        case .failed(let problem): finish(.failed(problem))
+        case .failed(let problem):
+            guard let fallback else { return finish(.failed(problem)) }
+            // R29 — 칸 나누기를 바꿔 실패했다: 거부 화면이지만 원본을 지니고 돌아갈 곳을 둔다
+            phase = .failed(problem)
+            pending = nil
+            delimiterFallback = fallback
         }
     }
 
-    /// 거부는 끝이다 — 원본을 바로 비운다(다시 읽을 길이 없다)
+    /// 거부는 끝이다 — 원본을 바로 비운다(다시 읽을 길이 없다). 칸 나누기 변경의 실패만 예외다(`apply`, R29)
     private mutating func finish(_ failed: Phase) {
         phase = failed
         isWorking = false
         source = nil
         pending = nil
+        delimiterFallback = nil
+        pendingFallback = nil
     }
 
     // MARK: - 메인 밖에서 할 일

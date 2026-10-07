@@ -52,11 +52,11 @@ private let failureTable: [(PackImportFailure, String)] = [
     (.missingRequiredColumn, "꼭 필요한 열이 없어요. 「본문」 열과 「번호」나 「단축어」 열을 넣어 주세요."),
     (.tooManyColumns, "칸이 너무 많아요. 필요한 칸만 남겨 주세요."),
     (.metaAfterHeader(record: 12, line: 40), "「#이름」 같은 정보 줄은 머리글 위에 있어야 해요. 정렬하다 아래로 내려갔는지 확인해 주세요."),
-    (.duplicateMeta(record: 12, line: 40), "같은 정보 줄(#이름·#틀·#권리)이 두 번 있어요. 하나만 남겨 주세요."),
-    (.unknownMeta(record: 12, line: 40), "모르는 정보 줄(#…)이 있어요. 정보 줄은 「#이름」·「#틀」·「#권리」만 쓸 수 있어요."),
+    (.duplicateMeta(record: 12, line: 40), "같은 정보 줄(#이름·#틀·#출처)이 두 번 있어요. 하나만 남겨 주세요."),
+    (.unknownMeta(record: 12, line: 40), "모르는 정보 줄(#…)이 있어요. 정보 줄은 「#이름」·「#틀」·「#출처」만 쓸 수 있어요."),
     (.unsupportedEscapeMeta(record: 12, line: 40), "「#escape」 줄은 아직 쓸 수 없어요. 그 줄을 지우고 다시 가져와 주세요."),
-    (.metaValueCount(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#권리」는 값 하나, 「#틀」은 1~8개예요."),
-    (.metaTooManyCells(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#권리」는 값 하나, 「#틀」은 1~8개예요."),
+    (.metaValueCount(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~8개예요."),
+    (.metaTooManyCells(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~8개예요."),
     (.templateInPhrasesMode, "단축어 열이 있는 파일에는 「#틀」 줄을 쓸 수 없어요.")
 ]
 
@@ -76,8 +76,8 @@ private let skipTable: [(SkipReason, String, String)] = [
 
 private func review(selected: PackEncodingReview.Encoding, utf8Failed: Int, cp949Failed: Int) -> PackEncodingReview {
     PackEncodingReview(selected: selected,
-                       utf8: .init(isReadable: utf8Failed == 0, failedLines: utf8Failed, samples: ["새해 인사"]),
-                       cp949: .init(isReadable: cp949Failed == 0, failedLines: cp949Failed, samples: ["새해 인사"]),
+                       utf8: .init(isReadable: utf8Failed == 0, failedLines: utf8Failed, samples: [.init(meta: nil, text: "새해 인사")]),
+                       cp949: .init(isReadable: cp949Failed == 0, failedLines: cp949Failed, samples: [.init(meta: nil, text: "새해 인사")]),
                        recordCount: 37, multilineBodyCount: 37)
 }
 
@@ -179,14 +179,44 @@ struct PackImportCopyMappingTests {
         #expect(PackImportCopy.encodingStatus(review(selected: selected, utf8Failed: utf8Failed, cp949Failed: cp949Failed)) == line)
     }
 
-    @Test("4-B·4-C 글자 확인 — 표 머리·방식 이름")
+    @Test("★ R29 4-B·4-C 글자 확인 — 표 머리 「불러온 글자」·「불러온 개수」·방식 이름")
     func encodingLines() {
         let both = review(selected: .utf8, utf8Failed: 0, cp949Failed: 0)
-        #expect(PackImportCopy.samplesHeader(both) == "파일에서 찾은 표본 — UTF-8")
+        #expect(PackImportCopy.samplesHeader(both) == "불러온 글자 — UTF-8")
         #expect(PackImportCopy.alternativeHeader(both) == "한국어(CP949)로 고르면")
-        #expect(PackImportCopy.samplesHeader(review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)) == "파일에서 찾은 표본")
+        #expect(PackImportCopy.samplesHeader(review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)) == "불러온 글자")
+        #expect(PackImportCopy.countsHeader == "불러온 개수")
         #expect(PackImportCopy.encodingName(.utf8) == "UTF-8")
         #expect(PackImportCopy.encodingName(.cp949) == "한국어(CP949)")
+    }
+
+    @Test("★ R29 — 표본 한 줄: 정보 줄은 「이름 : …」「틀 : …」「출처 : …」, 데이터 칸은 글자 그대로, 못 읽은 자리는 안내")
+    func sampleLines() {
+        #expect(PackImportCopy.sampleLine(.init(meta: .name, text: "사자성어 넘버스")) == "이름 : 사자성어 넘버스")
+        #expect(PackImportCopy.sampleLine(.init(meta: .template, text: "넘버스성어 {n}번")) == "틀 : 넘버스성어 {n}번")
+        #expect(PackImportCopy.sampleLine(.init(meta: .license, text: "자체 작성")) == "출처 : 자체 작성")
+        #expect(PackImportCopy.sampleLine(.init(meta: nil, text: "#메모,값")) == "#메모,값")
+        #expect(PackImportCopy.sampleLine(nil) == "이 방식으로는 읽을 수 없는 칸")
+        #expect(PackMetaField.allCases.map(PackImportCopy.metaLabel) == ["이름", "틀", "출처"])
+    }
+
+    @Test("★ R29 — 칸 나누기 되돌리기: 제목은 고른 칸 나누기를, 버튼은 직전 구분자(또는 고르기 화면)를 말한다 · 조사 (으)로")
+    func delimiterRevertLines() {
+        #expect(PackImportCopy.delimiterFailureTitle(.semicolon) == "칸을 세미콜론으로 나누면 읽을 수 없어요")
+        #expect(PackImportCopy.delimiterFailureTitle(.comma) == "칸을 쉼표로 나누면 읽을 수 없어요")
+        #expect(PackImportCopy.delimiterFailureTitle(.tab) == "칸을 탭으로 나누면 읽을 수 없어요")
+        #expect(PackImportCopy.revertDelimiter(.init(failed: .semicolon, previous: .comma)) == "쉼표로 되돌리기")
+        #expect(PackImportCopy.revertDelimiter(.init(failed: .comma, previous: .semicolon)) == "세미콜론으로 되돌리기")
+        #expect(PackImportCopy.revertDelimiter(.init(failed: .comma, previous: .tab)) == "탭으로 되돌리기")
+        #expect(PackImportCopy.revertDelimiter(.init(failed: .semicolon, previous: nil)) == "칸 나누기 다시 고르기")
+        #expect(PackImportCopy.revertDelimiterFooter(.file) == "되돌리면 파일을 처음부터 다시 읽어요.")
+        #expect(PackImportCopy.revertDelimiterFooter(.paste) == "되돌리면 붙여 넣은 표를 처음부터 다시 읽어요.")
+    }
+
+    @Test("★ R27 — 만드는 법 시트 그림·정보 줄 안내의 키는 `#출처`")
+    func guideUsesSourceKey() {
+        #expect(PackImportCopy.guideSheet[2] == ["#출처", "제작자 자체 작성", ""])
+        #expect(PackImportCopy.guideMeta == "머리글 위에 #이름 · #틀 · #출처 줄을 두면 가져올 때 미리 채워져요. 정렬하다 아래로 내려가지 않게 해 주세요.")
     }
 
     @Test("★ 4-B·4-C CSV 실물 반영(계획서 11절 F-1·F-2) — CP949 안내 줄은 **한국어(CP949)로 읽은 경우에만**, 풋터 둘째 문장")
@@ -326,7 +356,7 @@ var stage4Copy: [String] {
         PackImportCopy.readingMessage(.file), PackImportCopy.readingMessage(.paste),
         PackImportCopy.cancel, PackImportCopy.next, PackImportCopy.close,
         PackImportCopy.encodingTitle, PackImportCopy.encodingQuestion, PackImportCopy.alternativeFooter,
-        PackImportCopy.rowsLabel, PackImportCopy.multilineLabel, PackImportCopy.failedLabel, PackImportCopy.count(37),
+        PackImportCopy.countsHeader, PackImportCopy.rowsLabel, PackImportCopy.multilineLabel, PackImportCopy.failedLabel, PackImportCopy.count(37),
         PackImportCopy.encodingFooter, PackImportCopy.reviewEncodingAgain, PackImportCopy.unreadableSample,
         PackImportCopy.delimiterTitle, PackImportCopy.delimiterQuestion, PackImportCopy.delimiterFooter, PackImportCopy.delimiterLabel,
         PackImportCopy.encodingLabel,
@@ -347,6 +377,12 @@ var stage4Copy: [String] {
     texts += PackImportCopy.guideCells
     texts += [PackEncodingReview.Encoding.utf8, .cp949].map(PackImportCopy.encodingName)
     texts += CSVDelimiter.allCases.map(PackImportCopy.delimiterName)
+    texts += CSVDelimiter.allCases.flatMap {
+        [PackImportCopy.delimiterFailureTitle($0), PackImportCopy.revertDelimiter(.init(failed: .comma, previous: $0))]
+    }
+    texts += [PackImportCopy.revertDelimiter(.init(failed: .comma, previous: nil)),
+              PackImportCopy.revertDelimiterFooter(.file), PackImportCopy.revertDelimiterFooter(.paste)]
+    texts += PackMetaField.allCases.map { PackImportCopy.sampleLine(.init(meta: $0, text: "예시 값")) }
     for selected in [PackEncodingReview.Encoding.utf8, .cp949] {
         for failed in [(0, 0), (37, 0), (0, 37)] {
             let shown = review(selected: selected, utf8Failed: failed.0, cp949Failed: failed.1)

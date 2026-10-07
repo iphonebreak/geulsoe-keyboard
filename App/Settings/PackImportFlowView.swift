@@ -162,7 +162,8 @@ struct PackImportFlowView: View {
         .listRowBackground(Color.clear)
     }
 
-    /// 4-B·4-C — 두 방식 중 고르기, 고른 쪽 표본, 둘 다 읽히면 다른 쪽 표본(흐리게), 행·여러 줄 본문·읽기 실패
+    /// 4-B·4-C — 두 방식 중 고르기, 고른 쪽 「불러온 글자」(정보 줄은 「이름 : …」 — R29), 둘 다 읽히면 다른 쪽(흐리게),
+    /// 「불러온 개수」(행·여러 줄 본문·읽기 실패)
     @ViewBuilder
     private func encodingContent(_ review: PackEncodingReview) -> some View {
         Section {
@@ -219,13 +220,16 @@ struct PackImportFlowView: View {
                 LabeledContent(PackImportCopy.multilineLabel, value: PackImportCopy.count(multiline))
             }
             LabeledContent(PackImportCopy.failedLabel, value: PackNoticeCopy.number(selected.failedLines))
+        } header: {
+            Text(PackImportCopy.countsHeader)
         } footer: {
             Text(PackImportCopy.encodingFooter)
         }
     }
 
-    private func sampleRow(_ sample: String?) -> some View {
-        Text(sample ?? PackImportCopy.unreadableSample)
+    /// 표본 한 줄 — 정보 줄은 「이름 : …」 꼴(줄을 더 만들지 않는다), 그 방식으로 못 읽은 자리는 안내(흐리게)
+    private func sampleRow(_ sample: PackEncodingReview.Sample?) -> some View {
+        Text(PackImportCopy.sampleLine(sample))
             .foregroundStyle(sample == nil ? .secondary : .primary)
             .lineLimit(2)
     }
@@ -255,7 +259,8 @@ struct PackImportFlowView: View {
         }
     }
 
-    /// 4-G — 큰 ✕ + 제목 + 사유 한 줄(파일 내용 없음). 머리글 사유면 머리글 예시, 유효 0이면 건너뛴 이유. 다음 행동 둘 — 만드는 법 · 다른 파일
+    /// 4-G — 큰 ✕ + 제목 + 사유 한 줄(파일 내용 없음). 머리글 사유면 머리글 예시, 유효 0이면 건너뛴 이유. 다음 행동 둘 — 만드는 법 · 다른 파일.
+    /// 칸 나누기를 바꿔 실패했으면(R29) 제목이 그 칸 나누기를 말하고, 맨 앞에 「직전 구분자로 되돌리기」가 있다(원본에서 다시 읽는다)
     @ViewBuilder
     private func failureContent(_ problem: PackImportProblem) -> some View {
         Section {
@@ -264,8 +269,9 @@ struct PackImportFlowView: View {
                     .font(.system(size: 44))
                     .foregroundStyle(.red)
                     .accessibilityHidden(true)
-                Text(PackImportCopy.failureTitle(request.kind))
+                Text(failureTitle)
                     .font(.title3.weight(.semibold))
+                    .multilineTextAlignment(.center)
                 Text(PackImportCopy.failureMessage(problem, source: request.kind))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
@@ -274,6 +280,25 @@ struct PackImportFlowView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 12)
             .accessibilityElement(children: .combine)
+        }
+
+        if let fallback = session.delimiterFallback {
+            Section {
+                // 큰 글자에서 잘리지 않게 줄을 바꾼다(화면 확인 N-6)
+                Button {
+                    run(session.revertDelimiter())
+                } label: {
+                    Text(PackImportCopy.revertDelimiter(fallback))
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(session.isWorking)
+            } footer: {
+                Text(PackImportCopy.revertDelimiterFooter(request.kind))
+            }
+            .listRowBackground(Color.clear)
         }
 
         if PackImportCopy.showsHeaderExample(problem) {
@@ -313,6 +338,11 @@ struct PackImportFlowView: View {
                 Button(PackImportCopy.backToPaste) { close(.closed) }
             }
         }
+    }
+
+    /// 칸 나누기를 바꿔 실패했으면 그 칸 나누기가 맞지 않는다고(R29), 그 밖에는 4-G 제목
+    private var failureTitle: String {
+        session.delimiterFallback.map { PackImportCopy.delimiterFailureTitle($0.failed) } ?? PackImportCopy.failureTitle(request.kind)
     }
 
     // MARK: - 전체 보기
@@ -554,13 +584,16 @@ private struct PackImportPreviewSections: View {
                     Text(template).font(.body.monospaced())
                 }
             }
-            // 칸 나누기를 바꾸면 원본에서 다시 읽는다(5-2 #4)
-            Picker(PackImportCopy.delimiterLabel, selection: Binding(get: { draft.delimiter }, set: onDelimiter)) {
-                ForEach(CSVDelimiter.allCases, id: \.self) { delimiter in
-                    Text(PackImportCopy.delimiterName(delimiter)).tag(delimiter)
+            // 칸 나누기를 바꾸면 원본에서 다시 읽는다(5-2 #4). 자동 판정이 하나로 정했으면 보이지 않는다 — 두 가지 이상으로
+            // 읽힐 때만, 그 후보만(R29 — 하나로 정해진 표를 바꾸면 거의 실패했다)
+            if preview.offersDelimiterChoice {
+                Picker(PackImportCopy.delimiterLabel, selection: Binding(get: { draft.delimiter }, set: onDelimiter)) {
+                    ForEach(draft.delimiterCandidates, id: \.self) { delimiter in
+                        Text(PackImportCopy.delimiterName(delimiter)).tag(delimiter)
+                    }
                 }
+                .disabled(isWorking)
             }
-            .disabled(isWorking)
             if canReviewEncoding {
                 Button(PackImportCopy.reviewEncodingAgain, action: onReviewEncoding)
                     .disabled(isWorking)

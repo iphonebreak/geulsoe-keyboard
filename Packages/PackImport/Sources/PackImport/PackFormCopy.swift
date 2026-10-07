@@ -3,7 +3,7 @@ import TadakDomain
 /// 외부 채움글 **폼·확정·완료** 문구 표 — 한 곳(계획서 `external-snippet-packs-1c-plan.md` 5절 5행, 시안 5-A·5-B·5-C·U3·4-M).
 ///
 /// 규칙은 `PackNoticeCopy`·`PackImportCopy`와 같다: 해요체 · 「단축어」「채움글」 · 예산 한도 숫자 0(R2 — 보이는 숫자는 **필드 상한**
-/// (이름 40자·권리 120자·틀 40자·틀 8개·앞 글자 2자·틀+번호 48자)과 개수뿐이고 상한 값은 `PackLimits`에서 온다) · 예시는 교회·성경 소재 0(U6) —
+/// (이름 40자·출처 120자·틀 40자·틀 8개·앞 글자 2자·틀+번호 48자)과 개수뿐이고 상한 값은 `PackLimits`에서 온다) · 예시는 교회·성경 소재 0(U6) —
 /// 단 「성경 구절과 겹침」 거부 사유 한 줄은 **키보드의 기존 성경 기능**을 가리키는 이유라 예외다(시안 5-C 표, 계획서 6단계 ③).
 /// 4-J(가져오기 거부) 알림은 `PackChangeNotice`(`PackNoticeCopy` D1~D3)가 낸다. 문구 검사는 `PackFormCopyTests`가 `swift test`로 돈다.
 public enum PackFormCopy {
@@ -45,14 +45,15 @@ public enum PackFormCopy {
     }
     public static let reviewFooter = "빨간 표시가 있으면 가져올 수 없어요. 주황 표시는 알림이에요."
 
-    public static let licenseHeader = "권리 표기(꼭 필요해요)"
-    public static let customLicensePlaceholder = "권리 표기를 직접 써요"
-    public static let licenseTooLongFromFile = "파일에 적힌 권리 표기가 너무 길어서 보여 드리지 못했어요. 고르거나 직접 써 주세요."
+    /// 출처 절(R27 — 사용자에게 보이는 「권리 표기」는 「출처」다. 코드 식별자 `license`는 그대로)
+    public static let licenseHeader = "출처(꼭 필요해요)"
+    public static let customLicensePlaceholder = "출처를 직접 써요"
+    public static let licenseTooLongFromFile = "파일에 적힌 출처가 너무 길어서 보여 드리지 못했어요. 고르거나 직접 써 주세요."
 
-    /// 권리 선택지(R7) — 고른 선택지의 이 문구가 권리 표기로 저장된다(「파일에 적힌 표기」·「그 밖」은 그 원문·입력)
+    /// 출처 선택지(R7) — 고른 선택지의 이 문구가 출처로 저장된다(「파일에 적힌 출처」·「그 밖」은 그 원문·입력)
     public static func licenseLabel(_ choice: PackImportForm.LicenseChoice) -> String {
         switch choice {
-        case .fromFile: "파일에 적힌 표기"
+        case .fromFile: "파일에 적힌 출처"
         case .selfWritten: "직접 작성함"
         case .permitted: "사용 허락을 받음"
         case .publicDomain: "공개 도메인"
@@ -60,10 +61,12 @@ public enum PackFormCopy {
         }
     }
 
-    /// 시안 5-A·5-B 권리 절 풋터 — 선택지는 권리 증명이 아니다(R7)
+    /// 시안 5-A·5-B 출처 절 풋터 — 선택지는 증명이 아니다(R7). 파일에 출처가 있으면 폼이 그것을 미리 골라 둔다(R28) —
+    /// 없을 때만 「직접 골라야 켜진다」
     public static func licenseFooter(hasFileLicense: Bool) -> String {
-        (hasFileLicense ? "파일에 적힌 문구는 고치지 않고 그대로 보여 줘요. " : "")
-            + "하나를 직접 골라야 「가져오기」가 켜져요. 선택지는 권리를 증명하지 않아요. 이 내용을 쓸 권리가 있는지는 가져오는 분이 직접 확인해 주세요."
+        (hasFileLicense ? "파일에 적힌 출처를 고치지 않고 그대로 골라 뒀어요. 맞지 않으면 다른 것을 골라 주세요. "
+                        : "하나를 직접 골라야 「가져오기」가 켜져요. ")
+            + "고른 선택지는 증명이 아니에요. 이 내용을 써도 되는지는 가져오는 분이 직접 확인해 주세요."
     }
 
     // MARK: - 5-C 틀 검사
@@ -161,8 +164,8 @@ public enum PackFormCopy {
         switch failure {
         case .nameMissing: "이름을 써 주세요."
         case .nameTooLong: "이름은 \(PackNoticeCopy.number(PackLimits.name.characters))자까지예요."
-        case .licenseMissing: "권리 표기를 골라 주세요."
-        case .licenseTooLong: "권리 표기는 \(PackNoticeCopy.number(PackLimits.license.characters))자까지예요."
+        case .licenseMissing: "출처를 골라 주세요."
+        case .licenseTooLong: "출처는 \(PackNoticeCopy.number(PackLimits.license.characters))자까지예요."
         case .templateRequired: "틀을 하나 이상 써 주세요."
         case .tooManyPatterns: "틀은 \(PackNoticeCopy.number(PackLimits.templatePatterns))개까지예요."
         case .pattern(_, let pattern): templateFailure(pattern)

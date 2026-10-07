@@ -63,6 +63,18 @@ struct DelimiterCandidateTests {
         #expect(chosen.entries.map(\.triggers) == [["d"]])
     }
 
+    /// R29 — 미리보기는 자동 판정이 **둘 이상**을 채택했을 때만 「칸 나누기」를 보인다. 초안이 그 판정을 들고 간다(고른 구분자로 읽어도 같은 판정)
+    @Test("★ R29 — 초안의 칸 나누기 후보 = 자동 판정이 채택한 것. 하나로 정해지면 하나, 애매하면 둘 다(고른 구분자로 읽어도)")
+    func draftCarriesAdoptedCandidates() throws {
+        #expect(try ImportHelper.draft("단축어,본문\r\n인사,안녕하세요").delimiterCandidates == [.comma])
+        #expect(try ImportHelper.draft("단축어\t본문\tx;y;z;w\r\n인사\t안녕\t1;2;3;4").delimiterCandidates == [.tab])
+        let ambiguous = "단축어,본문,z;trigger;body\r\na,b,c;d;e"
+        #expect(try ImportHelper.draft(ambiguous, delimiter: .comma).delimiterCandidates == [.comma, .semicolon])
+        #expect(try ImportHelper.draft(ambiguous, delimiter: .semicolon).delimiterCandidates == [.comma, .semicolon])
+        // 하나로 정해지는 표는 구분자를 지정해 읽어도 판정이 그대로 하나다(화면은 고르기를 보이지 않는다)
+        #expect(try ImportHelper.draft("단축어,본문\r\n인사;안녕,반가워요", delimiter: .comma).delimiterCandidates == [.comma])
+    }
+
     @Test("채택 후보가 0개면 머리글 오류로 거부 (AC-10)")
     func noneAdopted() {
         #expect(throws: PackImportFailure.headerNotRecognized) { try PackImporter.read(text: "foo,bar\r\n1,2") }
@@ -107,7 +119,7 @@ struct HeaderMetaTests {
         #expect(draft.entries.map(\.body) == ["첫 줄\n#권리,가짜 권리"])
     }
 
-    @Test("메타가 머리글 뒤에 있으면 위치 오류 — 전체 거부 (AC-12)", arguments: ["#이름", "#틀", "#권리", "#escape"])
+    @Test("메타가 머리글 뒤에 있으면 위치 오류 — 전체 거부 (AC-12)", arguments: ["#이름", "#틀", "#출처", "#권리", "#escape"])
     func metaAfterHeader(key: String) {
         let text = "번호,본문\r\n1,가\r\n\(key),값"
         #expect(throws: PackImportFailure.metaAfterHeader(record: 3, line: 3)) { try PackImporter.read(text: text) }
@@ -124,6 +136,43 @@ struct HeaderMetaTests {
         #expect(throws: PackImportFailure.unsupportedEscapeMeta(record: 1, line: 1)) {
             try PackImporter.read(text: "#escape,v1\r\n단축어,본문\r\na,b")
         }
+    }
+
+    // MARK: R27 — 「출처」 (옛 `#권리`는 같은 칸의 별칭)
+
+    @Test("★ R27 — `#출처`가 출처 칸이고, 옛 `#권리`도 같은 칸으로 읽는다(이미 받은 샘플·옛 파일 호환)", arguments: ["#출처", "#권리", "\"#출처\"", " #권리 "])
+    func sourceMetaAndLegacyAlias(key: String) throws {
+        let draft = try ImportHelper.draft("\(key),제작자 자체 작성\r\n단축어,본문\r\n인사,안녕하세요")
+        #expect(draft.meta.license == "제작자 자체 작성")
+        #expect(draft.meta.issues.isEmpty)
+    }
+
+    /// 둘 다 있으면 **같은 칸이 두 번** — 중복 메타 규칙(5-3 「뒤 값이 표시를 바꿔치기하지 못하게」) 그대로 전체 거부. 위치는 두 번째 줄
+    @Test("★ R27 — `#출처`와 `#권리`가 함께 있으면 같은 칸이 두 번(중복 메타) → 전체 거부, 순서와 상관없다", arguments: [
+        ("#출처", "#권리"), ("#권리", "#출처"), ("#출처", "#출처"), ("#권리", "#권리")
+    ])
+    func sourceAndLegacyTogetherIsDuplicate(first: String, second: String) {
+        let text = "#이름,예시 팩\r\n\(first),가\r\n\(second),나\r\n단축어,본문\r\n인사,안녕하세요"
+        #expect(throws: PackImportFailure.duplicateMeta(record: 3, line: 3)) { try PackImporter.read(text: text) }
+    }
+
+    @Test("R27 — `#출처`도 값 하나, 상한(120자)을 넘으면 거부하지 않고 미리 채우지 않는다(5-4 ⑧)")
+    func sourceMetaLimits() throws {
+        #expect(throws: PackImportFailure.metaValueCount(record: 1, line: 1)) {
+            try PackImporter.read(text: "#출처,가,나\r\n단축어,본문\r\na,b")
+        }
+        let long = try ImportHelper.draft("#출처,\(String(repeating: "가", count: PackLimits.license.characters + 1))\r\n단축어,본문\r\na,b")
+        #expect(long.meta.license == nil && long.meta.issues == [.licenseTooLong])
+    }
+
+    @Test("R27 — 정보 줄 키 표(한 곳): 이름·틀·출처, 옛 `#권리`는 출처. `#escape`·모르는 키는 칸이 아니다")
+    func metaFieldTable() {
+        #expect(PackMetaField.field(forKey: "#이름") == .name)
+        #expect(PackMetaField.field(forKey: "#틀") == .template)
+        #expect(PackMetaField.field(forKey: "#출처") == .license)
+        #expect(PackMetaField.field(forKey: "#권리") == .license)
+        #expect(PackMetaField.field(forKey: "#escape") == nil && PackMetaField.field(forKey: "#메모") == nil)
+        #expect(PackMetaField.field(forKey: "출처") == nil)
     }
 
     @Test("`#틀` 별칭 8개(9셀)는 데이터 열 cap(8)과 충돌하지 않는다 (AC-12)")

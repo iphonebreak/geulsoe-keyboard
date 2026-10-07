@@ -9,10 +9,11 @@ import TadakDomain
 // 번들 파일은 기획자 원본을 **바이트 그대로** 복사한 것이다 — 해시는 제작 기록 `docs/design/external-snippet-packs/sample-build-record.md`와 같아야 한다.
 // `/docs/`는 저장소에 올리지 않는다(.gitignore) — 그래서 기록의 해시를 아래 표에 옮겨 두고 **늘** 대조하며, 문서가 있는 기기에서는 표가 기록과 같은지도 본다.
 
-/// 제작 기록 표(2026-10-04)의 SHA-256 — 샘플을 다시 만들면 기록과 이 표를 함께 고친다(기록의 「다시 만들 때」)
+/// 제작 기록 표의 SHA-256 — 샘플을 다시 만들면 기록과 이 표를 함께 고친다(기록의 「다시 만들 때」).
+/// 2026-10-07 개정(R27) — 정보 줄 키 `#권리` → `#출처` 한 곳만 바꿨다(기록의 「변경 이력」)
 private let recordedSHA256: [PackSample.Kind: String] = [
-    .numbered: "40720ce4dc8c0f039bf7b4ac296e321b9658f70738c3241beb946badfe48dcf8",
-    .phrases: "16d2e659d40876dac0dfa4f7ace5653367d66c59ca6d9825919f8db1d62e4fbe"
+    .numbered: "425eb2c44b904b5779a64e01be07c5d2ef73effa140d7873d1bfba71187549f1",
+    .phrases: "e97413f0853cca93b6ef6043fd8d8be0b9f15a0fc0dffb41cd69d04a2ba1ef9d"
 ]
 
 /// 기획자 원본 이름 — 시험 픽스처(`Fixtures/`, 4단계에 원본을 그대로 복사)와 문서 폴더에 같은 이름으로 있다
@@ -82,7 +83,7 @@ struct PackSampleBundleTests {
         #expect(bundled == (try Data(contentsOf: sampleDocsDirectory.appendingPathComponent("\(originalName(kind)).csv"))))
     }
 
-    @Test("번들 샘플은 그대로 팩이 된다 — 건너뜀 0 · 파일 정보 줄로 폼이 채워지고 「파일에 적힌 표기」만 고르면 가져오기가 켜진다(AC-27 준비)",
+    @Test("★ 번들 샘플은 그대로 팩이 된다 — 건너뜀 0 · 파일 정보 줄로 폼이 채워지고 파일 출처가 미리 골라져 가져오기가 켜져 있다(R28 · AC-27 준비)",
           arguments: PackSample.Kind.allCases)
     func importsCleanly(_ kind: PackSample.Kind) throws {
         let data = try Data(contentsOf: try #require(csvFile(kind).bundledURL))
@@ -93,13 +94,22 @@ struct PackSampleBundleTests {
         #expect(draft.skipped.isEmpty && !draft.needsEncodingConfirmation)
         #expect(draft.mode == (kind == .numbered ? .numbered : .phrases))
         #expect(kind == .numbered ? draft.items.count == 20 : draft.entries.count == 15)
-        var form = PackImportForm(draft: draft)
-        #expect(!form.isComplete)                    // 권리는 미리 고르지 않는다(시안 리뷰 수정 1)
-        form.licenseChoice = .fromFile
+        let form = PackImportForm(draft: draft)
+        #expect(form.licenseChoice == .fromFile)     // R28 — 파일의 `#출처`를 미리 고른다(예전 시안 리뷰 수정 1을 바꿨다)
         #expect(form.isComplete)
         let pack = try PackCompiler.compile(draft, form: form.packForm)
         #expect(pack.name == (kind == .numbered ? "사자성어 예시 팩" : "업무 상용구 예시"))
         #expect(pack.license == "글쇠 고정 샘플 — 자체 작성 문구(가짜 내용)")
+    }
+
+    @Test("★ R27 — 번들 샘플의 정보 줄은 `#출처` 한 줄이고 옛 `#권리`는 없다(바뀐 곳은 그 키 하나 — 값은 그대로)", arguments: PackSample.Kind.allCases)
+    func sourceKeyInSample(_ kind: PackSample.Kind) throws {
+        let data = try Data(contentsOf: try #require(csvFile(kind).bundledURL))
+        let records = try CSVRecordParser.parse(try PackTextDecoder.decode(data).text, delimiter: .comma).records
+        let source = records.filter { $0.cells.first == "#출처" }
+        #expect(source.count == 1)
+        #expect(source.first?.cells[1] == "글쇠 고정 샘플 — 자체 작성 문구(가짜 내용)")
+        #expect(!records.contains { $0.cells.contains { $0.contains("권리") } })
     }
 }
 

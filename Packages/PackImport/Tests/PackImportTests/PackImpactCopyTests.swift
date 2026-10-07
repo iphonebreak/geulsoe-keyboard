@@ -129,8 +129,8 @@ struct PackImpactCopyTests {
     @Test("★ 2-E — 팩 상세: 스위치·정보·틀 상태 배지와 설명 줄·풋터·사용법·삭제")
     func detailCopy() {
         #expect(PackNoticeCopy.useToggle == "이 팩 사용")
-        #expect(PackNoticeCopy.infoHeader == "정보" && PackNoticeCopy.kindLabel == "종류" && PackNoticeCopy.licenseLabel == "권리 표기")
-        #expect(PackNoticeCopy.infoFooter == "권리 표기는 가져올 때 확인한 문구 그대로예요.")
+        #expect(PackNoticeCopy.infoHeader == "정보" && PackNoticeCopy.kindLabel == "종류" && PackNoticeCopy.licenseLabel == "출처")
+        #expect(PackNoticeCopy.infoFooter == "출처는 가져올 때 확인한 문구 그대로예요.")   // R27
         #expect(PackNoticeCopy.templatesHeader == "단축어 틀")
         #expect(PackNoticeCopy.templatesFooter
                 == "같은 틀을 두 팩이 쓰면 위에 있는 팩이 가져요. 고유한 앞 글자(예: 고사성어 {n}번)를 쓰면 겹치지 않아요.")

@@ -10,6 +10,8 @@ import TadakDomain
 //   「`xlsx`·`.xlsx`·엑셀 파일을 가져오는 안내」는 금지, 「엑셀에서 CSV로 저장」처럼 **엑셀을 CSV를 만드는 곳으로** 가리키는 안내는 허용
 // - **U6**(PDR E표): 화면 문구·샘플·`#` 예시에 교회·성경 소재 0. 예외는 `PackCopyLint.churchExceptions`에 **정확한 문자열로만** 둔다
 // - 금칙어: 「트리거」(용어는 「단축어」) · 「잠시 뒤」(틀린 안내, 계획서 4-2절)
+// - **R27**(PDR 결정 표, 2026-10-07): 외부 채움글 화면·샘플에 「권리」 0 — 보이는 이름은 「출처」다(코드 식별자 `license`는 그대로).
+//   앱 전체에는 「권리 표기」 0(처리방침의 가져온 팩 문장 포함). 옛 `#권리`는 **읽기만** 받는다(파서 별칭 — 안내·샘플에 쓰지 않는다)
 // 숫자 검사(예산 한도 숫자 0)는 단계마다 허용 목록이 달라 각 단계 시험에 남아 있다.
 
 // MARK: - 규칙
@@ -31,6 +33,13 @@ enum PackCopyLint {
 
     /// 금칙어
     static let bannedWords = ["트리거", "잠시 뒤"]
+
+    /// R27 — 외부 채움글 화면·샘플에서 물러난 낱말(보이는 이름은 「출처」)
+    static let retiredWords = ["권리"]
+    /// R27 — 앱 전체(처리방침 포함)에서 물러난 말
+    static let retiredAppPhrases = ["권리 표기"]
+
+    static func retiredWords(in text: String) -> [String] { retiredWords.filter(text.contains) }
 
     /// AC-35 — xlsx **형식** 이름(확장자 xls·xlsx·xlsm·xlsb — 점이 없어도·「통합 문서」·Excel·workbook·워크북)과, 엑셀을 **가져오는 대상**으로
     /// 가리키는 말(「엑셀 파일」·「엑셀로」·알약 「엑셀」·「엑셀·CSV 파일」). 엑셀은 **CSV를 만드는 곳**으로만 허용한다 — 「엑셀」(또는
@@ -339,6 +348,37 @@ struct PackCopyLintTests {
             let cells = try sampleCells(url)
             #expect(cells.contains { $0.hasPrefix("#") })
             for cell in cells { #expect(PackCopyLint.churchWords(in: cell).isEmpty, "\(url.lastPathComponent): \(cell)") }
+        }
+    }
+
+    // MARK: R27 「권리」 → 「출처」
+
+    @Test("★ R27 — 두 판의 화면 문구 전부에 「권리」 0(보이는 이름은 「출처」)", arguments: PackCopySet.allCases)
+    func screenCopyHasNoRetiredWords(_ set: PackCopySet) {
+        let texts = PackCopySet.$previewing.withValue(set, operation: { allScreenCopy })
+        #expect(texts.contains { $0.contains("출처") }, "검사가 실제 출처 문구를 돈다")
+        for text in texts { #expect(PackCopyLint.retiredWords(in: text).isEmpty, "\(text)") }
+    }
+
+    @Test("★ R27 — 앱 소스: 외부 채움글 화면 파일 리터럴에 「권리」 0, 앱 전체(처리방침 포함)에 「권리 표기」 0")
+    func appSourceHasNoRetiredWords() throws {
+        let literals = try appStringLiterals()
+        for (file, literal) in literals where PackCopyLint.isPackScreenFile(file) {
+            #expect(PackCopyLint.retiredWords(in: literal).isEmpty, "\(file): \(literal)")
+        }
+        for (file, literal) in literals {
+            #expect(!PackCopyLint.retiredAppPhrases.contains(where: literal.contains), "\(file): \(literal)")
+        }
+        #expect(literals.contains { $0.file == "PrivacyPolicyView.swift" && $0.literal.contains("(팩 이름·단축어·본문·출처)") },
+                "처리방침의 가져온 팩 문장이 「출처」로 바뀌었다")
+    }
+
+    @Test("★ R27 — 번들 샘플의 셀에 「권리」 0 — 정보 줄 키는 `#출처`(옛 `#권리`는 읽기 별칭일 뿐)")
+    func samplesUseSourceKey() throws {
+        for url in try bundledSampleFiles() {
+            let cells = try sampleCells(url)
+            #expect(cells.contains("#출처"), "\(url.lastPathComponent)")
+            for cell in cells { #expect(PackCopyLint.retiredWords(in: cell).isEmpty, "\(url.lastPathComponent): \(cell)") }
         }
     }
 

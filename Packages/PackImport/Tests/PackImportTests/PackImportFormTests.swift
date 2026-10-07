@@ -5,7 +5,7 @@ import TadakDomain
 @testable import PackImport
 
 // 외부 채움글 1-c 5단계 — 폼·틀 검사·확정·완료(계획서 `external-snippet-packs-1c-plan.md` 5절 5행, 3-4절 5-A·5-B·5-C, 4-2절 D1~D3·G1·G2, 8절 #5).
-// PDR `external-snippet-packs.md` 5-6(R7 — 폼이 최종 권위, 권리 필수·선택지는 증명이 아님)·9-1·9-2(커밋 직전 재검사)·10-1(R3 틀 규칙)·10-2~10-4,
+// PDR `external-snippet-packs.md` 5-6(R7 — 폼이 최종 권위, 출처 필수·선택지는 증명이 아님 · R27 「권리」→「출처」 · R28 파일 출처를 미리 고름)·9-1·9-2(커밋 직전 재검사)·10-1(R3 틀 규칙)·10-2~10-4,
 // E표 U2(켠 채 맨 아래 · 넘으면 「꺼 둔 채로」)·U3(같은 이름은 묻는다), AC-3·AC-20·AC-21~24.
 // 확정 흐름은 실제 `PackStore`(임시 폴더)로 돈다 — 「버튼이 켜졌는데 저장소가 거부」·「꺼 둔 채로가 기존 팩을 밀어냄」 같은 틈은 표가 아니라 저장소에서 보인다.
 
@@ -56,7 +56,7 @@ private struct Store {
     var library: PackImpact.Library? { store.impactLibrary() }
 }
 
-private let numberedCSV = "#이름,사자성어 예시 팩\n#틀,사자성어 {n}번,성어 {n}번\n#권리,제작자 자체 작성 예시 (가짜 내용)\n"
+private let numberedCSV = "#이름,사자성어 예시 팩\n#틀,사자성어 {n}번,성어 {n}번\n#출처,제작자 자체 작성 예시 (가짜 내용)\n"
     + "번호,제목,본문\n1,예시 제목 하나,예시 본문 하나\n12,예시 제목 둘,예시 본문 둘\n"
 private let phrasesCSV = "단축어,제목,본문\n회사주소,회사 주소,예시 주소 한 줄\n새해인사,새해 인사,예시 인사 한 줄\n"
 
@@ -75,7 +75,7 @@ private func numberedPack(_ name: String, template: String) -> ExternalPack {
         patterns: [pattern], titleFormat: template, items: [PackTemplateItem(n: 1, title: "제목", body: "본문")]))
 }
 
-/// 다 채운 폼 — 이름·권리(직접 작성함)·틀은 파일 값 그대로
+/// 다 채운 폼 — 이름·출처(직접 작성함)·틀은 파일 값 그대로
 private func filledForm(_ draft: PackDraft, name: String? = nil) -> PackImportForm {
     var form = PackImportForm(draft: draft)
     if let name { form.name = name }
@@ -105,30 +105,59 @@ private extension PackImportConfirmation {
 
 private func string(_ count: Int, _ character: Character = "가") -> String { String(repeating: character, count: count) }
 
-// MARK: - ① 폼 — 필수 칸 분리(AC-20) · 권리 미선택이면 꺼짐 · 상한
+// MARK: - ① 폼 — 필수 칸 분리(AC-20) · 출처 미선택이면 꺼짐(파일에 출처가 있으면 미리 고름, R28) · 상한
 
 @Suite("외부 채움글 1-c 5단계 — 폼 (5-A·5-B · AC-20)")
 struct PackImportFormTests {
 
-    @Test("번호형 — 파일 정보는 미리 채움, 권리는 미리 고르지 않는다(리뷰 수정 1)")
+    @Test("★ R28 번호형 — 파일 정보는 미리 채움, 파일의 `#출처`는 **미리 골라 두고** 가져오기가 켜진다")
     func numberedPrefill() throws {
         let form = PackImportForm(draft: try numberedDraft())
         #expect(form.mode == .numbered)
         #expect(form.name == "사자성어 예시 팩" && form.isNameFromFile)
         #expect(form.templates == ["사자성어 {n}번", "성어 {n}번"])
         #expect(form.isTemplateFromFile(at: 0) && form.isTemplateFromFile(at: 1))
-        #expect(form.licenseChoice == nil)
+        #expect(form.licenseChoice == .fromFile)
         #expect(form.licenseChoices == [.fromFile, .selfWritten, .permitted, .publicDomain, .custom])
         #expect(form.meta.license == "제작자 자체 작성 예시 (가짜 내용)")
-        // ★ 권리를 고르지 않았으면 가져오기가 꺼져 있다
-        #expect(form.licenseIssue == .licenseMissing && !form.isComplete)
+        #expect(form.license == "제작자 자체 작성 예시 (가짜 내용)")
+        #expect(form.licenseIssue == nil && form.isComplete)
+        #expect(form.packForm.license == "제작자 자체 작성 예시 (가짜 내용)")
     }
 
-    @Test("문구형 — 틀 칸이 없다(AC-20), 파일에 이름·권리가 없으면 빈칸·「파일에 적힌 표기」 선택지 없음")
+    @Test("★ R28 — 옛 `#권리`도 같은 출처라 미리 고른다(이미 받은 샘플·옛 파일)", arguments: ["#출처", "#권리"])
+    func legacyKeyIsPreselected(key: String) throws {
+        let form = PackImportForm(draft: try ImportHelper.draft("\(key),옛 파일의 출처\n단축어,제목,본문\n회사주소,회사 주소,본문\n"))
+        #expect(form.licenseChoice == .fromFile && form.license == "옛 파일의 출처")
+        #expect(form.licenseChoices.first == .fromFile)
+    }
+
+    @Test("★ R28 — 파일에 출처가 없으면 지금처럼 비어 있고 꺼짐(AC-20) · 고르면 켜진다")
+    func noSourceStaysUnselected() throws {
+        var form = PackImportForm(draft: try ImportHelper.draft("#이름,우리 회사 상용구\n단축어,제목,본문\n회사주소,회사 주소,본문\n"))
+        #expect(form.licenseChoice == nil && form.license == nil)
+        #expect(form.licenseIssue == .licenseMissing && !form.isComplete)
+        form.licenseChoice = .selfWritten
+        #expect(form.isComplete)
+    }
+
+    @Test("R28 — 미리 고른 것은 바꿀 수 있고, 「그 밖」으로 옮겼다 비우면 다시 꺼진다(폼이 최종 권위)")
+    func preselectionCanBeChanged() throws {
+        var form = PackImportForm(draft: try numberedDraft())
+        form.licenseChoice = .permitted
+        #expect(form.license == "사용 허락을 받음" && form.isComplete)
+        form.licenseChoice = .custom
+        #expect(form.licenseIssue == .licenseMissing && !form.isComplete)
+        form.licenseChoice = .fromFile
+        #expect(form.isComplete)
+    }
+
+    @Test("문구형 — 틀 칸이 없다(AC-20), 파일에 이름·출처가 없으면 빈칸·「파일에 적힌 출처」 선택지 없음")
     func phrasesHasNoTemplate() throws {
         var form = PackImportForm(draft: try phrasesDraft())
         #expect(form.mode == .phrases && form.templates.isEmpty && !form.canAddTemplate)
         #expect(form.name.isEmpty && !form.isNameFromFile)
+        #expect(form.licenseChoice == nil)
         #expect(form.licenseChoices == [.selfWritten, .permitted, .publicDomain, .custom])
         form.addTemplate()
         #expect(form.templates.isEmpty)
@@ -138,8 +167,8 @@ struct PackImportFormTests {
         #expect(form.packForm == PackForm(name: "우리 회사 상용구", license: "공개 도메인", templateSpecs: []))
     }
 
-    /// 표 — (이름, 권리 선택, 직접 입력, 틀) → (이름 사유, 권리 사유, 틀 사유)
-    @Test("★ 검증 표 — 이름 40 · 권리(직접 입력) 120 · 틀 필수(번호형) · 틀 스키마", arguments: [
+    /// 표 — (이름, 출처 선택, 직접 입력, 틀) → (이름 사유, 출처 사유, 틀 사유)
+    @Test("★ 검증 표 — 이름 40 · 출처(직접 입력) 120 · 틀 필수(번호형) · 틀 스키마", arguments: [
         ("이름", PackImportForm.LicenseChoice?.some(.selfWritten), "", ["사자성어 {n}번"], nil, nil, nil),
         ("이름", nil, "", ["사자성어 {n}번"], nil, PackCompileFailure.licenseMissing, nil),
         ("", .selfWritten, "", ["사자성어 {n}번"], .nameMissing, nil, nil),
@@ -183,10 +212,10 @@ struct PackImportFormTests {
         }
     }
 
-    @Test("권리 — 고른 선택지가 권리 표기가 된다. 파일 문구는 원문 그대로, 「그 밖」은 직접 입력")
+    @Test("출처 — 고른 선택지가 출처가 된다. 파일 문구는 원문 그대로, 「그 밖」은 직접 입력")
     func licenseResolution() throws {
         var form = PackImportForm(draft: try numberedDraft())
-        #expect(form.license == nil)
+        #expect(form.license == "제작자 자체 작성 예시 (가짜 내용)")   // R28 — 파일 출처를 미리 골랐다
         let expected: [(PackImportForm.LicenseChoice, String)] = [
             (.fromFile, "제작자 자체 작성 예시 (가짜 내용)"), (.selfWritten, "직접 작성함"), (.permitted, "사용 허락을 받음"),
             (.publicDomain, "공개 도메인")
@@ -198,17 +227,18 @@ struct PackImportFormTests {
         form.licenseChoice = .custom
         form.customLicense = "우리 회사 총무팀 자체 작성"
         #expect(form.license == "우리 회사 총무팀 자체 작성")
-        // 직접 입력은 다른 선택지로 옮겨도 남아 있다(돌아오면 다시 보인다) — 권리 표기는 고른 것 하나
+        // 직접 입력은 다른 선택지로 옮겨도 남아 있다(돌아오면 다시 보인다) — 출처는 고른 것 하나
         form.licenseChoice = .publicDomain
         #expect(form.license == "공개 도메인" && form.customLicense == "우리 회사 총무팀 자체 작성")
     }
 
-    @Test("파일 값이 상한을 넘어 미리 채우지 않은 칸 — 빈칸으로 시작하고 사유를 알린다(5-6)")
+    @Test("파일 값이 상한을 넘어 미리 채우지 않은 칸 — 빈칸으로 시작하고 사유를 알린다(5-6) · 출처는 미리 고르지 않는다(R28)")
     func overlongMetaIsNotPrefilled() throws {
-        let csv = "#이름,\(string(41))\n#권리,\(string(121))\n단축어,제목,본문\n회사주소,회사 주소,본문\n"
+        let csv = "#이름,\(string(41))\n#출처,\(string(121))\n단축어,제목,본문\n회사주소,회사 주소,본문\n"
         let form = PackImportForm(draft: try ImportHelper.draft(csv))
         #expect(form.name.isEmpty && form.meta.issues == [.nameTooLong, .licenseTooLong])
         #expect(!form.licenseChoices.contains(.fromFile))
+        #expect(form.licenseChoice == nil && !form.isComplete)
     }
 
     @Test("틀 칸 — 8개까지 추가, 마지막 한 칸은 지우지 않는다, 고치면 「파일에서」가 사라진다")
@@ -370,7 +400,7 @@ struct PackImportConfirmationTransitionTests {
     private let existing = PackSummary(id: "old", name: "우리 회사 상용구", mode: .phrases, itemCount: 3, titleFormat: nil,
                                        isEnabled: false, status: .off)
 
-    @Test("완성되지 않은 폼은 확정하지 않는다 — 권리 미선택")
+    @Test("완성되지 않은 폼은 확정하지 않는다 — 출처 미선택")
     func incompleteForm() throws {
         let draft = try phrasesDraft()
         var confirmation = PackImportConfirmation(draft: draft, library: library([]))
@@ -951,7 +981,7 @@ private let allCompileFailures: [PackCompileFailure] = [
     .pattern(index: 0, .prefixTooShort), .noValidRecords
 ]
 
-/// 숫자 허용 — 시안 예시(사자성어 {n}번 · 회차{n}번)와 **필드 상한**(이름 40자 · 권리 120자 · 틀 literal 40자 · 틀+번호 48자 ·
+/// 숫자 허용 — 시안 예시(사자성어 {n}번 · 회차{n}번)와 **필드 상한**(이름 40자 · 출처 120자 · 틀 literal 40자 · 틀+번호 48자 ·
 /// 틀 8개 · 앞 글자 2자)뿐. 개수 표시(37개)는 시험 값. 예산 한도(R2) 숫자는 여기에 없다
 private let stage5AllowedNumbers = ["40자까지", "120자까지", "48자 이내", "8개까지", "2자 이상", "37개", "예시 번호 팩 2", "업무 상용구 A"]
 
@@ -984,6 +1014,23 @@ struct PackFormCopyTests {
                     == "「사자성어 예시 팩」이 이미 있어요. 바꾸면 목록 자리와 켬/끔은 그대로고 내용만 새 파일로 바뀌어요.")
         #expect(PackFormCopy.doneSummary(name: "사자성어 예시 팩", count: 641) == "「사자성어 예시 팩」 · 641개")
         #expect(PackFormCopy.skippedLine(4) == "건너뛴 4개는 가져오지 않았어요.")
+    }
+
+    @Test("★ R27·R28 — 폼의 「권리 표기」는 「출처」다(머리·입력칸·선택지·사유·풋터). 파일 출처를 미리 고른다는 말은 파일 출처가 있을 때만")
+    func sourceCopy() {
+        #expect(PackFormCopy.licenseHeader == "출처(꼭 필요해요)")
+        #expect(PackFormCopy.customLicensePlaceholder == "출처를 직접 써요")
+        #expect(PackFormCopy.licenseTooLongFromFile == "파일에 적힌 출처가 너무 길어서 보여 드리지 못했어요. 고르거나 직접 써 주세요.")
+        #expect(PackFormCopy.licenseLabel(.fromFile) == "파일에 적힌 출처")
+        #expect(PackFormCopy.compileFailure(.licenseMissing) == "출처를 골라 주세요.")
+        #expect(PackFormCopy.compileFailure(.licenseTooLong) == "출처는 120자까지예요.")
+        #expect(PackFormCopy.licenseFooter(hasFileLicense: true)
+                    == "파일에 적힌 출처를 고치지 않고 그대로 골라 뒀어요. 맞지 않으면 다른 것을 골라 주세요. "
+                    + "고른 선택지는 증명이 아니에요. 이 내용을 써도 되는지는 가져오는 분이 직접 확인해 주세요.")
+        #expect(PackFormCopy.licenseFooter(hasFileLicense: false)
+                    == "하나를 직접 골라야 「가져오기」가 켜져요. 고른 선택지는 증명이 아니에요. 이 내용을 써도 되는지는 가져오는 분이 직접 확인해 주세요.")
+        // 보이는 글자에 「권리」가 남지 않는다(이 표 전부 — `PackCopyLintTests`가 화면 전체를 다시 본다)
+        for text in stage5Copy { #expect(!text.contains("권리"), "\(text)") }
     }
 
     @Test("★ 화면 확인 N-3 — 빨강 아래 「예:」 줄은 **통과하는 입력**이다(고친 예) — 그 사유로 다시 거부되면 실패")

@@ -272,8 +272,8 @@ public enum PackNoticeCopy {
     public static let useToggle = "이 팩 사용"
     public static let infoHeader = "정보"
     public static let kindLabel = "종류"
-    public static let licenseLabel = "권리 표기"
-    public static let infoFooter = "권리 표기는 가져올 때 확인한 문구 그대로예요."
+    public static let licenseLabel = "출처"
+    public static let infoFooter = "출처는 가져올 때 확인한 문구 그대로예요."
     public static let templatesHeader = "단축어 틀"
     public static let templatesFooter = "같은 틀을 두 팩이 쓰면 위에 있는 팩이 가져요. 고유한 앞 글자(예: 고사성어 {n}번)를 쓰면 겹치지 않아요."
 

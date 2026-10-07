@@ -51,10 +51,27 @@ public enum MetaIssue: Equatable, Sendable {
     case licenseTooLong
 }
 
+/// 머리글 위 정보 줄(`#` 메타, 5-3)의 칸 — 키 글자는 `field(forKey:)` **한 곳**에서 읽는다(파서·글자 확인 표본이 같이 쓴다).
+/// 출처 칸의 키는 `#출처`이고 옛 `#권리`도 같은 칸이다(R27 — 이미 받은 샘플·옛 파일 호환). 둘이 함께 있으면 같은 칸이 두 번이라 중복 메타다.
+/// 코드 식별자는 `license` 그대로다(보이는 글자만 「출처」 — 글쇠·단축어 원칙과 같다)
+public enum PackMetaField: Hashable, Sendable, CaseIterable {
+    /// `#이름`
+    case name
+    /// `#틀` — 값 1~8개(별칭)
+    case template
+    /// `#출처`(옛 `#권리`)
+    case license
+
+    static let keys: [String: PackMetaField] = ["#이름": .name, "#틀": .template, "#출처": .license, "#권리": .license]
+
+    /// 앞뒤 공백을 뗀 첫 칸이 정보 줄 키면 그 칸. `#escape`·모르는 `#` 키는 nil
+    public static func field(forKey key: String) -> PackMetaField? { keys[key] }
+}
+
 /// `#` 메타의 **미리 채움**(5-6 — 폼이 최종 권위, 파일명은 쓰지 않는다)
 public struct PackMetaPrefill: Equatable, Sendable {
     public var name: String?
-    /// 제작자가 준 권리 문구 — 선택지로 덮지 않고 원문 그대로 보인다(길이 제한 안에서)
+    /// 제작자가 준 출처 문구(`#출처`·옛 `#권리`) — 선택지로 덮지 않고 원문 그대로 보이고, 폼이 처음부터 고른다(R28, 길이 제한 안에서)
     public var license: String?
     /// `#틀` 원문 값(1~8) — 검사는 `TemplatePatternSpec`·`PackCompiler`
     public var templateSpecs: [String]
@@ -69,6 +86,8 @@ public struct PackDraft: Equatable, Sendable {
     /// R18 — BOM 없는 비ASCII 파일
     public var needsEncodingConfirmation: Bool
     public var delimiter: CSVDelimiter
+    /// 자동 판정(5-2)이 채택한 구분자 — 구분자를 골라 읽었어도 같은 원본의 판정이다. **둘 이상일 때만** 미리보기가 「칸 나누기」를 보인다(R29)
+    public var delimiterCandidates: [CSVDelimiter]
     public var mode: ExternalPack.Mode
     public var meta: PackMetaPrefill
     /// 문구형 항목(정규화 기준 같은 단축어는 뒤 항목이 이긴 결과)
@@ -130,12 +149,16 @@ public enum PackImporter {
         // 구분자 판정 앞 — 구분자·줄바꿈뿐이면 어느 구분자로 읽어도 비지 않은 레코드가 없다(검증 F4)
         guard !containsOnlySeparators(text) else { throw .emptyFile }
         let delimiter: CSVDelimiter
+        let candidates: [CSVDelimiter]
         if let chosen {
             delimiter = chosen
+            // 고른 구분자로 읽어도 자동 판정은 같은 원본에서 다시 한다(R29 — 미리보기가 고르기를 보일지). 판정이 실패해도 고른 것으로 읽는다
+            candidates = (try? adoptDelimiters(text)) ?? []
         } else {
             let adopted = try adoptDelimiters(text)
             guard adopted.count == 1, let only = adopted.first else { return .chooseDelimiter(adopted) }
             delimiter = only
+            candidates = adopted
         }
         // 본 파싱 — 여기서 난 quote 오류는 전체 거부(5-4 명확화 ①)
         let parsed: CSVParseResult
@@ -149,6 +172,7 @@ public enum PackImporter {
         }
         guard parsed.records.contains(where: { !$0.isBlank }) else { throw .emptyFile }
         var draft = try PackRecordReader.read(parsed.records, delimiter: delimiter)
+        draft.delimiterCandidates = candidates
         draft.encoding = encoding?.encoding
         draft.hadBOM = encoding?.hadBOM ?? false
         draft.needsEncodingConfirmation = encoding?.needsConfirmation ?? false
@@ -223,11 +247,9 @@ enum PackRecordReader {
         "본문": .body, "내용": .body, "body": .body
     ]
 
-    static let metaName = "#이름"
-    static let metaTemplate = "#틀"
-    static let metaLicense = "#권리"
     static let metaEscape = "#escape"
-    static let reservedMetaKeys: Set<String> = [metaName, metaTemplate, metaLicense, metaEscape]
+    /// 머리글 뒤에 오면 위치 오류인 키 — 칸 키 전부(옛 `#권리` 포함, `PackMetaField`)와 `#escape`
+    static let reservedMetaKeys: Set<String> = Set(PackMetaField.keys.keys).union([metaEscape])
 
     struct Header: Equatable {
         var columns: [Field: Int]
@@ -334,7 +356,7 @@ enum PackRecordReader {
     /// 본 판정 — 구조 오류는 throw, 행 오류는 건너뜀
     static func read(_ records: [CSVRecord], delimiter: CSVDelimiter) throws(PackImportFailure) -> PackDraft {
         var meta = PackMetaPrefill(name: nil, license: nil, templateSpecs: [], issues: [])
-        var seenMeta = Set<String>()
+        var seenMeta = Set<PackMetaField>()
         var header: Header?
         var rows = RowCollector()
 
@@ -369,37 +391,37 @@ enum PackRecordReader {
 
         let (entries, items, duplicates) = rows.finish(mode: header.mode)
         return PackDraft(encoding: nil, hadBOM: false, needsEncodingConfirmation: false, delimiter: delimiter,
-                         mode: header.mode, meta: meta, entries: entries, items: items, skipped: rows.skipped,
-                         dataRecordCount: rows.dataRecordCount, acceptedRecordCount: rows.accepted,
+                         delimiterCandidates: [delimiter], mode: header.mode, meta: meta, entries: entries, items: items,
+                         skipped: rows.skipped, dataRecordCount: rows.dataRecordCount, acceptedRecordCount: rows.accepted,
                          duplicateCount: duplicates, ignoredColumnCount: header.ignored,
                          sanitizedCharacterCount: rows.sanitized, strayQuoteCount: 0)
     }
 
-    /// 5-3 — 메타는 머리글 앞에서만. 중복·알 수 없는 키·`#escape`(후속)·셀 cap·값 개수(trailing 빈 셀만 허용)
+    /// 5-3 — 메타는 머리글 앞에서만. 중복(같은 **칸** — `#출처`와 옛 `#권리`는 한 칸)·알 수 없는 키·`#escape`(후속)·셀 cap·
+    /// 값 개수(trailing 빈 셀만 허용)
     private static func readMeta(
-        _ record: CSVRecord, key: String, number: Int, seen: inout Set<String>, into meta: inout PackMetaPrefill
+        _ record: CSVRecord, key: String, number: Int, seen: inout Set<PackMetaField>, into meta: inout PackMetaPrefill
     ) throws(PackImportFailure) {
-        switch key {
-        case metaName, metaTemplate, metaLicense: break
-        case metaEscape: throw .unsupportedEscapeMeta(record: number, line: record.line)
-        default: throw .unknownMeta(record: number, line: record.line)
+        guard let field = PackMetaField.field(forKey: key) else {
+            if key == metaEscape { throw .unsupportedEscapeMeta(record: number, line: record.line) }
+            throw .unknownMeta(record: number, line: record.line)
         }
-        guard seen.insert(key).inserted else { throw .duplicateMeta(record: number, line: record.line) }
+        guard seen.insert(field).inserted else { throw .duplicateMeta(record: number, line: record.line) }
         let effective = effectiveCount(record.cells)
         guard effective <= PackLimits.metaCells else { throw .metaTooManyCells(record: number, line: record.line) }
         let values = Array(record.cells[1..<max(1, effective)])
-        let allowed = key == metaTemplate ? 1...PackLimits.templatePatterns : 1...1
+        let allowed = field == .template ? 1...PackLimits.templatePatterns : 1...1
         guard allowed.contains(values.count), !values.contains(where: \.isEmpty) else {
             throw .metaValueCount(record: number, line: record.line)
         }
-        switch key {
-        case metaName:
+        switch field {
+        case .name:
             let value = PackTextSanitizer.sanitize(values[0]).text
             if PackLimits.name.admits(value) { meta.name = value } else { meta.issues.append(.nameTooLong) }
-        case metaLicense:
+        case .license:
             let value = PackTextSanitizer.sanitize(values[0]).text
             if PackLimits.license.admits(value) { meta.license = value } else { meta.issues.append(.licenseTooLong) }
-        default:
+        case .template:
             meta.templateSpecs = values.map { PackTextSanitizer.sanitize($0).text.trimmingCharacters(in: .whitespacesAndNewlines) }
         }
     }

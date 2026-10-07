@@ -7,7 +7,7 @@ import TadakDomain
 //
 // 상태는 패키지 값 둘이다 — 폼 칸 `PackImportForm`, 확정 흐름 `PackImportConfirmation`. 무거운 일(성경 전체 n 틀 검사·최종 컴파일·커밋)은
 // 전부 메인 밖(`PackTemplateReview.perform`·`PackImportConfirmation.perform` → `PackStoreClient`)이다. 문구는 전부 `PackFormCopy`·`PackNoticeCopy`.
-// 보안: 팩 이름·권리·틀은 사용자 입력이다 — **화면에 표시만** 하고 로그·분석 이벤트로 내보내지 않는다.
+// 보안: 팩 이름·출처·틀은 사용자 입력이다 — **화면에 표시만** 하고 로그·분석 이벤트로 내보내지 않는다.
 
 /// 「팩 정보」 — 미리보기의 「다음」으로 밀어 넣는다. 「가져오기」가 확정이다
 struct PackImportFormView: View {
@@ -240,7 +240,7 @@ struct PackImportFormView: View {
         return (title, PackFormCopy.reviewDetail(status, replacing: sameName != nil, name: name), .orange)
     }
 
-    // MARK: - 5-A·5-B 권리
+    // MARK: - 5-A·5-B 출처(R27 — 코드 식별자는 `license` 그대로) · 파일 출처는 미리 골라 둔다(R28, `PackImportForm`)
 
     private var licenseSection: some View {
         Section {
