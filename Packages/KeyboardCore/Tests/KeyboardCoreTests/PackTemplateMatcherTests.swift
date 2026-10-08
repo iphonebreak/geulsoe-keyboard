@@ -52,7 +52,8 @@ struct PackTemplateMatcherTests {
     func longestExpansion() throws {
         let prefix = String(repeating: "가", count: 39)
         let wide = PackTemplateMatcher(sources: [.init(id: "W", template: Self.template([(prefix, "번")], items: [9_999]))])
-        let match = try #require(wide.match(tail: "xx" + prefix + "9999번"))
+        // 앞 채움 2자는 경계(공백)로 끝나야 한다 — 단어 경계(2026-10-08) 뒤로 「xx가…」는 앞 「x」에 걸려 맞지 않는다
+        let match = try #require(wide.match(tail: "x " + prefix + "9999번"))
         #expect(match.trigger.count == 44 && match.n == 9_999)
     }
 

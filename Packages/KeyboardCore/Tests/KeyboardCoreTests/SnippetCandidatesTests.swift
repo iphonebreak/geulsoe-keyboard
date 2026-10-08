@@ -145,10 +145,13 @@ struct SnippetCandidatesTests {
         let templateMatcher = Fixture.matcher(Fixture.sources(order: [.pack("S"), .pack("L")], user: [], packs: packs, builtIn: []))
         #expect(templateMatcher.candidates(forTail: "새사자성어 38번", isSecureTextEntry: false).map(\.suggestion.body) == ["L 본문 38"])
 
-        // 문구 칩 + 시작 위치가 다른 템플릿: 문구가 칩이고 템플릿(더 긴 구간)은 같은 구간이 아니다
+        // 문구 칩 + 시작 위치가 다른 템플릿: 문구가 칩이고 템플릿(더 긴 구간)은 같은 구간이 아니다.
+        // 문구 앞을 띄운다 — 단어 경계(2026-10-08) 뒤로 「새사자성어 38번」의 문구 「사자성어38번」은 앞 「새」에 걸려 맞지 않는다
         let withPhrase = Fixture.matcher(Fixture.sources(order: [.userSnippets, .pack("L")], user: [Fixture.myIdiom38],
                                                          packs: packs, builtIn: []))
-        #expect(withPhrase.candidates(forTail: "새사자성어 38번", isSecureTextEntry: false).map(\.suggestion.body) == ["내가 쓴 38번"])
+        #expect(withPhrase.candidates(forTail: "새 사자성어 38번", isSecureTextEntry: false).map(\.suggestion.body) == ["내가 쓴 38번"])
+        #expect(withPhrase.candidates(forTail: "새사자성어 38번", isSecureTextEntry: false).map(\.suggestion.body) == ["L 본문 38"],
+                "붙여 쓰면 문구가 경계에 걸려 빠지고 템플릿(줄 처음)이 칩 — 목록도 그 구간만")
     }
 
     @Test("★ AC-38 — 시작 위치가 다른 날짜·템플릿 겹침(「기한 3일 후 날짜」)은 같은 구간이 아니다")

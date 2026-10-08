@@ -95,7 +95,10 @@ struct ExternalSnippetWiringTests {
     @Test("★ 정적 단축어(문구)가 템플릿보다 먼저다 — 같은 꼬리면 문구가 이긴다(10-3 가림)")
     func entriesBeforeTemplate() {
         let shadow = SnippetEntry(trigger: "12번", title: "문구", body: "문구가 이김")
-        #expect(matcher(order: [.userSnippets, .pack("num")], user: [shadow]).suggestion(forTail: "사자성어12번")?.body == "문구가 이김")
+        let shadowed = matcher(order: [.userSnippets, .pack("num")], user: [shadow])
+        #expect(shadowed.suggestion(forTail: "사자성어 12번")?.body == "문구가 이김")
+        // 단어 경계(2026-10-08) — 붙여 쓰면 정적 「12번」은 앞 「어」에 걸려 맞지 않아 템플릿이 뜬다(가림은 띄어 쓴 입력에서만)
+        #expect(shadowed.suggestion(forTail: "사자성어12번")?.body == "온고지신")
     }
 
     @Test("내장 팩 문구는 외부 팩 문구 뒤 — 같은 길이면 순서 목록 쪽이 이긴다")

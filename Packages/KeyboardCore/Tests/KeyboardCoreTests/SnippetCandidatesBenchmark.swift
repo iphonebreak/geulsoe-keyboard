@@ -103,6 +103,10 @@ struct SnippetCandidatesBenchmark {
         ("성경(창세기 1장 1절)", "창세기 1장 1절")
     ]
 
+    /// 단어 경계에 걸려 빠지는 입력(2026-10-08) — needle·틀·어휘가 끝에 맞았다가 앞 글자에 걸려 그 다음부터 다시 훑는다.
+    /// 칩 없음과 같은 자릿수여야 한다(보고서 `docs/release/impl-word-boundary.md`)
+    static let boundaryMissTails = ["팀장님께새해인사", "오늘은헌법 전문", "옛사자성어 12번", "그오늘 날짜"]
+
     /// 한 번 호출의 평균 µs — 7라운드 중 최소
     static func microseconds(iterations: Int = 20_000, _ body: (Int) -> Int) -> Double {
         var best = Double.infinity
@@ -128,6 +132,14 @@ struct SnippetCandidatesBenchmark {
             let hit = Self.microseconds { _ in matcher.suggestion(forTail: tail)?.body.count ?? 1 }
             report += String(format: "  칩: %@ %8.2f µs\n", label.padding(toLength: 28, withPad: " ", startingAt: 0), hit)
         }
+        // 단어 경계 — 이 줄만 경계 도입 뒤에 생겼다(위 줄들은 U7 전후와 같은 시험)
+        for tail in Self.boundaryMissTails {
+            #expect(matcher.suggestion(forTail: tail) == nil, "전제 — \(tail)는 경계에 걸려 칩이 없다")
+        }
+        let boundaryMiss = Self.microseconds {
+            matcher.suggestion(forTail: Self.boundaryMissTails[$0 % Self.boundaryMissTails.count])?.body.count ?? 1
+        }
+        report += String(format: "  경계 실패(%d종 평균)          %8.2f µs\n", Self.boundaryMissTails.count, boundaryMiss)
         print(report)
     }
 

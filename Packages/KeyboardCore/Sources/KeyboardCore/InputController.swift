@@ -57,6 +57,9 @@ public final class InputController {
     /// 메모리에만 있고 48자 상한. 로그·파일·네트워크로 내보내지 않는다 (보안 규칙).
     private var committedTail = ""
     private let committedTailLimit = 48
+    /// `committedTail`의 **앞이 잘렸나**(48자 상한으로 줄 중간에서 시작하나) — 채움글 단어 경계가 꼬리 맨 앞 글자의 앞을 모르는 경우다.
+    /// 앞을 버릴 때만 참이 되고, 새 줄(리턴·여러 줄 본문 삽입)이나 문맥을 모르는 sync(nil)에서 거짓이 된다. 내용은 담지 않는다.
+    private var committedTailIsTruncated = false
     /// 후보 선택·채움글 삽입 직후 참 — 꼬리 끝 단어는 이미 처리됐으므로 다음 공백/리턴이
     /// 같은 단어를 다시 학습으로 보내면 안 된다 (이중 카운트·스니펫 본문 학습 방지).
     /// 타이핑·백스페이스로 단어가 변하면 해제된다.
@@ -135,6 +138,14 @@ public final class InputController {
         committedTail + automaton.composingText + hangulSource.pendingText
     }
 
+    /// `textTail`의 앞이 잘렸나 — 참이면 꼬리 맨 앞 글자의 앞을 모른다. 조립 지점이 채움글 매처(칩·U7 목록)에 같은 값을 넘긴다
+    /// (단어 경계, PDR `snippet-shortcut-terms.md` 7절).
+    ///
+    /// ★ **문맥을 모르는 경우(sync(nil) — 빈 입력란·커서 도구 이동)는 잘림으로 보지 않는다.** 빈 입력란에서
+    /// `documentContextBeforeInput`이 nil로 와 같은 길을 타므로, 잘림으로 보면 입력란 첫 단축어(「주소」만 친 경우)가 막힌다.
+    /// 커서 도구 이동 뒤에는 호스트가 곧 textDidChange로 실제 꼬리를 다시 세운다.
+    public var textTailIsTruncated: Bool { committedTailIsTruncated }
+
     /// 입력 중인 단어 — 꼬리 끝의 한글 음절 연속 run (조합 중 음절 포함).
     /// 추천단어 매칭의 입력이 된다. 천지인 pending 점(ㆍ)은 음절이 아니라 run을 끊는다.
     public var currentWord: String {
@@ -202,6 +213,7 @@ public final class InputController {
             output.insertText("\n")
             // 단축어는 줄을 넘지 않는다 — 꼬리를 새 줄에서 다시 시작한다
             committedTail.removeAll()
+            committedTailIsTruncated = false
         case .shift: handleShift()
         case .toggleLanguage:
             commitComposition()
@@ -271,8 +283,8 @@ public final class InputController {
         let composing = automaton.composingText + hangulSource.pendingText
         if let documentTail, !composing.isEmpty, documentTail.hasSuffix(composing) {
             // 문서 = 확정 + 우리 조합 그대로. 상태는 살리고 확정 꼬리만 문서 기준으로 보정한다
-            committedTail = Self.tailLine(of: String(documentTail.dropLast(composing.count)),
-                                          limit: committedTailLimit)
+            (committedTail, committedTailIsTruncated) = Self.tailLine(of: String(documentTail.dropLast(composing.count)),
+                                                                      limit: committedTailLimit)
             return
         }
         automaton.reset()
@@ -284,12 +296,14 @@ public final class InputController {
         suppressesNextWordCommit = false
         lastSpaceTimestamp = nil
         if let documentTail {
-            committedTail = Self.tailLine(of: documentTail, limit: committedTailLimit)
+            (committedTail, committedTailIsTruncated) = Self.tailLine(of: documentTail, limit: committedTailLimit)
             // 커서 앞 단어는 이 키보드로 친 것이 아닐 수 있다 — 첫 구분자까지 학습 제외
             blocksLearningUntilSeparator = !Self.trailingHangulRun(of: committedTail).isEmpty
         } else {
-            // 커서가 어디로 갔는지 모른다 — 추적해 온 꼬리도 문서와 어긋났으므로 버린다
+            // 커서가 어디로 갔는지 모른다 — 추적해 온 꼬리도 문서와 어긋났으므로 버린다.
+            // 잘림으로는 보지 않는다(`textTailIsTruncated` 주석 — 빈 입력란도 이 길이다)
             committedTail.removeAll()
+            committedTailIsTruncated = false
             blocksLearningUntilSeparator = false
         }
         // 문맥을 모를 때는 시프트를 건드리지 않는다 — 커서 도구 이동 직후 nil sync가 오고 곧
@@ -297,10 +311,11 @@ public final class InputController {
         if documentTail != nil { updateAutoCapitalization() }
     }
 
-    /// 문서 꼬리에서 마지막 줄의 끝 `limit`자 — 단축어는 줄을 넘지 않는다는 규칙과 일치
-    private static func tailLine(of text: String, limit: Int) -> String {
+    /// 문서 꼬리에서 마지막 줄의 끝 `limit`자 — 단축어는 줄을 넘지 않는다는 규칙과 일치.
+    /// `truncated`는 마지막 줄이 `limit`자를 넘어 앞을 버렸는가(채움글 단어 경계).
+    private static func tailLine(of text: String, limit: Int) -> (tail: String, truncated: Bool) {
         let lastLine = text.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
-        return String(lastLine.suffix(limit))
+        return (String(lastLine.suffix(limit)), lastLine.count > limit)
     }
 
     // MARK: - 문자
@@ -593,6 +608,7 @@ public final class InputController {
         // (절 범위·애국가처럼 여러 줄인 본문에서 드러난다, PDR bible-verse-range).
         if let newline = inserted.lastIndex(of: "\n") {
             committedTail.removeAll()
+            committedTailIsTruncated = false   // 새 줄의 처음부터 — 본문 마지막 줄이 길면 아래 덧붙이기가 다시 잘림을 적는다
             appendToTail(String(inserted[inserted.index(after: newline)...]))
         } else {
             appendToTail(inserted)
@@ -757,6 +773,7 @@ public final class InputController {
         committedTail += text
         if committedTail.count > committedTailLimit {
             committedTail.removeFirst(committedTail.count - committedTailLimit)
+            committedTailIsTruncated = true   // 앞을 버렸다 — 이제 꼬리 맨 앞은 줄 중간이다
         }
     }
 }

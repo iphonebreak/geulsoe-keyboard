@@ -202,20 +202,28 @@ struct SnippetInsertionHoldEdgeTests {
         #expect(visibleChip(controller, matcher) == chip, "이어 치면 정상")
     }
 
-    /// A안 — 삽입 전 글 + 본문에 걸친 구간(「가가나」 → 「가나」 → 다시 「가나」)도 닫힌다
+    /// A안 — 삽입 전 글 + 본문에 걸친 구간(「가 가나」 → 「가 나」 → 다시 「가 나」)도 닫힌다.
+    ///
+    /// 단어 경계(2026-10-08) 뒤로 옛 입력 「가가나」는 첫 칩부터 없다(「가나」 앞이 「가」). 그래서 삽입 전 글을 「가 」로 띄운다 —
+    /// 단축어 안 띄어쓰기는 무시되므로 삽입 뒤 「가 나」가 삽입 전 글(「가 」)과 본문(「나」)에 걸쳐 다시 맞는다(줄 처음).
     @Test("경계를 걸친 구간 — 삽입 전 글과 본문에 걸쳐 다시 맞아도 보류된다")
     func spanningSegmentIsHeld() throws {
         let output = RecordingOutput()
         let controller = InputController(output: output)
         let matcher = SnippetMatcher(bible: nil, entries: [SnippetEntry(trigger: "가나", title: "가나", body: "나")])
-        for key in ["r", "k", "r", "k", "s", "k"] { controller.handle(.character(key)) }   // 가가나
+        for key in ["r", "k"] { controller.handle(.character(key)) }             // 가
+        controller.handle(.space)
+        for key in ["r", "k", "s", "k"] { controller.handle(.character(key)) }   // 가나
+        #expect(matcher.suggestion(forTail: "가가나") == nil, "전제 — 붙여 쓴 옛 입력은 경계에 걸린다")
         let chip = try #require(visibleChip(controller, matcher))
+        #expect(chip.trigger == "가나")
         #expect(controller.insertSnippet(chip))
-        #expect(output.text == "가나")
-        #expect(matcher.suggestion(forTail: controller.textTail) == chip, "전제 — 같은 후보가 다시 맞는다")
+        #expect(output.text == "가 나")
+        let again = try #require(matcher.suggestion(forTail: controller.textTail), "전제 — 걸친 구간이 다시 맞는다")
+        #expect(again.trigger == "가 나" && again.body == chip.body)
         #expect(visibleChip(controller, matcher) == nil)
-        #expect(controller.insertSnippet(chip) == false)
-        #expect(output.text == "가나")
+        #expect(controller.insertSnippet(again) == false)
+        #expect(output.text == "가 나")
     }
 }
 

@@ -18,6 +18,10 @@ import TadakDomain
 /// 그 앞의 **ASCII 숫자열 전체**(1~4자리, 선행 0 금지, **후퇴 금지** — `3232`를 `232`로 줄이지 않는다) → 접두 일치 →
 /// literal이 긴 쌍이 이긴다 → 소유 팩의 `n`. 지울 구간은 **꼬리에서 잘라낸 원문**(`insertSnippet`의 꼬리 정합 불변식).
 ///
+/// **단어 경계(2026-10-08, 1.3.0):** 틀의 **첫 글자**(접두 첫 글자) 바로 앞이 줄 처음·공백·문장부호/기호일 때만 맞은 것이다
+/// (`SnippetWordBoundary` — 「옛고사성어12번」은 안 맞는다). 경계에 걸린 쌍은 「안 맞은」 것이라 다음 쌍을 본다 — 후퇴 금지(소유 팩에
+/// n이 없으면 아무것도 없다)는 경계를 통과해 **맞은** 쌍에 대한 규칙이다.
+///
 /// ## U7 — 소유하지 못한 팩의 같은 번호 (10-6 ①)
 ///
 /// 칩은 위 규칙 그대로 소유 팩의 항목이다(`match(tail:)`). 길게 누르기 목록(`matches(tail:limit:)`)만 같은 쌍을 **후순위로 가진 팩**의
@@ -156,6 +160,7 @@ public struct PackTemplateMatcher: Sendable {
     /// 2. 다른 소유 쌍이 **같은 구간**(같은 시작 위치)에 맞으면 그 소유 팩 → 그 쌍의 후순위 팩 — 쌍 우선순위(literal 길이 → 목록 → 패턴) 순
     ///
     /// 이긴 쌍의 소유 팩에 n이 없으면 **빈 배열**이다 — 칩이 없으면 목록도 없다(10-4 5번, 후퇴 금지). 같은 (팩, 번호)는 한 번만.
+    /// 꼬리 맨 앞은 줄 처음으로 본다(단어 경계 — 잘린 꼬리는 `SnippetMatcher`가 넘긴다).
     public func matches(tail: String, limit: Int = .max) -> [Match] {
         guard !owned.isEmpty, !tail.isEmpty, limit > 0 else { return [] }
         let characters = Array(tail)
@@ -168,7 +173,7 @@ public struct PackTemplateMatcher: Sendable {
             reversed.append((character, index))
         }
         var result: [Match] = []
-        forEachMatch(characters: characters, reversed: reversed) { raw in
+        forEachMatch(characters: characters, reversed: reversed, tailIsTruncated: false) { raw in
             result.append(raw.match)
             return result.count < limit
         }
@@ -191,8 +196,10 @@ public struct PackTemplateMatcher: Sendable {
 
     /// `matches`의 판정 본체 — 꼬리를 이미 풀어 둔 호출자(`SnippetMatcher`)가 그대로 넘긴다(같은 규칙: 줄바꿈에서 멈추고 공백은 건너뛴다).
     /// 적중을 순서대로 `visit`에 넘기고 `visit`이 false를 내면 멈춘다. 이긴 쌍의 소유 팩에 n이 없으면 아무것도 넘기지 않는다.
+    /// - Parameter tailIsTruncated: 꼬리 앞이 잘렸나 — 꼬리 맨 앞에서 시작한 틀은 앞 글자를 모르므로 경계가 아니다
     func forEachMatch(
-        characters: [Character], reversed: [(character: Character, index: Int)], _ visit: (RawMatch) -> Bool
+        characters: [Character], reversed: [(character: Character, index: Int)], tailIsTruncated: Bool,
+        _ visit: (RawMatch) -> Bool
     ) {
         var span: (start: Int, trigger: String)?
         var seen: [(sourceID: String, n: Int)] = []   // 같은 (팩, 번호)는 한 번만 — 한 팩이 같은 구간에 맞는 쌍을 둘 가질 수 있다
@@ -221,6 +228,8 @@ public struct PackTemplateMatcher: Sendable {
                 guard span.start == start else { continue }
                 trigger = span.trigger
             } else {
+                // 단어 경계 — 틀 첫 글자 앞이 문자·숫자면 이 쌍은 안 맞은 것이다(다음 쌍을 본다). 같은 구간의 다른 쌍(위)은 같은 답이다
+                guard SnippetWordBoundary.allows(start: start, in: characters, tailIsTruncated: tailIsTruncated) else { continue }
                 // 이 쌍이 이겼다 — 소유 팩에 n이 없으면 아무것도 없다(더 짧은 쌍·다른 판본으로도 후퇴하지 않는다)
                 guard pattern.items[n] != nil else { return }
                 trigger = String(characters[start...])

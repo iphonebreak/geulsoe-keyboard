@@ -714,8 +714,10 @@ final class KeyboardViewController: UIInputViewController {
         // 비밀번호 필드에서는 매칭·표시·학습 모두 하지 않는다 (보안 규칙)
         let secure = textDocumentProxy.isSecureTextEntry == true
 
-        // secure 게이트는 매처 안에 있다 — 날짜 팩 수용 기준 8을 `swift test`로 잠그려고 옮겼다(규칙은 같다)
-        let matched = snippetMatcher?.suggestion(forTail: inputController.textTail, isSecureTextEntry: secure)
+        // secure 게이트는 매처 안에 있다 — 날짜 팩 수용 기준 8을 `swift test`로 잠그려고 옮겼다(규칙은 같다).
+        // 꼬리 잘림은 단어 경계용 — 후보 목록(`openSnippetCandidatesPanel`)에도 같은 값을 넘긴다
+        let matched = snippetMatcher?.suggestion(
+            forTail: inputController.textTail, isSecureTextEntry: secure, tailIsTruncated: inputController.textTailIsTruncated)
         // ✕로 내린 추천단어는 같은 단어를 이어 치는 동안(접두 유지) 다시 띄우지 않는다.
         // 해제 판정은 사용자 편집 때만 — 커서 이동으로 꼬리가 바뀐 것은 "이어 치기"가 아니다.
         let currentWord = inputController.currentWord
@@ -1148,7 +1150,8 @@ final class KeyboardViewController: UIInputViewController {
         let tail = inputController.textTail
         guard SnippetCandidateGate.canArm(pressed: pressed, current: viewState.snippetSuggestion, tail: tail) else { return }
         let candidates = snippetMatcher.candidates(
-            forTail: tail, isSecureTextEntry: textDocumentProxy.isSecureTextEntry == true)
+            forTail: tail, isSecureTextEntry: textDocumentProxy.isSecureTextEntry == true,
+            tailIsTruncated: inputController.textTailIsTruncated)   // 칩(`updateSuggestionBar`)과 같은 단어 경계 판정
         guard SnippetCandidateGate.canOpen(candidateCount: candidates.count), let first = candidates.first else { return }
         // 패널은 한 번에 하나 — 다른 패널을 닫고 연다(`openBibleSearchPanel` 선례)
         if viewState.showsEmojiPanel { viewState.showsEmojiPanel = false }

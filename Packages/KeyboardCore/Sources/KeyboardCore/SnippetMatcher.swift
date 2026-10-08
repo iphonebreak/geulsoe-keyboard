@@ -114,6 +114,13 @@ public struct SnippetSuggestion: Equatable, Sendable {
 /// **성경 참조 파서(`BibleReferenceParser`)는 건드리지 않는다** — 규칙을 하나로 두기 위한 결정이고
 /// 거긴 이미 "애국가1절"·"애국가 1절" 양쪽을 자기 규칙으로 받는다.
 ///
+/// ## ★ 단어 경계 (2026-10-08 사장님 결정, 1.3.0)
+///
+/// 맞은 구간 첫 글자의 **바로 앞 글자**가 줄 처음·공백·문장부호/기호일 때만 맞은 것으로 친다(`SnippetWordBoundary`) —
+/// 「서울주소」 끝의 「주소」에는 칩이 없고 「서울 주소」·「(주소」에는 뜬다. 문구·날짜·번호형 틀·U7 후보에 적용, **성경 참조는 제외**.
+/// 단축어 **안**의 띄어쓰기 무시·지울 길이·칩 탭 꼬리 정합은 그대로다. 긴 needle이 경계에 걸리면 그 needle은 「안 맞은」 것이라
+/// **더 짧은 needle**이 경계를 통과하면 그쪽이 맞는다(「그새해 인사」 → 「인사」) — 「첫 매치가 곧 최선」은 「경계를 통과한 첫 매치」가 된다.
+///
 /// ## 성능 — 키 입력마다 도는 핫패스다
 ///
 /// - 정규화된 단축어는 **`init` 에서 미리 계산**해 둔다. 매 호출마다 다시 만들지 않는다.
@@ -135,6 +142,14 @@ public struct SnippetMatcher: Sendable {
         let characters: [Character]
         /// 비공백 글자와 그 글자의 원문 인덱스, 꼬리 끝에서부터. 줄바꿈에서 멈춘다
         let reversed: [(character: Character, index: Int)]
+        /// 꼬리 앞이 잘렸나 — 꼬리 맨 앞에서 시작한 구간은 앞 글자를 모른다(단어 경계)
+        let tailIsTruncated: Bool
+
+        /// 비공백 `length`글자로 맞은 구간이 단어 경계에서 시작하나 — 같은 길이면 같은 구간이라 답도 같다
+        @inline(__always)
+        func startsAtBoundary(length: Int) -> Bool {
+            SnippetWordBoundary.allows(start: reversed[length - 1].index, in: characters, tailIsTruncated: tailIsTruncated)
+        }
     }
 
     private let bible: (any BibleVerseRepository)?
@@ -193,8 +208,10 @@ public struct SnippetMatcher: Sendable {
     ///
     /// 이 게이트는 원래 조립 지점(`KeyboardViewController.updateSuggestionBar`)의 삼항식에만 있어
     /// `swift test`가 닿지 않았다(반론자1 — 날짜 팩 수용 기준 8). 같은 규칙을 여기로 옮겨 테스트로 잠근다.
-    public func suggestion(forTail tail: String, isSecureTextEntry: Bool) -> SnippetSuggestion? {
-        isSecureTextEntry ? nil : suggestion(forTail: tail)
+    ///
+    /// - Parameter tailIsTruncated: 꼬리 앞이 잘렸나(`InputController.textTailIsTruncated`). 조립 지점은 칩과 목록에 **같은 값**을 넘긴다
+    public func suggestion(forTail tail: String, isSecureTextEntry: Bool, tailIsTruncated: Bool = false) -> SnippetSuggestion? {
+        isSecureTextEntry ? nil : suggestion(forTail: tail, tailIsTruncated: tailIsTruncated)
     }
 
     /// 칩 — 분기 순서대로 처음 맞은 후보. 맞았으면 **같은 꼬리 구간**에 함께 걸린 다른 후보 수를 `alternativeCount`로 단다(U7 「+n」).
@@ -205,9 +222,12 @@ public struct SnippetMatcher: Sendable {
     /// 칩이 **맞았을 때만** 뒤 후보를 **세기만** 한다(값·제목·본문을 만들지 않는다): 같은 정규화 길이의 뒤 needle(정렬돼 있어 연속 구간) ·
     /// 뒤 분기 하나씩(날짜 끝말·템플릿 접미 거절은 O(1), 다른 팩 번호는 이진 탐색) · 성경 본문 존재 확인(빈 절은 후보가 아니다 —
     /// 목록과 **같은 판정**). 상한 8에서 멈춘다. 개수는 칩과 함께 보여야 하므로 미루지 않는다. 목록(`candidates`)은 길게 누를 때만 만든다.
-    public func suggestion(forTail tail: String) -> SnippetSuggestion? {
+    ///
+    /// 꼬리 맨 앞은 `tailIsTruncated`가 거짓이면 줄 처음이다(단어 경계 — 타입 주석).
+    public func suggestion(forTail tail: String, tailIsTruncated: Bool = false) -> SnippetSuggestion? {
         guard !tail.isEmpty else { return nil }
-        guard let (chip, count) = walk(Self.scan(tail), limit: SnippetCandidateGate.limit, visit: nil) else { return nil }
+        guard let (chip, count) = walk(Self.scan(tail, tailIsTruncated: tailIsTruncated),
+                                       limit: SnippetCandidateGate.limit, visit: nil) else { return nil }
         return chip.withAlternativeCount(count - 1)
     }
 
@@ -219,13 +239,15 @@ public struct SnippetMatcher: Sendable {
     ///   **소유하지 못한 팩의 같은 번호**(10-4는 칩에 대해 불변 — 소유 팩에 n이 없으면 칩도 목록도 없다).
     /// - 첫 원소는 `suggestion(forTail:)`과 **같은 값**이다(`alternativeCount` 포함, 기본 `limit`일 때). 둘째부터는 개수 0.
     /// - secure 입력란·빈 꼬리·칩 없음이면 빈 배열.
+    /// - 단어 경계도 칩과 같은 판정이다(같은 `walk`) — 칩이 없는데 목록만 열리는 일이 없다. `tailIsTruncated`는 칩과 같은 값을 넘긴다.
     public func candidates(
-        forTail tail: String, isSecureTextEntry: Bool, limit: Int = SnippetCandidateGate.limit
+        forTail tail: String, isSecureTextEntry: Bool, tailIsTruncated: Bool = false, limit: Int = SnippetCandidateGate.limit
     ) -> [SnippetCandidate] {
         guard !isSecureTextEntry, limit > 0, !tail.isEmpty else { return [] }
         var list: [SnippetCandidate] = []
         list.reserveCapacity(min(limit, SnippetCandidateGate.limit))
-        guard walk(Self.scan(tail), limit: limit, visit: { list.append($0) }) != nil else { return [] }
+        guard walk(Self.scan(tail, tailIsTruncated: tailIsTruncated), limit: limit, visit: { list.append($0) }) != nil
+        else { return [] }
         list[0] = SnippetCandidate(suggestion: list[0].suggestion.withAlternativeCount(list.count - 1), origin: list[0].origin)
         return list
     }
@@ -250,7 +272,7 @@ public struct SnippetMatcher: Sendable {
     ///
     /// ★ 지울 길이 불변식은 그대로다. `start`는 여전히 **마지막으로 맞은 글자의 원문 인덱스**라
     ///   개행 뒤에서만 잡히고, 잘라낸 원문이 줄을 넘지 않는다.
-    private static func scan(_ tail: String) -> Scan {
+    private static func scan(_ tail: String, tailIsTruncated: Bool) -> Scan {
         let characters = Array(tail)
         var reversed: [(character: Character, index: Int)] = []
         reversed.reserveCapacity(characters.count)
@@ -260,7 +282,7 @@ public struct SnippetMatcher: Sendable {
             if character.isWhitespace { continue }  // 같은 줄 안의 공백만 건너뛴다
             reversed.append((character, index))
         }
-        return Scan(tail: tail, characters: characters, reversed: reversed)
+        return Scan(tail: tail, characters: characters, reversed: reversed, tailIsTruncated: tailIsTruncated)
     }
 
     /// needle이 꼬리 끝에 맞나(공백 무시)
@@ -278,6 +300,8 @@ public struct SnippetMatcher: Sendable {
     ///
     /// ★ 칩 처리 코드(같은 구간 후보 세기·중복 거르기)와 한 루프에 섞어 두었더니 **빗나가는 입력이 8.0 → 9.2µs**로 느려졌다
     /// (최적화 결과가 바뀐다 — U7 ① 벤치 `SnippetCandidatesBenchmark` 실측, 2026-10-07). 루프 모양은 U7 전 그대로다.
+    /// 단어 경계 판정도 같은 이유로 이 루프에 넣지 않는다 — 시작 인덱스만 받게 바꿔도 빗나가는 입력이 7.61 → 7.72µs로
+    /// 느려졌다(2026-10-08 실측). 맞은 needle이 경계에 걸린 드문 경우는 `nextPhrase`가 이어 훑는다.
     @inline(never)
     private func firstPhrase(_ reversed: [(character: Character, index: Int)]) -> Int? {
         var index = 0
@@ -290,6 +314,23 @@ public struct SnippetMatcher: Sendable {
                     break
                 }
                 if matched { return index }
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// 단어 경계에 걸린 needle(`failed`) **뒤에서** 맞고 경계도 통과한 첫 needle — 드문 길이라 핫패스 루프(`firstPhrase`)와 따로 둔다.
+    /// 같은 정규화 길이는 같은 구간이라 경계 답도 같다 — 걸린 길이의 나머지는 건너뛴다(정렬돼 있어 연속이다).
+    @inline(never)
+    private func nextPhrase(_ scan: Scan, after failed: Int) -> Int? {
+        var failedLength = needles[failed].characters.count
+        var index = failed + 1
+        while index < needles.count {
+            let length = needles[index].characters.count
+            if length != failedLength, Self.matches(needles[index], scan.reversed) {
+                if scan.startsAtBoundary(length: length) { return index }
+                failedLength = length
             }
             index += 1
         }
@@ -314,8 +355,14 @@ public struct SnippetMatcher: Sendable {
             add({ suggestion }, origin)
         }
 
-        // 문구 — `needles` 는 정규화 길이 내림차순이라 **첫 매치가 곧 최선**이다.
-        if let index = firstPhrase(scan.reversed) {
+        // 문구 — `needles` 는 정규화 길이 내림차순이라 **경계를 통과한 첫 매치가 곧 최선**이다.
+        // 맞았는데 단어 경계에 걸린 needle은 「안 맞은」 것으로 보고 그 다음부터 다시 찾는다 — 더 짧은 needle은 시작이 뒤라
+        // 앞 글자가 달라 통과할 수 있다(「그새해 인사」의 「인사」). 같은 길이는 같은 구간이라 경계 답도 같다.
+        var phraseIndex = firstPhrase(scan.reversed)
+        if let index = phraseIndex, !scan.startsAtBoundary(length: needles[index].characters.count) {
+            phraseIndex = nextPhrase(scan, after: index)
+        }
+        if let index = phraseIndex {
             let first = needles[index]
             // 잘라낼 구간은 **마지막으로 맞은 글자**에서 꼬리 끝까지 —
             // 그 앞의 공백은 포함하지 않는다("보내줄게 우리집 주소"에서 앞 공백을 안 먹는다).
@@ -326,6 +373,7 @@ public struct SnippetMatcher: Sendable {
             }
             setChip(phrase(first)) { origins.entryOrigin(at: first.entryIndex) }
             // 같은 정규화 길이로 맞은 needle = 같은 구간(같은 역방향 풀이를 공유한다, 지시서 F2). 정렬돼 있어 연속이다.
+            // 같은 구간이라 단어 경계도 이미 통과했다(칩과 목록이 같은 규칙).
             // 한 항목의 별칭 여럿이 같은 정규화로 겹치면 인접해 있다 — 항목 단위로 한 번만
             var lastEntry = first.entryIndex
             var shown = [first.entryIndex]
@@ -347,7 +395,8 @@ public struct SnippetMatcher: Sendable {
         // 날짜·시간 팩 — **문구 다음, 성경 앞**(PDR `date-snippet-pack.md` 3-5절).
         // 사용자 문구가 먼저라 「날짜」로 끝나는 사용자 단축어가 이긴다(확정 동작 — 편집기가 경고한다).
         // 끝말(날짜·시간·시각)이 아니면 두어 번의 글자 비교로 끝난다. 값은 맞았을 때만 계산한다.
-        if count < limit, let dates, let date = dates.suggestion(characters: scan.characters, reversed: scan.reversed) {
+        if count < limit, let dates,
+           let date = dates.suggestion(characters: scan.characters, reversed: scan.reversed, tailIsTruncated: scan.tailIsTruncated) {
             if let chip {
                 if date.trigger == chip.trigger { add({ date }, { .date }) }   // 뒤 분기는 같은 구간만
             } else {
@@ -359,7 +408,7 @@ public struct SnippetMatcher: Sendable {
         // 소유 팩에 그 번호가 없으면 아무것도 없고 다른 판본으로 후퇴하지 않는다(10-4 5번). 지울 구간은 꼬리에서 잘라낸 원문이다.
         // 성경 참조와 겹치는 패턴은 가져오기에서 이미 거부됐다(10-2, 1~9,999 전체 검사).
         if count < limit, let templates {
-            templates.forEachMatch(characters: scan.characters, reversed: scan.reversed) { raw in
+            templates.forEachMatch(characters: scan.characters, reversed: scan.reversed, tailIsTruncated: scan.tailIsTruncated) { raw in
                 if let chip {
                     // 템플릿 적중은 모두 같은 구간이다 — 칩과 다르면 이 분기는 통째로 빠진다
                     guard raw.trigger == chip.trigger else { return false }
