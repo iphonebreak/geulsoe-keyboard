@@ -319,6 +319,27 @@ struct SnippetCandidatesTests {
         #expect(matcher.suggestion(forTail: "사자성어 5번")?.alternativeCount == 7)
     }
 
+    /// 분기 사이 상한(검증 `verify-u7.md` L-1) — `walk`의 **날짜 분기 앞·성경 분기 앞** `count < limit`를 잠근다.
+    /// 그 줄이 빠지면 문구로 이미 8을 채운 같은 구간에 날짜·성경이 9번째로 붙어 목록 9행·칩 「+8」(AC-42 「최대 +7」 위반)이 된다
+    @Test("★ AC-46 · AC-42 — 문구 8개로 상한을 채운 같은 구간의 날짜·성경 후보는 들어가지 않는다(8행, 「+7」)", arguments: [
+        ("오늘날짜", "오늘 날짜", SnippetOrigin.date),
+        ("창세기1장1절", "창세기 1장 1절", SnippetOrigin.bible)
+    ])
+    func laterBranchStopsAtCap(trigger: String, tail: String, later: SnippetOrigin) {
+        func phrases(_ count: Int) -> [SnippetEntry] {
+            (0..<count).map { SnippetEntry(trigger: trigger, title: "문구 \($0)", body: "본문 \($0)") }
+        }
+        // 전제 — 문구가 7개면 뒤 분기 후보가 같은 구간의 8번째로 들어온다
+        let seven = Fixture.matcher(Fixture.sources(user: phrases(7), packs: [:], builtIn: []))
+        #expect(seven.candidates(forTail: tail, isSecureTextEntry: false).map(\.origin)
+                == Array(repeating: .user, count: 7) + [later], "\(tail)")
+
+        let eight = Fixture.matcher(Fixture.sources(user: phrases(8), packs: [:], builtIn: []))
+        #expect(eight.candidates(forTail: tail, isSecureTextEntry: false).map(\.suggestion.body)
+                == (0..<8).map { "본문 \($0)" }, "\(tail)")
+        #expect(eight.suggestion(forTail: tail)?.alternativeCount == 7, "\(tail)")
+    }
+
     @Test("limit 인자 — 더 적게 달라면 그만큼(0 이하면 빈 배열)")
     func explicitLimit() {
         let matcher = Fixture.matcher()
@@ -695,5 +716,30 @@ struct PackTemplateCandidatesTests {
         let other = Self.source("B", [("창세기1장", "절")], items: [1])
         let matcher = PackTemplateMatcher(sources: [both, other])
         #expect(matcher.matches(tail: "창세기 1장 1절").map(\.sourceID) == ["A", "B"])
+    }
+
+    /// 검증 `verify-u7.md` R-3 — 사장님 결정(2026-10-08): **지금 동작 유지.** 후퇴 금지(소유 팩에 n이 없으면 빈 배열)는 **이긴 쌍**에만
+    /// 걸린다. 같은 구간을 덮는 다른 소유 쌍은 그 소유 팩에 n이 없으면 그 행만 빠지고, 그 쌍의 후순위 팩(n 있음) 행은 들어간다
+    @Test("다른 소유 쌍의 소유 팩에 n이 없으면 그 행만 빠지고 그 쌍의 후순위 팩(n 있음) 행은 들어간다")
+    func otherPairOwnerMissingNumberKeepsAlternate() {
+        // 「창세기 1장 1절」에서 (창세기, 장1절)과 (창세기1장, 절)은 literal 길이 6으로 같고 같은 구간·같은 n=1 — 목록 순서 A → C → B
+        let matcher = PackTemplateMatcher(sources: [
+            Self.source("A", [("창세기", "장1절")], items: [1]),   // 이긴 쌍의 소유 팩
+            Self.source("C", [("창세기1장", "절")], items: [2]),   // 다른 쌍의 소유 팩 — 1이 없다
+            Self.source("B", [("창세기1장", "절")], items: [1])    // 그 쌍의 후순위 팩 — 1이 있다
+        ])
+        #expect(matcher.matches(tail: "창세기 1장 2절").map(\.sourceID) == ["C"], "전제 — (창세기1장, 절)은 C가 소유한다")
+        #expect(matcher.match(tail: "창세기 1장 1절")?.sourceID == "A", "칩은 이긴 쌍의 소유 팩")
+        #expect(matcher.matches(tail: "창세기 1장 1절").map(\.sourceID) == ["A", "B"], "C는 빠지고 B는 들어간다")
+
+        // 칩 「+n」과 목록이 같은 판정을 쓴다(SnippetMatcher 경로 — 출처는 팩 이름)
+        let packs = ["a": Fixture.numbered("A", "창세기", "장1절", items: [1]),
+                     "c": Fixture.numbered("C", "창세기1장", "절", items: [2]),
+                     "b": Fixture.numbered("B", "창세기1장", "절", items: [1])]
+        let snippets = Fixture.matcher(Fixture.sources(order: [.pack("a"), .pack("c"), .pack("b")], user: [], packs: packs,
+                                                       builtIn: []), dates: nil, bible: nil)
+        #expect(snippets.candidates(forTail: "창세기 1장 1절", isSecureTextEntry: false).map(\.origin)
+                == [.pack(name: "A"), .pack(name: "B")])
+        #expect(snippets.suggestion(forTail: "창세기 1장 1절")?.alternativeCount == 1)
     }
 }
