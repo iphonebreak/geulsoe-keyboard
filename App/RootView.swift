@@ -1,4 +1,5 @@
 import SwiftUI
+import PackImport
 import TadakDomain
 import TadakData
 
@@ -26,6 +27,10 @@ struct RootView: View {
             InfoTab(onReplayOnboarding: { hasSeenOnboarding = false })
                 .tabItem { Label("정보", systemImage: "info.circle") }
         }
+        // 앱 실행 때 한 번 — 외부 채움글 저장소의 옛 snapshot 세대·안 쓰는 변환본 정리(PDR `external-snippet-packs.md` 8-2, 앱 실행·변경
+        // 때만). 사용자 데이터는 지우지 않는다(9-3). **메인 밖에서**(`PackStoreClient`, 1-c G8) — `.task`는 메인 액터라 그대로 부르면
+        // `PackStore`의 `queue.sync` 파일 정리 동안 첫 화면이 멈춘다
+        .task(priority: .utility) { await PackStoreClient.live.maintain() }
         .onChange(of: settings) { _, updated in
             repository.save(updated)
             // 떠 있는 키보드가 즉시 다시 읽도록 (Darwin 알림, PDR field-traits-and-live-settings)

@@ -29,6 +29,7 @@ struct ToolbarTab: View {
             Form {
                 toolsSection
                 suggestionSection   // 추천단어·채움글이 클립보드보다 자주 손대는 설정 (사용자 요청 2026-09-08)
+                snippetSection      // 「추천과 채움글」 한 절을 둘로 나눴다 — 순서는 그대로 (사장님 실기 2026-10-07)
                 clipboardSection    // 전체 접근 안내를 이 절로 **합쳤다** (사용자 요청 2026-09-15)
             }
             .settingsFormWidth()
@@ -338,6 +339,20 @@ struct ToolbarTab: View {
     private var suggestionSection: some View {
         Section {
             Toggle("추천단어", isOn: $settings.suggestionsEnabled)
+            // 이모지 칩 (v1.3.0 ⑤, PDR `emoji-word-suggestion.md` D1·D2) — 추천단어 줄 안에 뜨는 기능이라 **바로 아래**.
+            // 추천단어를 끄면 값은 지키고 흐리게 비활성 + 안내 문구로 바꾼다(D2). 전체 접근 불필요 — 번들 사전 읽기뿐.
+            // 설명문은 사장님 결정(2026-10-02)으로 예시 🚗를 뺐다 — 이모지는 묶음에서 랜덤으로 뽑는다(D9).
+            Toggle(isOn: $settings.emojiWordSuggestionsEnabled) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("추천단어에 이모지")
+                    Text(settings.suggestionsEnabled
+                         ? "단어를 다 치면 어울리는 이모지를 함께 보여 줘요. 탭하면 단어가 이모지로 바뀌어요."
+                         : "추천단어가 켜져 있을 때만 동작해요.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!settings.suggestionsEnabled)
             // 추천단어를 꺼도 초기화는 가능해야 한다 — 기능을 끄는 사용자일수록
             // 남은 학습 데이터를 지우고 싶어 한다
             Button("학습 단어 초기화", role: .destructive) {
@@ -362,19 +377,28 @@ struct ToolbarTab: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // 「복사한 인증번호 제안」 토글은 **클립보드 절로 옮겼다** (2026-09-15).
+            // 여기 있던 푸터가 **사라진 「전체 접근」 헤더를 가리키고 있었고**(반론자 R-1),
+            // 그 토글은 클립보드 기록과 **같은 권한 하나**에 묶여 있어 같은 절이 맞다.
+        } header: {
+            // 「추천」 → 「추천 단어와 이모지」 — 절에 이모지 칩·최근 이모지가 함께 있다(PDR external-snippet-packs R30, 사장님 실기 2026-10-07)
+            Text("추천 단어와 이모지")
+        } footer: {
+            Text("학습은 기기 안에서만 해요.")
+        }
+    }
 
+    /// 채움글 — 예전 「추천과 채움글」 절의 마지막 줄을 따로 뗐다(사장님 실기 2026-10-07). 풋터 「학습은 …」은 추천 절 몫이라 여기엔 없다.
+    /// 머리는 두지 않는다 — 줄 이름이 이미 「채움글」이라 머리까지 두면 같은 말이 두 번 보인다(검증 O3). 영역은 절 경계로 나뉜다
+    private var snippetSection: some View {
+        Section {
             NavigationLink {
                 SnippetSettingsView(settings: $settings)
             } label: {
                 LabeledContent("채움글", value: settings.snippetsEnabled ? "켬" : "끔")
             }
-            // 「복사한 인증번호 제안」 토글은 **클립보드 절로 옮겼다** (2026-09-15).
-            // 여기 있던 푸터가 **사라진 「전체 접근」 헤더를 가리키고 있었고**(반론자 R-1),
-            // 그 토글은 클립보드 기록과 **같은 권한 하나**에 묶여 있어 같은 절이 맞다.
-        } header: {
-            Text("추천과 채움글")
-        } footer: {
-            Text("학습은 기기 안에서만 해요.")
+            // UI 하네스(`GlassThemeDeviceTests.testSnippetIntroCard`)가 이 줄을 집는 이름 — 라벨로 찾으면 다른 「채움글…」 요소가 먼저 잡힐 수 있다(검증 L3)
+            .accessibilityIdentifier("toolbar.snippetsRow")
         }
     }
 

@@ -22,9 +22,9 @@ public final class KeyboardViewState {
     /// 툴바에 띄울 채움글 후보. 단축어 근처에서만 nil↔값이 바뀌고
     /// 구독자는 툴바뿐이라 키캡 뷰 리빌드를 일으키지 않는다 (성능 규율 유지).
     public var snippetSuggestion: SnippetSuggestion?
-    /// 추천단어 후보 (최대 3개). 채움글 칩이 있으면 조립 지점이 비워 넣는다 (칩만 표시).
-    /// 구독자는 툴바뿐 — 키캡 리빌드 없음.
-    public var wordSuggestions: [String]
+    /// 추천단어 후보 — 단어 칩 최대 3개, 이모지 칩이 뜨면 단어 2(배지 있으면 1) + `[🚗 자동차][🚗]`(v1.3.0 ⑤).
+    /// 채움글 칩이 있으면 조립 지점이 비워 넣는다 (칩만 표시). 구독자는 툴바뿐 — 키캡 리빌드 없음.
+    public var wordSuggestions: [WordSuggestionCandidate]
     /// 툴바 붙여넣기 칩 — **인증번호 또는 복사한 일반 텍스트** 하나. nil이면 칩 없음.
     ///
     /// 2026-09-15 이전에는 `pasteboardCode: String?`(인증번호 전용)였다. 사용자 요구로
@@ -54,7 +54,7 @@ public final class KeyboardViewState {
 
     /// 툴바 성경 배지에 띄울 결과 건수. **nil이면 배지 없음**(0건 포함).
     ///
-    /// 조립 지점이 우선순위(채움글 칩 > 붙여넣기 칩 > 배지)를 이미 적용해 넣는다 —
+    /// 조립 지점이 우선순위(붙여넣기 칩 > 채움글 칩 > 배지, D19)를 이미 적용해 넣는다 —
     /// 뷰는 이 값이 있으면 그린다. **추천단어 개수 분기도 조립 지점이 같은 값으로 한다**
     /// (계획서 2-1: 두 곳에서 따로 계산하면 "배지는 없는데 추천단어는 2개"가 된다).
     public var bibleMatchCount: Int?
@@ -65,6 +65,14 @@ public final class KeyboardViewState {
     /// 패널에 그릴 결과 행들 (랭킹 순). 조립 지점이 본문을 읽어 미리보기까지 만들어 넣는다.
     public var bibleSearchRows: [BibleSearchRow]
 
+    // MARK: - 채움글 후보 고르기 (U7 — 칩 길게 누르기)
+
+    /// 자판 대신 겹치는 후보 패널을 보여줄지 — 다른 패널과 동시에 켜지 않는다(조립 지점이 닫고 연다).
+    public var showsSnippetCandidatesPanel: Bool
+    /// 패널 행 — 조립 지점이 **열 때 한 번** `SnippetMatcher.candidates(...)`로 만들어 넣고, 닫으면 비운다
+    /// (칩은 개수만 들고 본문은 들지 않는다 — 10-6 ① · ⑧ 메모리). 첫 행 = 칩 후보(순서 계약).
+    public var snippetCandidates: [SnippetCandidate]
+
     public init(
         layout: LayoutDefinition,
         isShifted: Bool = false,
@@ -74,7 +82,7 @@ public final class KeyboardViewState {
         showsKeyPreview: Bool = true,
         needsInputModeSwitchKey: Bool = false,
         snippetSuggestion: SnippetSuggestion? = nil,
-        wordSuggestions: [String] = [],
+        wordSuggestions: [WordSuggestionCandidate] = [],
         pasteSuggestion: PasteSuggestion? = nil,
         visibleTools: [ToolbarTool] = [],
         showsEmojiPanel: Bool = false,
@@ -87,7 +95,9 @@ public final class KeyboardViewState {
         bibleMatchCount: Int? = nil,
         showsBibleSearchPanel: Bool = false,
         bibleSearchQuery: String = "",
-        bibleSearchRows: [BibleSearchRow] = []
+        bibleSearchRows: [BibleSearchRow] = [],
+        showsSnippetCandidatesPanel: Bool = false,
+        snippetCandidates: [SnippetCandidate] = []
     ) {
         self.layout = layout
         self.isShifted = isShifted
@@ -111,6 +121,8 @@ public final class KeyboardViewState {
         self.showsBibleSearchPanel = showsBibleSearchPanel
         self.bibleSearchQuery = bibleSearchQuery
         self.bibleSearchRows = bibleSearchRows
+        self.showsSnippetCandidatesPanel = showsSnippetCandidatesPanel
+        self.snippetCandidates = snippetCandidates
     }
 }
 

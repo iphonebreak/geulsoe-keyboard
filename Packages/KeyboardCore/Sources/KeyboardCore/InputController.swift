@@ -26,7 +26,15 @@ public final class InputController {
     /// 여기서 정한다(`LayoutDefinition.layout(... letterMode:)`). 기호·키패드·숫자 패드에 있을 때만 뜻이 있다
     public private(set) var letterMode: InputMode = .hangul
 
-    private let output: TextOutput
+    /// 문서 쓰기는 전부 이 계수기를 지난다 — `documentRevision`(D17)
+    private let revisionCounter: RevisionCountingOutput
+    private var output: TextOutput { revisionCounter }
+    /// 마지막 이모지 칩 삽입 직후의 `documentRevision` — 그 뒤 문서가 안 바뀐 채 온 이모지 칩 탭은 퇴장 중 더블탭이다
+    /// (`replaceCurrentWord`의 둘째 층). 값은 정수뿐이다 — 넣은 글자는 기억하지 않는다
+    private var revisionAfterEmojiChip: Int?
+    /// 마지막 채움글 삽입 직후의 `documentRevision` — 문서가 그대로인 동안 채움글 칩·삽입을 보류한다(K1, `ReplacementGate.holdsSnippets`).
+    /// 정수뿐이다 — 넣은 본문은 기억하지 않는다
+    private var revisionAfterSnippetInsertion: Int?
     private var automaton = HangulAutomaton()
     private var hangulSource: JamoSource
     /// 문서에 들어가 있는 조합 중 글자 수 (교체 시 지울 개수). pending 문자 포함.
@@ -49,6 +57,9 @@ public final class InputController {
     /// 메모리에만 있고 48자 상한. 로그·파일·네트워크로 내보내지 않는다 (보안 규칙).
     private var committedTail = ""
     private let committedTailLimit = 48
+    /// `committedTail`의 **앞이 잘렸나**(48자 상한으로 줄 중간에서 시작하나) — 채움글 단어 경계가 꼬리 맨 앞 글자의 앞을 모르는 경우다.
+    /// 앞을 버릴 때만 참이 되고, 새 줄(리턴·여러 줄 본문 삽입)이나 문맥을 모르는 sync(nil)에서 거짓이 된다. 내용은 담지 않는다.
+    private var committedTailIsTruncated = false
     /// 후보 선택·채움글 삽입 직후 참 — 꼬리 끝 단어는 이미 처리됐으므로 다음 공백/리턴이
     /// 같은 단어를 다시 학습으로 보내면 안 된다 (이중 카운트·스니펫 본문 학습 방지).
     /// 타이핑·백스페이스로 단어가 변하면 해제된다.
@@ -94,11 +105,26 @@ public final class InputController {
         startsInHangul: Bool = true,
         clock: @escaping () -> TimeInterval = { Date().timeIntervalSinceReferenceDate }
     ) {
-        self.output = output
+        self.revisionCounter = RevisionCountingOutput(base: output)
         self.hangulSource = hangulSource
         self.mode = startsInHangul ? .hangul : .english
         self.clock = clock
     }
+
+    /// 이 컨트롤러가 문서에 글자를 넣거나 지운 횟수 — 조립 지점이 입력 하나 앞뒤로 비교해 **문서 글자가 실제로
+    /// 바뀌었는가**를 안다(이모지 칩 탭 뒤 숨김 해제, PDR emoji-word-suggestion D17). ⇧·한영·123·페이지 전환·천지인
+    /// 이동처럼 문서를 안 바꾸는 키는 세지 않는다 — 키 종류 목록이 아니라 실제 쓰기를 세므로 새 키가 생겨도 맞다.
+    /// 호스트가 바꾼 문서(sync)는 세지 않는다(우리 쓰기가 아니다).
+    public var documentRevision: Int { revisionCounter.revision }
+
+    /// K1 — 채움글을 넣은 뒤 아직 문서가 안 바뀌었나(다음 사용자 편집 전). 참이면 채움글 칩·U7·성경 배지를 띄우지 않고
+    /// `insertSnippet`도 거절한다 — 조립 지점의 표시와 이 거절이 같은 식(`ReplacementGate`)이다
+    public var holdsSnippetsAfterInsertion: Bool {
+        ReplacementGate.holdsSnippets(revisionAfterSnippetInsertion: revisionAfterSnippetInsertion, documentRevision: documentRevision)
+    }
+
+    /// K4 — 호스트 문서에 선택 영역이 있나(유무만). 조립 지점이 후보 표시를 가를 때도 이 값을 쓴다
+    public var hasSelectedText: Bool { output.hasSelectedText }
 
     /// 지금 조합 중인가. 툴바 모드 전환(`ToolbarState.textDidChange`)의 입력이 된다.
     /// 천지인의 pending 점만 떠 있는 상태도 조합 중으로 본다.
@@ -111,6 +137,14 @@ public final class InputController {
     public var textTail: String {
         committedTail + automaton.composingText + hangulSource.pendingText
     }
+
+    /// `textTail`의 앞이 잘렸나 — 참이면 꼬리 맨 앞 글자의 앞을 모른다. 조립 지점이 채움글 매처(칩·U7 목록)에 같은 값을 넘긴다
+    /// (단어 경계, PDR `snippet-shortcut-terms.md` 7절).
+    ///
+    /// ★ **문맥을 모르는 경우(sync(nil) — 빈 입력란·커서 도구 이동)는 잘림으로 보지 않는다.** 빈 입력란에서
+    /// `documentContextBeforeInput`이 nil로 와 같은 길을 타므로, 잘림으로 보면 입력란 첫 단축어(「주소」만 친 경우)가 막힌다.
+    /// 커서 도구 이동 뒤에는 호스트가 곧 textDidChange로 실제 꼬리를 다시 세운다.
+    public var textTailIsTruncated: Bool { committedTailIsTruncated }
 
     /// 입력 중인 단어 — 꼬리 끝의 한글 음절 연속 run (조합 중 음절 포함).
     /// 추천단어 매칭의 입력이 된다. 천지인 pending 점(ㆍ)은 음절이 아니라 run을 끊는다.
@@ -179,6 +213,7 @@ public final class InputController {
             output.insertText("\n")
             // 단축어는 줄을 넘지 않는다 — 꼬리를 새 줄에서 다시 시작한다
             committedTail.removeAll()
+            committedTailIsTruncated = false
         case .shift: handleShift()
         case .toggleLanguage:
             commitComposition()
@@ -248,8 +283,8 @@ public final class InputController {
         let composing = automaton.composingText + hangulSource.pendingText
         if let documentTail, !composing.isEmpty, documentTail.hasSuffix(composing) {
             // 문서 = 확정 + 우리 조합 그대로. 상태는 살리고 확정 꼬리만 문서 기준으로 보정한다
-            committedTail = Self.tailLine(of: String(documentTail.dropLast(composing.count)),
-                                          limit: committedTailLimit)
+            (committedTail, committedTailIsTruncated) = Self.tailLine(of: String(documentTail.dropLast(composing.count)),
+                                                                      limit: committedTailLimit)
             return
         }
         automaton.reset()
@@ -261,12 +296,14 @@ public final class InputController {
         suppressesNextWordCommit = false
         lastSpaceTimestamp = nil
         if let documentTail {
-            committedTail = Self.tailLine(of: documentTail, limit: committedTailLimit)
+            (committedTail, committedTailIsTruncated) = Self.tailLine(of: documentTail, limit: committedTailLimit)
             // 커서 앞 단어는 이 키보드로 친 것이 아닐 수 있다 — 첫 구분자까지 학습 제외
             blocksLearningUntilSeparator = !Self.trailingHangulRun(of: committedTail).isEmpty
         } else {
-            // 커서가 어디로 갔는지 모른다 — 추적해 온 꼬리도 문서와 어긋났으므로 버린다
+            // 커서가 어디로 갔는지 모른다 — 추적해 온 꼬리도 문서와 어긋났으므로 버린다.
+            // 잘림으로는 보지 않는다(`textTailIsTruncated` 주석 — 빈 입력란도 이 길이다)
             committedTail.removeAll()
+            committedTailIsTruncated = false
             blocksLearningUntilSeparator = false
         }
         // 문맥을 모를 때는 시프트를 건드리지 않는다 — 커서 도구 이동 직후 nil sync가 오고 곧
@@ -274,10 +311,11 @@ public final class InputController {
         if documentTail != nil { updateAutoCapitalization() }
     }
 
-    /// 문서 꼬리에서 마지막 줄의 끝 `limit`자 — 단축어는 줄을 넘지 않는다는 규칙과 일치
-    private static func tailLine(of text: String, limit: Int) -> String {
+    /// 문서 꼬리에서 마지막 줄의 끝 `limit`자 — 단축어는 줄을 넘지 않는다는 규칙과 일치.
+    /// `truncated`는 마지막 줄이 `limit`자를 넘어 앞을 버렸는가(채움글 단어 경계).
+    private static func tailLine(of text: String, limit: Int) -> (tail: String, truncated: Bool) {
         let lastLine = text.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
-        return String(lastLine.suffix(limit))
+        return (String(lastLine.suffix(limit)), lastLine.count > limit)
     }
 
     // MARK: - 문자
@@ -543,10 +581,17 @@ public final class InputController {
     /// 같은 칩이 두 번 들어올 때(퇴장 애니메이션 0.28초 중 더블탭) 2회차가 방금 삽입한 본문 끝을
     /// `triggerLength`만큼 잘라냈다 — 절 범위(`창세기 1:1~13`)면 본문 1,444B가 다시 들어가고
     /// 앞의 10자가 사라진다. 어긋나면 **아무 것도 하지 않는다** (문서를 건드리는 쪽이 늘 더 나쁘다).
+    ///
+    /// **K1·K4(2026-10-08).** 꼬리 정합만으로는 본문이 자기 단축어로 끝날 때 2회차가 다시 통과한다 — 직전 채움글 삽입 뒤 문서가
+    /// 그대로면 거절한다(`holdsSnippetsAfterInsertion`). 선택 영역이 있어도 거절한다(첫 `deleteBackward`가 선택 영역을 지운다).
+    /// 거절은 조합 확정 **전**이다 — 문서도 조합 상태도 그대로 둔다.
     /// - Returns: 실제로 삽입했으면 true.
     @discardableResult
     public func insertSnippet(_ suggestion: SnippetSuggestion) -> Bool {
-        guard !suggestion.trigger.isEmpty, textTail.hasSuffix(suggestion.trigger) else { return false }
+        guard !suggestion.trigger.isEmpty, textTail.hasSuffix(suggestion.trigger),
+              ReplacementGate.allowsSnippetInsertion(isHeldAfterInsertion: holdsSnippetsAfterInsertion,
+                                                     hasSelectedText: output.hasSelectedText)
+        else { return false }
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 (기존 규칙) — 문서 텍스트는 안 변한다
         output.deleteBackward(suggestion.triggerLength)
@@ -563,6 +608,7 @@ public final class InputController {
         // (절 범위·애국가처럼 여러 줄인 본문에서 드러난다, PDR bible-verse-range).
         if let newline = inserted.lastIndex(of: "\n") {
             committedTail.removeAll()
+            committedTailIsTruncated = false   // 새 줄의 처음부터 — 본문 마지막 줄이 길면 아래 덧붙이기가 다시 잘림을 적는다
             appendToTail(String(inserted[inserted.index(after: newline)...]))
         } else {
             appendToTail(inserted)
@@ -573,6 +619,8 @@ public final class InputController {
         // 규칙으로 **다음 구분자(공백·리턴)까지** 막는다 (`insertProvidedText`와 동일).
         suppressesNextWordCommit = true
         blocksLearningUntilSeparator = true
+        // K1 — 이 삽입 뒤 문서가 바뀌기 전까지 다음 채움글을 보류한다(방금 넣은 글 끝에서 다시 맞은 구간)
+        revisionAfterSnippetInsertion = documentRevision
         updateAutoCapitalization()
         return true
     }
@@ -581,11 +629,15 @@ public final class InputController {
 
     /// 입력 중인 단어를 후보로 바꾼다 — 채움글과 같은 delete/insert 메커니즘.
     /// 후행 공백은 넣지 않는다 (교착어 — 조사·어미를 이어 치는 흐름, PDR word-suggestions).
-    public func completeWord(_ word: String) {
+    /// 선택 영역이 있으면 아무 것도 하지 않는다(K4 — 채움글과 같은 이유).
+    /// - Returns: 실제로 바꿨으면 true.
+    @discardableResult
+    public func completeWord(_ word: String) -> Bool {
+        guard ReplacementGate.allowsReplacement(hasSelectedText: output.hasSelectedText) else { return false }
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 — 문서 텍스트는 안 변한다
         let current = Self.trailingHangulRun(of: committedTail)
-        guard !current.isEmpty, !word.isEmpty else { return }
+        guard !current.isEmpty, !word.isEmpty else { return false }
         output.deleteBackward(current.count)
         output.insertText(word)
         committedTail.removeLast(min(current.count, committedTail.count))
@@ -594,6 +646,39 @@ public final class InputController {
         // 여기서 이미 알렸다 — 이어지는 공백/리턴이 같은 단어를 또 보내면 이중 카운트다
         suppressesNextWordCommit = true
         updateAutoCapitalization()
+        return true
+    }
+
+    /// 이모지 칩 탭 — 치던 단어를 지우고 `text`(`🚗 자동차` 또는 `🚗`)를 넣는다(PDR emoji-word-suggestion 1-2·1-3절).
+    ///
+    /// **정합 검사(채움글 칩과 같은 방어).** 꼬리 끝 한글 run이 **칩이 든 원본 단어와 같을 때만** 바꾼다 —
+    /// 「큰자동차」에 「자동차」 칩이면 거절한다(세 글자만 지우면 「큰🚗 자동차」가 된다). **직전 문서 변경이 이모지 칩
+    /// 삽입이면** 거절한다 — 혼합 칩 퇴장 중 더블탭(넣은 「자동차」가 다시 꼬리 끝 run이라 위 검사를 통과한다).
+    /// 예전 「꼬리가 이미 `text`로 끝나면 거절」은 손으로 쳐 둔 「🚕 자동차」에 같은 🚕가 뽑힌 칩까지 죽였다
+    /// (검증 ⑤-2b 참고 2) — 그때는 사용자가 누른 그대로 「🚕 🚕 자동차」가 맞다.
+    /// 어긋나면 **아무 것도 하지 않는다.** 첫 층 방어는 조립 지점의 「지금 떠 있는 칩만」과 탭 뒤 숨김이다.
+    ///
+    /// **학습으로 보내지 않는다**(5-3절, 수용 기준 4) — `completeWord`와 달리 `onWordCommitted`를 부르지 않는다.
+    /// 이모지가 섞인 삽입분은 사용자가 친 단어가 아니다. 다음 구분자가 넣은 「자동차」를 다시 보내지 않게
+    /// `suppressesNextWordCommit`을 켜고, 이어 치면 풀려 「자동차는」처럼 사용자가 완성한 run은 학습된다.
+    /// 선택 영역이 있으면 거절한다(K4 — `ReplacementGate.allowsReplacement`).
+    /// - Returns: 실제로 바꿨으면 true.
+    @discardableResult
+    public func replaceCurrentWord(_ sourceWord: String, with text: String) -> Bool {
+        guard !sourceWord.isEmpty, !text.isEmpty, currentWord == sourceWord,
+              revisionAfterEmojiChip != documentRevision,
+              ReplacementGate.allowsReplacement(hasSelectedText: output.hasSelectedText)
+        else { return false }
+        lastSpaceTimestamp = nil
+        commitComposition()  // 조합 확정 + 소스 리셋 — 문서 텍스트는 안 변한다
+        output.deleteBackward(sourceWord.count)
+        output.insertText(text)
+        committedTail.removeLast(min(sourceWord.count, committedTail.count))
+        appendToTail(text)
+        suppressesNextWordCommit = true
+        revisionAfterEmojiChip = documentRevision
+        updateAutoCapitalization()
+        return true
     }
 
     /// 외부에서 온 텍스트(인증번호 붙여넣기 등)를 그대로 삽입한다.
@@ -688,6 +773,31 @@ public final class InputController {
         committedTail += text
         if committedTail.count > committedTailLimit {
             committedTail.removeFirst(committedTail.count - committedTailLimit)
+            committedTailIsTruncated = true   // 앞을 버렸다 — 이제 꼬리 맨 앞은 줄 중간이다
         }
     }
+}
+
+/// 문서 쓰기를 그대로 넘기면서 실제로 글자를 넣거나 지운 횟수만 센다 — `InputController.documentRevision`.
+/// 빈 삽입·0개 지우기는 넘기되 세지 않는다(문서가 안 바뀐다). 내용은 기억하지 않는다(보안 규칙).
+@MainActor
+private final class RevisionCountingOutput: TextOutput {
+    private let base: TextOutput
+    private(set) var revision = 0
+
+    init(base: TextOutput) {
+        self.base = base
+    }
+
+    func insertText(_ text: String) {
+        if !text.isEmpty { revision += 1 }
+        base.insertText(text)
+    }
+
+    func deleteBackward(_ count: Int) {
+        if count > 0 { revision += 1 }
+        base.deleteBackward(count)
+    }
+
+    var hasSelectedText: Bool { base.hasSelectedText }
 }

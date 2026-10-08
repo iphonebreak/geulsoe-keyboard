@@ -21,6 +21,12 @@ public enum KeyboardMetrics {
     /// 자판 아래 여백.
     public static let bottomPadding: CGFloat = 4
 
+    // MARK: - 길게 누르기
+
+    /// 길게 누르기가 무장되기까지 누르고 있어야 하는 시간 — **키 대체 입력(문장부호 키 등)과 채움글 칩(U7)이 이 값 하나를 본다.**
+    /// 둘로 갈리면 손 감각이 둘이 된다(PDR `external-snippet-packs.md` 10-6 ⑤ · AC-43). 스페이스 트랙패드 진입(400ms)은 다른 동작이라 별도다.
+    static let longPressDelay: Duration = .milliseconds(450)
+
     // MARK: - 목표 종횡비
 
     /// 아이폰 기준 행 높이 — 216pt / 4행에서 나온 값(행 간격 제외). "아이폰에서 이 자판이 어떤
@@ -190,6 +196,33 @@ public enum KeyboardMetrics {
         hasSnippet || hasWords || hasPaste
     }
 
+    /// 후보 줄에 그릴 추천단어(이모지 칩 포함) — **붙여넣기 칩이 있으면 없다**(D18, 2026-10-06).
+    ///
+    /// 붙여넣기 칩이 있으면 그 줄은 `[칩][✕]`만이다(채움글 칩도 — `candidateRowSnippet`, D19). v1.2.0부터 둘이 한 줄에
+    /// 함께 떠 `[복사됨][추천]×4[✕]`가 말줄임으로 안 보였다(실기 세션 1 K7). 조립 지점이 이미 후보를 비워
+    /// 넘기지만(`WordSuggestionGate`의 `hasPasteChip`) 그림 쪽도 같은 규칙을 지킨다 — ✕를 누르면 칩이
+    /// 물러나고 이 함수가 후보를 그대로 돌려준다.
+    public static func candidateRowWords(
+        _ words: [WordSuggestionCandidate], hasPaste: Bool
+    ) -> [WordSuggestionCandidate] {
+        hasPaste ? [] : words
+    }
+
+    /// 후보 줄에 그릴 채움글 칩(날짜·시간 칩 포함) — **붙여넣기 칩이 있으면 없다**(D19, 2026-10-06).
+    ///
+    /// 붙여넣기 칩이 먼저다 — `[붙여넣기][채움글][✕]`가 한 줄에 함께 떠 말줄임 위험이 있었다(D18 구현 중 발견).
+    /// 조립 지점이 이미 비워 넘기지만(`SnippetChipGate`) 그림 쪽도 같은 규칙을 지킨다 — ✕로 붙여넣기 칩을 물리면
+    /// 이 함수가 채움글 칩을 그대로 돌려주고, 칩은 평소처럼 아래에서 떠오른다.
+    public static func candidateRowSnippet(_ snippet: SnippetSuggestion?, hasPaste: Bool) -> SnippetSuggestion? {
+        hasPaste ? nil : snippet
+    }
+
+    /// 후보 줄에 성경 배지를 그리는가 — 붙여넣기 칩이 있으면 그리지 않는다(D18, `candidateRowWords`와 같은 이유).
+    /// 조립 지점은 칩이 있으면 검색 예약부터 하지 않는다(배지 수 nil).
+    public static func candidateRowShowsBadge(hasPaste: Bool) -> Bool {
+        !hasPaste
+    }
+
     /// 추천단어를 몇 개까지 띄울까 — **실제 배지 유무**로 갈린다.
     ///
     /// ## ★ 자리 예약을 되돌렸다 (2026-09-21 저녁 → 밤)
@@ -205,6 +238,31 @@ public enum KeyboardMetrics {
     /// 되살아난 위험(배지가 뜰 때 자리가 움직인다)은 `KeyboardRootView.bibleBadge` 주석의 표에 있다.
     public static func wordSuggestionLimit(hasBadge: Bool) -> Int {
         hasBadge ? 2 : 3
+    }
+
+    /// 이모지 칩(혼합·전용)이 뜰 때의 단어 후보 개수 — **한 칸 적게**(PDR `emoji-word-suggestion.md` Q2).
+    ///
+    /// | | 이모지 없음(숨김 동안 포함, D3) | 이모지 있음 |
+    /// |---|---|---|
+    /// | 배지 없음 | 단어 3 | 단어 2 + `[🚗 자동차][🚗]` = 4칸 |
+    /// | 배지 있음 | 단어 2 | 단어 1 + `[🚗 자동차 │ 🚗]`(둘째 칸을 반으로) = 2칸 |
+    public static func wordSuggestionLimit(hasBadge: Bool, hasEmojiChips: Bool) -> Int {
+        wordSuggestionLimit(hasBadge: hasBadge) - (hasEmojiChips ? 1 : 0)
+    }
+
+    /// 추천단어 칩 안쪽 좌우 여백 — **이모지 칩이 뜬 줄만 0**(D6 여백C: 칩 사이 간격 10pt는 그대로, 배지 반쪽 칩도 0).
+    /// 이모지가 없는 3칩 줄은 지금 그대로 6이다. 글자는 기존 `minimumScaleFactor(0.7)`로 줄인다(4-5절).
+    public static func wordChipHorizontalPadding(hasEmojiChips: Bool) -> CGFloat {
+        hasEmojiChips ? 0 : 6
+    }
+
+    /// 후보를 칸으로 묶는다 — 칸 하나가 툴바의 균등 분배 단위다.
+    /// 배지가 있을 때만 혼합·전용 두 이모지 칩이 **한 칸을 반씩** 나눈다(Q2 배지판·4-3절) — 단어 후보 칸이
+    /// 0개로 떨어지지 않는다. 그 밖에는 후보 하나에 칸 하나(이모지가 없으면 v1.2.0과 같다).
+    public static func wordChipSlots(_ candidates: [WordSuggestionCandidate], hasBadge: Bool) -> [[WordSuggestionCandidate]] {
+        let emojiChips = candidates.filter { $0.emoji != nil }
+        guard hasBadge, !emojiChips.isEmpty else { return candidates.map { [$0] } }
+        return candidates.filter { $0.emoji == nil }.map { [$0] } + [emojiChips]
     }
 
     /// 자판 배열의 기준 열 수에서 곧바로 최대 폭을 낸다.
