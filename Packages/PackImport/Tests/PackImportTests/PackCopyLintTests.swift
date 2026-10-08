@@ -88,7 +88,7 @@ enum PackCopyLint {
 var stage6Copy: [String] {
     var texts: [String] = []   // 「처음이라면」 풋터(샘플 안내)는 뺐다(사장님 실기 2026-10-07)
     for kind in PackSample.Kind.allCases {
-        texts += [PackImportCopy.sampleTitle(kind), PackImportCopy.sampleDetail(kind)]
+        texts += [PackImportCopy.sampleRowTitle(kind), PackImportCopy.sampleTitle(kind), PackImportCopy.sampleDetail(kind)]
         texts += PackSample.files(kind).flatMap { [PackImportCopy.sampleFormatLabel($0.format), PackImportCopy.sampleShareLabel($0), $0.displayName] }
     }
     if let row = PackImportCopy.otherFileRow { texts += [row.title, row.detail] }

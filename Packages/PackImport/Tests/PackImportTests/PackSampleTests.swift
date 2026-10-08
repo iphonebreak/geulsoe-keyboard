@@ -16,10 +16,11 @@ private let recordedSHA256: [PackSample.Kind: String] = [
     .phrases: "e97413f0853cca93b6ef6043fd8d8be0b9f15a0fc0dffb41cd69d04a2ba1ef9d"
 ]
 
-/// 제작 기록 표의 xlsx SHA-256 — 1-e ④-가 `tools/generate_sample_xlsx.py` 산출물(`#출처`판·열 너비·본문 줄바꿈). 다시 만들면 기록과 함께 고친다
+/// 제작 기록 표의 xlsx SHA-256 — 1-e ④-가 `tools/generate_sample_xlsx.py` 산출물(`#출처`판·열 너비·본문 줄바꿈). 다시 만들면 기록과 함께 고친다.
+/// 2026-10-08 실기 피드백판 — 정보 줄 키·머리글 칸 굵게 · 정보 줄 묶음과 머리글 사이 빈 행 하나(셀 값은 그대로)
 private let recordedXLSXSHA256: [PackSample.Kind: String] = [
-    .numbered: "5bd1c1cfa3d14307eee0af2b8993bbb7f1cea291cc16c003c141d294c856b5c0",
-    .phrases: "292b72433f452c0b4e59f8f09be378e2a993bbcb1b393aa27d4aa5615aa49301"
+    .numbered: "b4111b9aaad725023292b1eb2303a2649240f629c6a41fa58fabca946eec3f45",
+    .phrases: "2940e090dede7584f66eaddd229375c767765b5d9ee65a45f97f33d68e48ad38"
 ]
 
 /// 기획자 원본 이름 — 시험 픽스처(`Fixtures/`, 4단계에 원본을 그대로 복사)와 문서 폴더에 같은 이름으로 있다
@@ -46,6 +47,73 @@ private func bundledXLSXData(_ kind: PackSample.Kind) throws -> Data {
 }
 
 private func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+
+/// xlsx 샘플의 엑셀 행 자리(사장님 실기 피드백 2026-10-08) — 정보 줄 묶음(1행부터) · **빈 행 하나** · 머리글 · 데이터.
+/// 번호형은 정보 줄 3 · 데이터 20(머리글 5행), 문구형은 2 · 15(머리글 4행). CSV 샘플에는 빈 줄이 없다(바꾸지 않았다)
+private func sampleLayout(_ kind: PackSample.Kind) -> (meta: Int, header: Int, rows: [Int]) {
+    let meta = kind == .numbered ? 3 : 2
+    let header = meta + 2
+    let data = kind == .numbered ? 20 : 15
+    return (meta, header, Array(1...meta) + Array(header...(header + data)))
+}
+
+/// 샘플 xlsx의 굵은 칸과 칸 스타일의 숫자 서식 — `xl/styles.xml`의 `fonts`(`<b/>`)·`cellXfs`(fontId·numFmtId)와 시트 칸의 `s`만 본다.
+/// 생성기·파이썬 검사기(L2)와 따로 읽는다
+struct SampleCellStyles {
+    private(set) var boldCells: Set<String> = []
+    /// `cellXfs` 순서의 numFmtId
+    private(set) var numberFormats: [Int] = []
+
+    init(_ data: Data) throws {
+        var archive = try XLSXArchive.open(data)
+        let styles = try ElementList(try archive.read("xl/styles.xml", as: .styles))
+        let sheet = try ElementList(try archive.read("xl/worksheets/sheet1.xml", as: .worksheet))
+        var boldFonts: Set<Int> = []
+        var fontCount = 0
+        var xfFonts: [Int] = []
+        for element in styles.elements {
+            switch (element.parent, element.name) {
+            case ("fonts", "font"): fontCount += 1
+            case ("font", "b") where [nil, "1", "true"].contains(element.attributes["val"]): boldFonts.insert(fontCount - 1)
+            case ("cellXfs", "xf"):
+                xfFonts.append(Int(element.attributes["fontId"] ?? "0") ?? 0)
+                numberFormats.append(Int(element.attributes["numFmtId"] ?? "0") ?? 0)
+            default: break
+            }
+        }
+        for element in sheet.elements where element.name == "c" {
+            let style = Int(element.attributes["s"] ?? "0") ?? 0
+            if xfFonts.indices.contains(style), boldFonts.contains(xfFonts[style]), let reference = element.attributes["r"] {
+                boldCells.insert(reference)
+            }
+        }
+    }
+
+    /// 요소마다 (부모 로컬 이름, 로컬 이름, 속성) — 시작 순서
+    private final class ElementList: NSObject, XMLParserDelegate {
+        struct Element { let parent: String?; let name: String; let attributes: [String: String] }
+        private var stack: [String] = []
+        private(set) var elements: [Element] = []
+
+        init(_ data: Data) throws {
+            super.init()
+            let parser = XMLParser(data: data)
+            parser.shouldProcessNamespaces = true
+            parser.delegate = self
+            guard parser.parse() else { throw CocoaError(.fileReadCorruptFile) }
+        }
+
+        func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?,
+                    attributes: [String: String]) {
+            elements.append(Element(parent: stack.last, name: elementName, attributes: attributes))
+            stack.append(elementName)
+        }
+
+        func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName: String?) {
+            _ = stack.popLast()
+        }
+    }
+}
 
 /// 제작 기록 표에서 그 원본 파일 줄의 SHA-256
 private func recordedHash(_ original: String) throws -> String {
@@ -274,6 +342,53 @@ struct PackSampleWorkbookTests {
         #expect(found.allSatisfy { !$0.contains("작성자") && !$0.contains("회사") }, "값은 담지 않는다")
     }
 
+    @Test("★ 실기 피드백(2026-10-08) — 정보 줄 묶음과 머리글 사이에 빈 행 하나: 시트 행 번호가 엑셀 화면 그대로(번호형 머리글 5행 · 문구형 4행)",
+          arguments: PackSample.Kind.allCases)
+    func blankRowBeforeHeader(_ kind: PackSample.Kind) throws {
+        var reader = try XLSXWorkbookReader.open(try bundledXLSXData(kind))
+        let table = try reader.table(for: try #require(reader.sheets.first))
+        let layout = sampleLayout(kind)
+        #expect(table.rows.map(\.number) == layout.rows)
+        // 빈 행 위는 마지막 정보 줄, 아래는 머리글
+        let lastMeta = try #require(table.rows.first { $0.number == layout.meta }?.cells.first)
+        #expect(lastMeta == .text("#출처"))
+        let header = kind == .numbered ? ["번호", "제목", "본문"] : ["단축어", "제목", "본문"]
+        #expect(table.rows.first { $0.number == layout.header }?.cells == header.map(RawCell.text))
+    }
+
+    @Test("★ 실기 피드백 — 빈 행이 있어도 건너뜀 문구의 「n번째 행」은 엑셀 화면의 행 번호다(같은 표를 CSV로 저장하면 빈 레코드를 세어 같은 번호)",
+          arguments: PackSample.Kind.allCases)
+    func skipPositionIsSheetRow(_ kind: PackSample.Kind) throws {
+        var reader = try XLSXWorkbookReader.open(try bundledXLSXData(kind))
+        let table = try reader.table(for: try #require(reader.sheets.first))
+        // 샘플 표를 빈 행 자리까지 그대로 옮기고 데이터 셋째 행의 본문만 비운다
+        let broken = sampleLayout(kind).header + 3
+        let grid: [[String]] = (1...(table.rows.last?.number ?? 0)).map { number in
+            let cells = table.rows.first { $0.number == number }?.cells ?? []
+            return cells.enumerated().map { column, cell in
+                switch cell {
+                case .text(let text), .number(let text): number == broken && column == 2 ? "" : text
+                case .blank, .unsupported: ""
+                }
+            }
+        }
+        let workbook = WorkbookBuilder.workbook(grid: grid)
+        let draft = try WorkbookHelper.draft(workbook)
+        #expect(draft.skipped == [SkippedRecord(row: broken, reason: .emptyBody)])
+        #expect(draft.skipped.first.map(PackImportCopy.skipTitle)?.hasPrefix("\(broken)번째 행 — ") == true)
+        // 같은 표의 CSV — 빈 줄이 레코드 하나라 「n번째 항목」의 n이 같다
+        #expect(PackVerdictResult.xlsx(workbook) == PackVerdictResult.csv(grid))
+    }
+
+    @Test("★ 실기 피드백 — 굵은 칸은 정보 줄 키(#이름·#틀·#출처)와 머리글 칸뿐 · 칸 스타일의 숫자 서식은 모두 일반(날짜·숫자로 오인 0)",
+          arguments: PackSample.Kind.allCases)
+    func boldMetaKeysAndHeader(_ kind: PackSample.Kind) throws {
+        let styles = try SampleCellStyles(try bundledXLSXData(kind))
+        let layout = sampleLayout(kind)
+        #expect(styles.boldCells == Set((1...layout.meta).map { "A\($0)" } + ["A", "B", "C"].map { "\($0)\(layout.header)" }))
+        #expect(!styles.numberFormats.isEmpty && styles.numberFormats.allSatisfy { $0 == 0 })
+    }
+
     @Test("★ 번들 xlsx 샘플은 그대로 팩이 된다 — 번들 CSV와 같은 판정 · 시트 이름이 팩 이름 기본값이지만 `#이름`이 이긴다 · 파일 출처가 미리 골라진다",
           arguments: PackSample.Kind.allCases)
     func importsCleanly(_ kind: PackSample.Kind) throws {
@@ -338,6 +453,11 @@ struct PackSampleShareTests {
         #expect(csvFile(.phrases).displayName == "문구형 샘플.csv")
         #expect(csvFile(.numbered).bundledURL?.lastPathComponent == "sample-numbered.csv")
         #expect(PackImportCopy.sampleTitle(.numbered) == "번호형 샘플" && PackImportCopy.sampleTitle(.phrases) == "문구형 샘플")
+        // 3-A 줄 제목만 「… 받기」(사장님 실기 2026-10-08) — 파일 이름·알약의 손쉬운 사용 이름은 `sampleTitle` 그대로
+        #expect(PackImportCopy.sampleRowTitle(.numbered) == "번호형 샘플 받기" && PackImportCopy.sampleRowTitle(.phrases) == "문구형 샘플 받기")
+        #expect(xlsxFile(.numbered).displayName == "번호형 샘플.xlsx" && xlsxFile(.phrases).displayName == "문구형 샘플.xlsx")
+        #expect(PackImportCopy.sampleShareLabel(xlsxFile(.numbered)) == "번호형 샘플 엑셀 받기")
+        #expect(PackImportCopy.sampleShareLabel(csvFile(.phrases)) == "문구형 샘플 CSV 받기")
         #expect(PackImportCopy.sampleDetail(.numbered) == "사자성어·상용 영어처럼 번호로 고르는 자료")
         #expect(PackImportCopy.sampleDetail(.phrases) == "단축어를 치면 문구가 떠요")
         #expect(PackImportCopy.sampleFormatLabel(.csv) == "CSV" && PackImportCopy.sampleFormatLabel(.xlsx) == "엑셀")

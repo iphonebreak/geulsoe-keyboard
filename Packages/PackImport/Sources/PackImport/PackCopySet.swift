@@ -51,7 +51,7 @@ public enum PackCopySet: String, CaseIterable, Sendable {
     public struct Lines: Sendable {
         /// 2-B 빈 상태의 첫 문장(뒤 문장은 공유)
         let listIntro: String
-        /// 3-A 주 버튼 절 — 제목 · 설명 첫 줄(둘째 줄은 공유) · 버튼
+        /// 3-A 주 버튼 절 — 제목 · 설명(판별 문구 한 줄 — 공유하던 둘째 줄은 2026-10-08에 뺐다) · 버튼
         let heroTitle: String
         let heroLead: String
         let pickFile: String

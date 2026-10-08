@@ -7,6 +7,9 @@
 
 무엇을 만드나 (파이썬 표준 라이브러리만 — zipfile·csv·unicodedata):
   - 셀 = 원본 CSV와 **셀 단위로 같다**. 셀 안 줄바꿈은 LF(6-4 정리 순서 뒤의 값 — CSV의 CRLF를 LF로).
+  - 행 자리 = 정보 줄 묶음(1행부터) · **빈 행 하나** · 머리글 · 데이터(사장님 실기 2026-10-08). xlsx는 빈 행을 담지 않으므로
+    행 번호만 하나 띄운다(파서는 빈 레코드를 어디서든 무시한다). 정보 줄이 없으면 1행부터 빈 행 없이.
+  - **굵게** = 정보 줄 키 칸(A열 `#이름`·`#틀`·`#출처`)과 머리글 칸만 — 글꼴 bold 하나. 숫자 서식은 모두 일반(numFmtId 0).
   - 번호 열(머리글 「번호」)의 정수만 숫자 셀(엑셀이 CSV를 열 때처럼, 일반 서식). 나머지는 전부 공유 문자열.
     수식·날짜 서식·불리언·숫자 서식 칸은 만들지 않는다(6-4·R19). 병합·숨김 없음.
   - 열 너비 = 글자 길이에 맞춤(`<col width customWidth>`). 한글 등 넓은 글자(동아시아 W·F·A)는 2칸으로 센다.
@@ -124,19 +127,25 @@ def build_parts(name, records):
     number_column = header.index("번호") if "번호" in header else None
     column_count = max(len(cells) for cells in records)
     body_column = column_count - 1
+    gap = 1 if header_index else 0      # 정보 줄 묶음과 머리글 사이 빈 행(정보 줄이 있을 때만)
+
+    def bold(index, column):
+        return index == header_index or (index < header_index and column == 0)
 
     # 공유 문자열(처음 나온 순서, 중복 제거 — 엑셀과 같다)과 셀
     strings, string_index, string_refs = [], {}, 0
     rows_xml = []
-    for row_number, cells in enumerate(records, start=1):
+    for index, cells in enumerate(records):
+        row_number = index + 1 + (gap if index >= header_index else 0)
         cells_xml = []
         for column, text in enumerate(cells):
             if text == "":
                 continue
             check_cell(name, row_number, text)
             reference = f"{column_letter(column)}{row_number}"
-            style = ' s="1"' if column == body_column else ""
-            if column == number_column and row_number - 1 > header_index and re.fullmatch(r"[0-9]+", text):
+            style_index = (2 if bold(index, column) else 0) + (1 if column == body_column else 0)
+            style = f' s="{style_index}"' if style_index else ""
+            if column == number_column and index > header_index and re.fullmatch(r"[0-9]+", text):
                 cells_xml.append(f'<c r="{reference}"{style}><v>{int(text)}</v></c>')
                 continue
             if text not in string_index:
@@ -161,7 +170,7 @@ def build_parts(name, records):
         style = ' style="1"' if column == body_column else ""
         cols_xml.append(f'<col min="{column + 1}" max="{column + 1}" width="{width!r}"{style} customWidth="1"/>')
 
-    last_reference = f"{column_letter(column_count - 1)}{len(records)}"
+    last_reference = f"{column_letter(column_count - 1)}{len(records) + gap}"
     sheet = (f'{DECLARATION}<worksheet xmlns="{NS_MAIN}" xmlns:r="{NS_REL}">'
              f'<dimension ref="A1:{last_reference}"/>'
              '<sheetViews><sheetView tabSelected="1" workbookViewId="0"/></sheetViews>'
@@ -177,15 +186,20 @@ def build_parts(name, records):
     shared_strings = (f'{DECLARATION}<sst xmlns="{NS_MAIN}" count="{string_refs}" uniqueCount="{len(strings)}">'
                       f'{"".join(shared_item(text) for text in strings)}</sst>')
 
-    # 스타일 — 0: 표준(세로 가운데), 1: 표준 + 줄바꿈(본문 열). 둘 다 일반 서식(numFmtId 0) — 날짜·숫자 서식 없음
+    # 스타일 — 0: 표준(세로 가운데), 1: 표준 + 줄바꿈(본문 열), 2: 굵게, 3: 굵게 + 줄바꿈(본문 열의 머리글 칸).
+    # 모두 일반 서식(numFmtId 0) — 날짜·숫자 서식 없음. 글꼴 1 = 글꼴 0 + 굵게
+    font = '<sz val="11"/><name val="맑은 고딕"/><family val="2"/><charset val="129"/>'
     styles = (f'{DECLARATION}<styleSheet xmlns="{NS_MAIN}">'
-              '<fonts count="1"><font><sz val="11"/><name val="맑은 고딕"/><family val="2"/><charset val="129"/></font></fonts>'
+              f'<fonts count="2"><font>{font}</font><font><b/>{font}</font></fonts>'
               '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
               '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
               '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"><alignment vertical="center"/></xf></cellStyleXfs>'
-              '<cellXfs count="2">'
+              '<cellXfs count="4">'
               '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="center"/></xf>'
               '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'
+              '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>'
+              '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1">'
+              '<alignment vertical="center" wrapText="1"/></xf>'
               '</cellXfs>'
               '<cellStyles count="1"><cellStyle name="표준" xfId="0" builtinId="0"/></cellStyles>'
               '</styleSheet>')

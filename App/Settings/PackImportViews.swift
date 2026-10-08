@@ -170,7 +170,7 @@ private struct PackSampleRow: View {
         HStack(spacing: 8) {
             Label {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(PackImportCopy.sampleTitle(kind))
+                    Text(PackImportCopy.sampleRowTitle(kind))
                     Text(PackImportCopy.sampleDetail(kind))
                         .font(.footnote)
                         .foregroundStyle(.secondary)

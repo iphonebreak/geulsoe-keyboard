@@ -17,7 +17,8 @@ public enum PackImportCopy {
     // MARK: - 3-A 첫 화면
 
     public static var heroTitle: String { lines.heroTitle }
-    public static var heroMessage: String { lines.heroLead + "\n번호형(사자성어 12번처럼)·문구형(단축어 → 문구) 둘 다 돼요." }
+    /// 판별 문구 한 줄뿐 — 둘째 줄 「번호형(…)·문구형(…) 둘 다 돼요.」는 두 판 모두 뺐다(사장님 실기 2026-10-08)
+    public static var heroMessage: String { lines.heroLead }
     public static var pickFile: String { lines.pickFile }
     public static let firstTimeHeader = "처음이라면"
     public static let otherWaysHeader = "그 밖의 방법"
@@ -31,12 +32,16 @@ public enum PackImportCopy {
 
     // MARK: 3-A 「처음이라면」 샘플 · 3-C 샘플 받기(공유 시트)
 
+    /// 샘플 이름 — 공유 파일 이름(`PackSample.File.displayName` 「번호형 샘플.xlsx」)과 알약의 손쉬운 사용 이름(`sampleShareLabel`)이 쓴다
     public static func sampleTitle(_ kind: PackSample.Kind) -> String {
         switch kind {
         case .numbered: "번호형 샘플"
         case .phrases: "문구형 샘플"
         }
     }
+
+    /// 3-A 샘플 줄 제목 — 「번호형 샘플 받기」. 화면 줄 제목만 「받기」를 붙인다(사장님 실기 2026-10-08) — 파일 이름·손쉬운 사용 이름은 `sampleTitle` 그대로
+    public static func sampleRowTitle(_ kind: PackSample.Kind) -> String { "\(sampleTitle(kind)) 받기" }
 
     public static func sampleDetail(_ kind: PackSample.Kind) -> String {
         switch kind {

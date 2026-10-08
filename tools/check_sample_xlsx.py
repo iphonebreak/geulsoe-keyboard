@@ -15,6 +15,8 @@
   S1 표시 시트 하나 = 기대 이름, 숨김 시트 없음      S2 병합·숨김 행/열 없음
   S3 수식 0, 셀 타입 s·inlineStr·숫자만, 셀 참조 행 = 행 번호   S4 숫자 셀은 번호 열(머리글 「번호」) 데이터 행의 정수만
   S5 셀·행·열이 쓰는 스타일의 숫자 서식 = 일반(0)·텍스트(49)만 — 날짜·숫자 서식 0 (6-4·R19)
+  L1 행 자리 — 정보 줄 묶음(1행부터)과 머리글 사이에 빈 행 하나, 머리글·데이터는 이어서(정보 줄이 없으면 1행부터 빈 행 없이)
+  L2 굵게 — 글이 든 칸 중 굵은 글꼴은 정보 줄 키 칸(A열 `#…`)과 머리글 칸뿐(숫자 서식은 S5가 본다) — L1·L2는 사장님 실기 피드백(2026-10-08)
   C1 모든 셀이 원본 CSV와 같다(빈 레코드 빼고, 끝 빈 칸 떼고, 셀 안 줄바꿈은 6-4 순서 정리 뒤 LF — `_xHHHH_` 한 번 디코드)
   A29 위험 시작 글자(`= + - @`·전각·탭·CR·LF) 셀 0 — 모든 공유 문자열 항목·인라인·숫자 셀
   A47 개인 정보 0 — 작성자·수정자(빈 값·「글쇠」만 허용)·Company·Manager 값, `absPath`, 사용자 경로(`/Users/`·`/home/`·
@@ -89,6 +91,15 @@ def item_text(element):
         elif child.tag == MAIN + "r":
             pieces.extend(t.text or "" for t in child.findall(MAIN + "t"))
     return "".join(pieces)
+
+
+def column_letter(index):
+    letters = ""
+    index += 1
+    while index:
+        index, rest = divmod(index - 1, 26)
+        letters = chr(ord("A") + rest) + letters
+    return letters
 
 
 def column_index(reference):
@@ -314,14 +325,22 @@ def read_sheet(book, report, workbook_name, expected_sheet):
     styles = book.xml.get(style_parts[0]) if style_parts else None
     custom_formats = {}
     wrap_styles = set()
+    bold_styles = set()
     if styles is not None:
         for fmt in styles.findall(f"{MAIN}numFmts/{MAIN}numFmt"):
             custom_formats[int(fmt.get("numFmtId"))] = fmt.get("formatCode", "")
+        bold_fonts = set()
+        for index, font in enumerate(styles.findall(f"{MAIN}fonts/{MAIN}font")):
+            weight = font.find(MAIN + "b")
+            if weight is not None and weight.get("val", "1") in ("1", "true"):
+                bold_fonts.add(index)
         for index, xf in enumerate(styles.findall(f"{MAIN}cellXfs/{MAIN}xf")):
             number_formats.append(int(xf.get("numFmtId", "0")))
             alignment = xf.find(MAIN + "alignment")
             if alignment is not None and alignment.get("wrapText") in ("1", "true"):
                 wrap_styles.add(index)
+            if int(xf.get("fontId", "0")) in bold_fonts:
+                bold_styles.add(index)
 
     def check_style(code, where, style):
         if style is None:
@@ -379,7 +398,8 @@ def read_sheet(book, report, workbook_name, expected_sheet):
                 continue
             cells[column] = ("number" if kind == "n" else "text", text)
             wrap = cell.get("s") is not None and int(cell.get("s")) in wrap_styles
-            model[reference] = (cells[column][0], text, fmt, wrap)
+            bold = cell.get("s") is not None and int(cell.get("s")) in bold_styles
+            model[reference] = (cells[column][0], text, fmt, wrap, bold)
         if cells:
             width = max(cells) + 1
             rows.append((number, [cells.get(i, ("blank", "")) for i in range(width)]))
@@ -416,6 +436,25 @@ def check_cells(report, rows, records, raw_strings):
     return differences
 
 
+def check_layout(report, rows, model, records):
+    """L1·L2 — 정보 줄 묶음과 머리글 사이 빈 행 하나 · 굵게는 정보 줄 키 칸과 머리글 칸만(사장님 실기 피드백 2026-10-08)"""
+    meta = next((i for i, cells in enumerate(records) if not cells[0].startswith("#")), None)
+    if meta is None:
+        return
+    gap = 1 if meta else 0
+    expected = list(range(1, meta + 1)) + list(range(meta + 1 + gap, len(records) + 1 + gap))
+    actual = [number for number, _ in rows]
+    first = next((i for i, (got, want) in enumerate(zip(actual, expected)) if got != want), min(len(actual), len(expected)))
+    report.check("L1", actual == expected,
+                 f"행 번호 {actual[first:first + 3]} ≠ 기대 {expected[first:first + 3]}(정보 줄 {meta}개 — 머리글은 {meta + 1 + gap}행)")
+    header_row = meta + 1 + gap
+    want_bold = {f"A{number}" for number in range(1, meta + 1)}
+    want_bold |= {f"{column_letter(column)}{header_row}" for column, text in enumerate(records[meta]) if text}
+    got_bold = {reference for reference, cell in model.items() if cell[4]}
+    report.check("L2", got_bold == want_bold,
+                 f"굵은 칸 — 더 {sorted(got_bold - want_bold)} · 빠짐 {sorted(want_bold - got_bold)}")
+
+
 def check_file(path, kind):
     name = KINDS[kind]
     report = Report(f"{Path(path).name} ↔ {name}.original.csv")
@@ -429,6 +468,7 @@ def check_file(path, kind):
         rows, model, columns, raw_strings = sheet
         records = read_csv_records(SAMPLES / f"{name}.original.csv")
         check_cells(report, rows, records, raw_strings)
+        check_layout(report, rows, model, records)
         cell_count = sum(1 for _, cells in rows for kind_, _ in cells if kind_ != "blank")
         report.note(f"행 {len(rows)} · 셀 {cell_count} · 공유 문자열 {len(raw_strings)} · 숫자 셀 "
                     f"{sum(1 for v in model.values() if v[0] == 'number')}")
@@ -449,7 +489,7 @@ def compare(path, base_path, kind, model, columns):
         if got is None or want is None or got[:2] != want[:2]:
             contract.append(f"셀 {reference}: {want[:2] if want else None} → {got[:2] if got else None}")
         elif got[2:] != want[2:]:
-            info.append(f"셀 {reference} 서식: numFmt·줄바꿈 {want[2:]} → {got[2:]}")
+            info.append(f"셀 {reference} 서식: numFmt·줄바꿈·굵게 {want[2:]} → {got[2:]}")
     if columns != base_columns:
         info.append(f"열: {[(c[0], c[2], c[4]) for c in base_columns]} → {[(c[0], c[2], c[4]) for c in columns]}")
     added = sorted(set(book.namelist()) - set(base_book.parts))
@@ -483,7 +523,7 @@ def main():
             for failure in report.failures:
                 print(f"   실패 {failure}")
         else:
-            print("   통과 Z1~Z5 X1~X6 S1~S5 C1(셀 차이 0) A29(위험 시작 글자 0) A47(개인 정보 0)")
+            print("   통과 Z1~Z5 X1~X6 S1~S5 L1·L2(빈 행 자리·굵은 칸) C1(셀 차이 0) A29(위험 시작 글자 0) A47(개인 정보 0)")
         if args.against:
             contract, info = compare(path, args.against, kind, model, columns)
             print(f"   -- 차이 ↔ {args.against.name}")
