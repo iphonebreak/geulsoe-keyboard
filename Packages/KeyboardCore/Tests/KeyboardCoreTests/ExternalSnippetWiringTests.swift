@@ -160,8 +160,8 @@ struct ExternalSnippetWiringTests {
     @Test("D19 회귀 — 붙여넣기 칩이 있으면 외부 팩 템플릿 칩도 같은 줄에 없다")
     func pasteChipStillWins() throws {
         let hit = try #require(matcher(order: [.pack("num")]).suggestion(forTail: "사자성어 12번"))
-        #expect(SnippetChipGate.visibleSnippet(hit, isDismissed: false, hasPasteChip: true) == nil)
-        #expect(SnippetChipGate.visibleSnippet(hit, isDismissed: false, hasPasteChip: false) == hit)
+        #expect(SnippetChipGate.visibleSnippet(hit, isDismissed: false, hasPasteChip: true, allowsInsertion: true) == nil)
+        #expect(SnippetChipGate.visibleSnippet(hit, isDismissed: false, hasPasteChip: false, allowsInsertion: true) == hit)
     }
 
     // MARK: 칩 탭 — 기존 insertSnippet(꼬리 정합·학습 제외) 그대로

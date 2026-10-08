@@ -770,11 +770,20 @@ final class KeyboardViewController: UIInputViewController {
         let chip = PasteChipGate.visibleChip(
             pasteSuggestion, hasFullAccess: hasFullAccess, isSecureTextEntry: secure,
             isSuppressedByTyping: pasteChipSuppressedByTyping)
+        // ★ K4(2026-10-08): 선택 영역이 있으면 지우고 넣는 치환 후보(채움글·U7·성경 배지·추천단어·이모지)를 띄우지 않는다 — 탭해도
+        //   `InputController`가 같은 식으로 거절한다(첫 `deleteBackward`가 선택 영역을 지워 지울 개수가 어긋난다). 유무만 본다.
+        //   secure는 읽지 않는다(어차피 후보가 없다). 호스트가 선택만 바꿀 때 이 함수가 불리는지는 호스트에 달렸다 — 탭 거절이 최종 방어다
+        let hasSelection = !secure && inputController.hasSelectedText
+        // ★ K1(2026-10-08): 채움글을 넣은 뒤 문서가 안 바뀐 동안(다음 사용자 편집 전) 채움글 칩·U7·성경 배지를 보류한다 —
+        //   본문이 자기 단축어로 끝나면 같은 칩이 곧바로 다시 떠 퇴장 중 재탭이 두 번 넣었다. 식은 `ReplacementGate`
+        let allowsSnippetInsertion = ReplacementGate.allowsSnippetInsertion(
+            isHeldAfterInsertion: inputController.holdsSnippetsAfterInsertion, hasSelectedText: hasSelection)
         // ★ D19(2026-10-06): **붙여넣기 칩이 채움글 칩(날짜 칩 포함)보다 먼저다** — 붙여넣기 칩이 있으면 그 줄은
         //   `[붙여넣기 칩][✕]`만이고, ✕로 칩을 물리면(클립보드 소비) 채움글 칩(+✕)이 나온다. 그 ✕는 기존 채움글 ✕
         //   그대로(`dismissedSnippetTail`). 예전 주석은 「채움글 > 붙여넣기」라 적었지만 실제로는 둘이 한 줄에 함께 떴다.
         let snippet = SnippetChipGate.visibleSnippet(
-            matched, isDismissed: Self.dismissedSnippetTail != nil, hasPasteChip: chip != nil)
+            matched, isDismissed: Self.dismissedSnippetTail != nil, hasPasteChip: chip != nil,
+            allowsInsertion: allowsSnippetInsertion)
         // U7 — 후보 패널은 칩이 그 구간 그대로이고 꼬리가 그 trigger로 끝나는 동안만 연다(AC-41, 8-F). 칩이 사라졌거나(편집·✕·
         //   붙여넣기 칩) 구간이 바뀌었거나 호스트가 커서·글자를 바꿨으면 즉시 닫는다 — 눌러도 거절되는 목록을 남기지 않는다.
         //   메아리 sync로 꼬리가 흔들려도 trigger로 끝나는 한 닫지 않는다(지시서 R5)
@@ -832,11 +841,15 @@ final class KeyboardViewController: UIInputViewController {
             // 이제 `typedText`를 쓰는 곳은 **구절 삽입**뿐인데, 꼬리가 어긋나면
             // `insertSnippet`의 정합 검사가 **조용히 거절한다**(문서는 안전하지만 탭이 먹통이 된다).
             // 사용자에게는 *눌러도 아무 일이 안 일어나는 패널*로 보인다 — 그 상태로 두느니 닫는다.
+            //
+            // K4 — 선택 영역이 생겨도 닫는다. 구절 행은 `insertSnippet`이라 선택 영역이 있으면 거절된다(같은 「먹통 패널」).
             if let result = bibleSearchScheduler?.result,
-               !inputController.textTail.hasSuffix(result.typedText) {
+               !inputController.textTail.hasSuffix(result.typedText) || !allowsSnippetInsertion {
                 closeBibleSearchPanel()
             }
-        } else if canSearchBibleNow(tail: inputController.textTail), snippet == nil, chip == nil {
+        } else if allowsSnippetInsertion, canSearchBibleNow(tail: inputController.textTail), snippet == nil, chip == nil {
+            // K1·K4 — 배지의 구절 행도 `insertSnippet` 경로라 보류·선택 영역 동안은 예약하지 않는다(아래 `else`가 결과를 버린다).
+            //   채움글을 넣은 직후 본문 끝 단어로 뜨던 배지도 한 글자 칠 때까지 뜨지 않는다(A안 부작용, 보고서)
             bibleSearchSchedulerMakingIfNeeded().schedule(tail: inputController.textTail)
         } else {
             bibleSearchScheduler?.cancel()
@@ -862,7 +875,7 @@ final class KeyboardViewController: UIInputViewController {
         //   (`textDidChange`는 sync 뒤), sync(userEdited == false)에서는 뽑은 값을 버리지도 새로 뽑지도 않는다 —
         //   호스트가 꼬리를 잠깐 비웠다 다시 세워도 같은 값이다(검증 ⑤-2a 참고 2, `EmojiChipState`).
         let wordsAllowed = WordSuggestionGate.allowsWords(
-            isSecureTextEntry: secure, hasSnippet: snippet != nil, hasPasteChip: chip != nil,
+            isSecureTextEntry: secure, hasSnippet: snippet != nil, hasPasteChip: chip != nil, hasSelectedText: hasSelection,
             isDismissed: dismissedSuggestionWord != nil,
             isSuppressedAfterCursorMove: suppressesWordSuggestionsAfterCursorMove
         ) && suggestionEngine != nil
@@ -990,8 +1003,13 @@ final class KeyboardViewController: UIInputViewController {
             prefix: settings.bibleSnippetPrefixEnabled ? "[\(reference)] " : nil
         )
         let revision = inputController.documentRevision
-        _ = inputController.insertSnippet(suggestion)
+        let inserted = inputController.insertSnippet(suggestion)
         closeBibleSearchPanel()
+        // 거절(꼬리 어긋남·K1 보류·K4 선택 영역) — 문서는 그대로, 패널만 닫고 후보를 다시 낸다(사용자 편집이 아니다)
+        guard inserted else {
+            updateSuggestionBar()
+            return
+        }
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false
         releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
@@ -1088,7 +1106,12 @@ final class KeyboardViewController: UIInputViewController {
         }
         playToolbarHaptic()
         let revision = inputController?.documentRevision
-        inputController?.insertSnippet(suggestion)
+        // 거절(꼬리 어긋남·K1 삽입 뒤 보류·K4 선택 영역) — 문서는 그대로다. 사용자 편집이 아니므로 억제·숨김을 풀지 않고 후보만 다시 낸다
+        //   (후보 행 탭과 같은 처리). 예전에는 거절돼도 `finishSnippetInsertion`(사용자 편집 취급)을 탔다
+        guard inputController?.insertSnippet(suggestion) == true else {
+            updateSuggestionBar()
+            return
+        }
         finishSnippetInsertion(since: revision)
     }
 
@@ -1337,7 +1360,11 @@ final class KeyboardViewController: UIInputViewController {
         } else {
             playToolbarHaptic()
             let revision = inputController?.documentRevision
-            inputController?.completeWord(candidate.insertionText)
+            // K4 — 선택 영역이 있으면 거절된다(문서 무변경). 이모지 칩과 같이 후보만 다시 낸다
+            guard inputController?.completeWord(candidate.insertionText) == true else {
+                updateSuggestionBar()
+                return
+            }
             releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         }
         refreshLayout()
@@ -2362,6 +2389,12 @@ private final class ProxyTextOutput: TextOutput {
     func deleteBackward(_ count: Int) {
         guard let proxy = controller?.textDocumentProxy else { return }
         for _ in 0..<count { proxy.deleteBackward() }
+    }
+
+    /// K4 — 선택 영역 유무만 낸다(글자는 넘기지 않고 어디에도 남기지 않는다 — 보안 규칙). `selectedText`는 프록시의 기본 읽기라
+    /// 전체 접근과 무관하다(Apple 「Creating a custom keyboard」의 프록시 예제, 전체 접근 문서가 묶는 목록에 없음 — Context7 2026-10-08)
+    var hasSelectedText: Bool {
+        controller?.textDocumentProxy.selectedText?.isEmpty == false
     }
 }
 

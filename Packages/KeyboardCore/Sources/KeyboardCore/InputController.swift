@@ -32,6 +32,9 @@ public final class InputController {
     /// 마지막 이모지 칩 삽입 직후의 `documentRevision` — 그 뒤 문서가 안 바뀐 채 온 이모지 칩 탭은 퇴장 중 더블탭이다
     /// (`replaceCurrentWord`의 둘째 층). 값은 정수뿐이다 — 넣은 글자는 기억하지 않는다
     private var revisionAfterEmojiChip: Int?
+    /// 마지막 채움글 삽입 직후의 `documentRevision` — 문서가 그대로인 동안 채움글 칩·삽입을 보류한다(K1, `ReplacementGate.holdsSnippets`).
+    /// 정수뿐이다 — 넣은 본문은 기억하지 않는다
+    private var revisionAfterSnippetInsertion: Int?
     private var automaton = HangulAutomaton()
     private var hangulSource: JamoSource
     /// 문서에 들어가 있는 조합 중 글자 수 (교체 시 지울 개수). pending 문자 포함.
@@ -110,6 +113,15 @@ public final class InputController {
     /// 이동처럼 문서를 안 바꾸는 키는 세지 않는다 — 키 종류 목록이 아니라 실제 쓰기를 세므로 새 키가 생겨도 맞다.
     /// 호스트가 바꾼 문서(sync)는 세지 않는다(우리 쓰기가 아니다).
     public var documentRevision: Int { revisionCounter.revision }
+
+    /// K1 — 채움글을 넣은 뒤 아직 문서가 안 바뀌었나(다음 사용자 편집 전). 참이면 채움글 칩·U7·성경 배지를 띄우지 않고
+    /// `insertSnippet`도 거절한다 — 조립 지점의 표시와 이 거절이 같은 식(`ReplacementGate`)이다
+    public var holdsSnippetsAfterInsertion: Bool {
+        ReplacementGate.holdsSnippets(revisionAfterSnippetInsertion: revisionAfterSnippetInsertion, documentRevision: documentRevision)
+    }
+
+    /// K4 — 호스트 문서에 선택 영역이 있나(유무만). 조립 지점이 후보 표시를 가를 때도 이 값을 쓴다
+    public var hasSelectedText: Bool { output.hasSelectedText }
 
     /// 지금 조합 중인가. 툴바 모드 전환(`ToolbarState.textDidChange`)의 입력이 된다.
     /// 천지인의 pending 점만 떠 있는 상태도 조합 중으로 본다.
@@ -554,10 +566,17 @@ public final class InputController {
     /// 같은 칩이 두 번 들어올 때(퇴장 애니메이션 0.28초 중 더블탭) 2회차가 방금 삽입한 본문 끝을
     /// `triggerLength`만큼 잘라냈다 — 절 범위(`창세기 1:1~13`)면 본문 1,444B가 다시 들어가고
     /// 앞의 10자가 사라진다. 어긋나면 **아무 것도 하지 않는다** (문서를 건드리는 쪽이 늘 더 나쁘다).
+    ///
+    /// **K1·K4(2026-10-08).** 꼬리 정합만으로는 본문이 자기 단축어로 끝날 때 2회차가 다시 통과한다 — 직전 채움글 삽입 뒤 문서가
+    /// 그대로면 거절한다(`holdsSnippetsAfterInsertion`). 선택 영역이 있어도 거절한다(첫 `deleteBackward`가 선택 영역을 지운다).
+    /// 거절은 조합 확정 **전**이다 — 문서도 조합 상태도 그대로 둔다.
     /// - Returns: 실제로 삽입했으면 true.
     @discardableResult
     public func insertSnippet(_ suggestion: SnippetSuggestion) -> Bool {
-        guard !suggestion.trigger.isEmpty, textTail.hasSuffix(suggestion.trigger) else { return false }
+        guard !suggestion.trigger.isEmpty, textTail.hasSuffix(suggestion.trigger),
+              ReplacementGate.allowsSnippetInsertion(isHeldAfterInsertion: holdsSnippetsAfterInsertion,
+                                                     hasSelectedText: output.hasSelectedText)
+        else { return false }
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 (기존 규칙) — 문서 텍스트는 안 변한다
         output.deleteBackward(suggestion.triggerLength)
@@ -584,6 +603,8 @@ public final class InputController {
         // 규칙으로 **다음 구분자(공백·리턴)까지** 막는다 (`insertProvidedText`와 동일).
         suppressesNextWordCommit = true
         blocksLearningUntilSeparator = true
+        // K1 — 이 삽입 뒤 문서가 바뀌기 전까지 다음 채움글을 보류한다(방금 넣은 글 끝에서 다시 맞은 구간)
+        revisionAfterSnippetInsertion = documentRevision
         updateAutoCapitalization()
         return true
     }
@@ -592,11 +613,15 @@ public final class InputController {
 
     /// 입력 중인 단어를 후보로 바꾼다 — 채움글과 같은 delete/insert 메커니즘.
     /// 후행 공백은 넣지 않는다 (교착어 — 조사·어미를 이어 치는 흐름, PDR word-suggestions).
-    public func completeWord(_ word: String) {
+    /// 선택 영역이 있으면 아무 것도 하지 않는다(K4 — 채움글과 같은 이유).
+    /// - Returns: 실제로 바꿨으면 true.
+    @discardableResult
+    public func completeWord(_ word: String) -> Bool {
+        guard ReplacementGate.allowsReplacement(hasSelectedText: output.hasSelectedText) else { return false }
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 — 문서 텍스트는 안 변한다
         let current = Self.trailingHangulRun(of: committedTail)
-        guard !current.isEmpty, !word.isEmpty else { return }
+        guard !current.isEmpty, !word.isEmpty else { return false }
         output.deleteBackward(current.count)
         output.insertText(word)
         committedTail.removeLast(min(current.count, committedTail.count))
@@ -605,6 +630,7 @@ public final class InputController {
         // 여기서 이미 알렸다 — 이어지는 공백/리턴이 같은 단어를 또 보내면 이중 카운트다
         suppressesNextWordCommit = true
         updateAutoCapitalization()
+        return true
     }
 
     /// 이모지 칩 탭 — 치던 단어를 지우고 `text`(`🚗 자동차` 또는 `🚗`)를 넣는다(PDR emoji-word-suggestion 1-2·1-3절).
@@ -619,11 +645,13 @@ public final class InputController {
     /// **학습으로 보내지 않는다**(5-3절, 수용 기준 4) — `completeWord`와 달리 `onWordCommitted`를 부르지 않는다.
     /// 이모지가 섞인 삽입분은 사용자가 친 단어가 아니다. 다음 구분자가 넣은 「자동차」를 다시 보내지 않게
     /// `suppressesNextWordCommit`을 켜고, 이어 치면 풀려 「자동차는」처럼 사용자가 완성한 run은 학습된다.
+    /// 선택 영역이 있으면 거절한다(K4 — `ReplacementGate.allowsReplacement`).
     /// - Returns: 실제로 바꿨으면 true.
     @discardableResult
     public func replaceCurrentWord(_ sourceWord: String, with text: String) -> Bool {
         guard !sourceWord.isEmpty, !text.isEmpty, currentWord == sourceWord,
-              revisionAfterEmojiChip != documentRevision
+              revisionAfterEmojiChip != documentRevision,
+              ReplacementGate.allowsReplacement(hasSelectedText: output.hasSelectedText)
         else { return false }
         lastSpaceTimestamp = nil
         commitComposition()  // 조합 확정 + 소스 리셋 — 문서 텍스트는 안 변한다
@@ -753,4 +781,6 @@ private final class RevisionCountingOutput: TextOutput {
         if count > 0 { revision += 1 }
         base.deleteBackward(count)
     }
+
+    var hasSelectedText: Bool { base.hasSelectedText }
 }

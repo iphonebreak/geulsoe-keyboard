@@ -52,6 +52,13 @@ public struct PackStats: Codable, Equatable, Sendable {
                          bytes: Self.serializedBytes(of: pack), items: pack.entries.count + (pack.template?.items.count ?? 0))
     }
 
+    /// 항목 직렬화 바이트의 **하한** — 문자열 필드(단축어·제목·본문)의 원시 UTF-8 바이트 합(K2). JSON은 이 글자들을 UTF-8 그대로 쓰고
+    /// 키·따옴표·쉼표·escape(`\"`·`\/`·`\n`·`\u0000`)는 **더하기만** 하므로 `serializedBytes(of: entry)` 이상일 수 없다(시험이 고정).
+    /// 인코드하지 않는다 — 네이티브 문자열의 `utf8.count`는 길이를 다시 세지 않는다
+    static func rawUTF8Bytes(of entry: SnippetEntry) -> Int {
+        entry.triggers.reduce(entry.title.utf8.count + entry.body.utf8.count) { $0 + $1.utf8.count }
+    }
+
     private static func needleCharacters(of entries: [SnippetEntry]) -> [Int] {
         entries.flatMap { entry in
             entry.triggers.map { SnippetEntry.normalizedTrigger($0).count }.filter { $0 > 0 }
@@ -183,9 +190,9 @@ public enum ActivePackBudget {
         }
     }
 
-    /// 9-3 — 내 채움글을 **한 번 훑어** 전체 stats와 싣는 개수를 함께 낸다. 키보드(`PackSnapshotLoader`)와 앱(`PackStore` 판정 입력·
-    /// 「일부만 사용 중」 안내)이 이 함수 하나를 쓴다(AC-8). 저장 순서대로 한도까지만 싣고 나머지는 지우지 않는다. 내장은 번들 고정량이라
-    /// 먼저 차감하고 항상 싣는다.
+    /// 9-3 — 내 채움글을 **한 번 훑어** 전체 stats와 싣는 개수를 함께 낸다. 앱(`PackStore` 판정 입력·「일부만 사용 중」 안내)이 쓴다.
+    /// 키보드(`PackSnapshotLoader`)는 넘으면 멈추는 `userSnippetLoad`를 쓴다(K2) — 싣는 개수는 이 함수와 같다(AC-8, 시험이 고정).
+    /// 저장 순서대로 한도까지만 싣고 나머지는 지우지 않는다. 내장은 번들 고정량이라 먼저 차감하고 항상 싣는다.
     ///
     /// R23(P-2 6-4) — 예전에는 기준 바이트를 내려고 배열 전체를 다시 인코드했고(넘으면 항목마다 두 번 더), 재구성 피크가 내 채움글
     /// 크기의 약 2배만큼 늘었다. 이제 항목마다 **한 번만** 인코드해 앞에서부터 더한다(항등식 `2 + Σ항목 + (n−1)`). 처음 넘는 자리가
@@ -204,6 +211,71 @@ public enum ActivePackBudget {
             }
         }
         return UserSnippetUsage(stats: stats, loadableCount: loadable ?? entries.count)
+    }
+
+    /// 키보드 로더의 내 채움글 몫 — `userSnippetLoad`의 결과(K2)
+    public struct UserSnippetLoad: Equatable, Sendable {
+        public enum Baseline: Equatable, Sendable {
+            /// 내 채움글 + 내장이 한도 안 — 내 채움글 **전체** stats(`userSnippetUsage(...).stats`와 같다)
+            case fits(PackStats)
+            /// 넘는다 — 멈춘 자리에서 **확인된** 넘는 항목(비지 않음). 끝까지 세지 않으므로 전체를 센 `baselineOverflow`의
+            /// 부분집합(하한)이다. 키보드는 넘었는지만 본다 — 정확한 넘는 항목·비용은 앱(`userSnippetUsage`)이 센다
+            case overflow([PackBudgetDimension])
+        }
+
+        /// 싣는 개수 — `userSnippetUsage(...).loadableCount`와 **같다**(AC-8)
+        public var loadableCount: Int
+        public var baseline: Baseline
+
+        public init(loadableCount: Int, baseline: Baseline) {
+            self.loadableCount = loadableCount
+            self.baseline = baseline
+        }
+
+        /// 넘는 항목 — 한도 안이면 빈 배열
+        public var overflowDimensions: [PackBudgetDimension] {
+            if case .overflow(let dimensions) = baseline { return dimensions }
+            return []
+        }
+    }
+
+    /// K2(codex 반론 v1.3.0 #2) — **키보드 전용** 내 채움글 몫. 싣는 개수는 `userSnippetUsage`와 같고(AC-8), 넘는 것이 확정되면
+    /// **그 자리에서 멈춘다.** 내 채움글 본문에는 읽기 상한이 없어 10MB 한 항목도 저장될 수 있는데, `userSnippetUsage`는 그 항목을
+    /// 통째로 인코드한 **뒤** 넘는 것을 알았고 넘은 뒤에도 끝까지 인코드했다.
+    ///
+    /// 1. 항목마다 **인코드 전에** 하한(`rawUTF8Bytes` + 앞 쉼표, 개수 +1)을 더해 본다 — 하한이 넘으면 정확 계산도 이 자리에서 넘으므로
+    ///    인코드하지 않고 「초과」로 끝낸다. 하한에 없는 단축어 수·글자 수는 인코드하며 센다(단축어는 설정이 40자로 막는다).
+    /// 2. 인코드한 누적이 넘어도 그 자리에서 끝낸다 — 뒤 항목은 인코드하지 않는다.
+    ///
+    /// 앱(`PackStore`)은 이 함수를 쓰지 않는다 — 커밋 판정(R21)이 넘은 뒤 **전체** 비용을 비교하므로 정확 통계(`userSnippetUsage`)가 필요하다.
+    public static func userSnippetLoad(
+        _ entries: [SnippetEntry], builtIn: PackStats, limits: PackBudgetLimits = .candidate
+    ) -> UserSnippetLoad {
+        userSnippetLoad(entries, builtIn: builtIn, limits: limits, entryStats: PackStats.of(entry:at:))
+    }
+
+    /// 시험용 — `entryStats`(항목 하나의 몫 = 인코드 1회)를 바꿔 끼워 **몇 항목을 인코드했는지** 센다
+    static func userSnippetLoad(
+        _ entries: [SnippetEntry], builtIn: PackStats, limits: PackBudgetLimits,
+        entryStats: (SnippetEntry, Int) -> PackStats
+    ) -> UserSnippetLoad {
+        var stats = PackStats.emptyArray
+        for (index, entry) in entries.enumerated() {
+            let comma = index > 0 ? 1 : 0
+            let floor = stats + PackStats(needleCount: 0, needleChars: 0, bytes: PackStats.rawUTF8Bytes(of: entry) + comma, items: 1)
+            let floorOverflow = overflowing(builtIn + floor, largestPackBytes: 0, limits: limits)
+            guard floorOverflow.isEmpty else {
+                return UserSnippetLoad(loadableCount: index, baseline: .overflow(floorOverflow))
+            }
+            stats = stats + entryStats(entry, index)
+            let overflow = overflowing(builtIn + stats, largestPackBytes: 0, limits: limits)
+            guard overflow.isEmpty else {
+                return UserSnippetLoad(loadableCount: index, baseline: .overflow(overflow))
+            }
+        }
+        // 항목이 없으면 내장 + 「[]」만으로 넘을 수 있다(있으면 위에서 이미 봤다)
+        let overflow = overflowing(builtIn + stats, largestPackBytes: 0, limits: limits)
+        return UserSnippetLoad(loadableCount: entries.count, baseline: overflow.isEmpty ? .fits(stats) : .overflow(overflow))
     }
 
     static func overflowing(_ usage: PackStats, largestPackBytes: Int, limits: PackBudgetLimits) -> [PackBudgetDimension] {

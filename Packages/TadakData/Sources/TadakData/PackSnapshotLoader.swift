@@ -40,6 +40,8 @@ public struct PackSnapshotLoader: Sendable {
         public var packs: [String: ExternalPack]
         public var includedPackIDs: [String]
         public var excluded: [ActivePackBudget.Exclusion]
+        /// baseline이 넘는 항목 — 키보드는 넘는 것이 확정된 자리에서 세기를 멈추므로 **그때까지 확인된 항목**(하한, K2)이다.
+        /// 비었는지만 뜻이 있다. 정확한 넘는 항목은 앱 `PackStore.evaluation()`이 센다
         public var baselineOverflow: [PackBudgetDimension]
         /// 외부 팩을 통째로 뺀 이유(정상이면 nil)
         public var dropped: DropReason?
@@ -129,15 +131,15 @@ public struct PackSnapshotLoader: Sendable {
 
     private func readSnapshot(generation: Int, user: [SnippetEntry], builtIn: [SnippetEntry]) -> Outcome {
         let builtInStats = PackStats.of(entries: builtIn)
-        // 내 채움글은 항목마다 한 번만 인코드해 센다 — 배열 전체를 다시 인코드하지 않는다(R23, 앱 `PackStore`와 같은 함수 — AC-8)
-        let usage = ActivePackBudget.userSnippetUsage(user, builtIn: builtInStats, limits: limits)
-        let baseline = usage.stats + builtInStats
-        let baselineCheck = ActivePackBudget.evaluate(baseline: baseline, packs: [], limits: limits)
+        // 내 채움글은 항목마다 한 번만 인코드해 센다(R23). 넘는 것이 확정되면 그 자리에서 멈춘다 — 인코드 전 원시 바이트 하한으로 거대 항목을
+        // 인코드하지 않고, 넘은 뒤 항목도 인코드하지 않는다(K2). 싣는 개수는 앱 `PackStore`의 정확 통계 함수와 같다(AC-8)
+        let userLoad = ActivePackBudget.userSnippetLoad(user, builtIn: builtInStats, limits: limits)
         // 9-3 — baseline이 넘으면 외부 팩은 읽지도 않는다. 사용자 문구는 저장 순서대로 한도까지
-        guard baselineCheck.baselineOverflow.isEmpty else {
-            return .loaded(makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(usage.loadableCount)), packs: [:],
-                                      included: [], excluded: [], baselineOverflow: baselineCheck.baselineOverflow))
+        guard case .fits(let userStats) = userLoad.baseline else {
+            return .loaded(makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(userLoad.loadableCount)), packs: [:],
+                                      included: [], excluded: [], baselineOverflow: userLoad.overflowDimensions))
         }
+        let baseline = userStats + builtInStats
         guard generation > 0 else {   // 아직 snapshot이 없다 — 내 채움글·내장만(지금과 같다)
             return .loaded(makeResult(order: SnippetSourceSlot.defaultOrder, user: user, packs: [:],
                                       included: [], excluded: [], baselineOverflow: []))
@@ -226,10 +228,9 @@ public struct PackSnapshotLoader: Sendable {
 
     private func baselineOnly(user: [SnippetEntry], builtIn: [SnippetEntry], dropped: DropReason) -> Result {
         let builtInStats = PackStats.of(entries: builtIn)
-        let usage = ActivePackBudget.userSnippetUsage(user, builtIn: builtInStats, limits: limits)
-        let check = ActivePackBudget.evaluate(baseline: usage.stats + builtInStats, packs: [], limits: limits)
-        var result = makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(usage.loadableCount)), packs: [:],
-                                included: [], excluded: [], baselineOverflow: check.baselineOverflow)
+        let userLoad = ActivePackBudget.userSnippetLoad(user, builtIn: builtInStats, limits: limits)   // 읽은 경로와 같은 함수(K2)
+        var result = makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(userLoad.loadableCount)), packs: [:],
+                                included: [], excluded: [], baselineOverflow: userLoad.overflowDimensions)
         result.dropped = dropped
         return result
     }

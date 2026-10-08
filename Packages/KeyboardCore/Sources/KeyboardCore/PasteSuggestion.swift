@@ -120,10 +120,12 @@ public enum SnippetChipGate {
     ///   - matched: 꼬리로 맞춘 채움글 후보(`SnippetMatcher`)
     ///   - isDismissed: ✕로 숨긴 꼬리가 남아 있다(`dismissedSnippetTail`) — 사용자 편집으로 꼬리가 바뀔 때 풀린다
     ///   - hasPasteChip: 붙여넣기 칩이 보인다(`PasteChipGate.visibleChip`의 결과)
+    ///   - allowsInsertion: 지금 채움글을 넣을 수 있다(`ReplacementGate.allowsSnippetInsertion` — K1 삽입 뒤 보류·K4 선택 영역).
+    ///     거짓이면 칩을 띄우지 않는다 — `insertSnippet`이 같은 식으로 거절하므로 띄우면 눌러도 안 되는 칩이 된다
     public static func visibleSnippet(
-        _ matched: SnippetSuggestion?, isDismissed: Bool, hasPasteChip: Bool
+        _ matched: SnippetSuggestion?, isDismissed: Bool, hasPasteChip: Bool, allowsInsertion: Bool
     ) -> SnippetSuggestion? {
-        guard !isDismissed, !hasPasteChip else { return nil }
+        guard !isDismissed, !hasPasteChip, allowsInsertion else { return nil }
         return matched
     }
 }

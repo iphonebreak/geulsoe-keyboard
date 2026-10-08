@@ -111,6 +111,59 @@ struct UserSnippetUsageTests {
         #expect(fits > 300 && truncated > 300 && none > 300, "전부 \(fits) · 일부 \(truncated) · 없음 \(none)")
     }
 
+    /// K2 — 키보드 조기 종료(`userSnippetLoad`)가 앱 정확 통계(`userSnippetUsage`)와 **싣는 개수·넘음 여부**에서 같다(AC-8).
+    /// 넘지 않으면 전체 stats도 같고, 넘으면 넘는 항목은 정확 계산의 비지 않은 부분집합(하한)이다. 하한의 전제(인코드 ≥ 원시)도 함께 본다
+    @Test("무작위 비교 — 키보드 조기 종료가 앱 함수와 싣는 개수·넘음 여부가 같다 (4,000건, K2)")
+    func loadMatchesUsage() {
+        var generator = SplitMix64(seed: 0x5EED_00C2)
+        var mismatches: [String] = []
+        var fits = 0, truncated = 0, none = 0, floorHits = 0
+        for round in 0..<4_000 {
+            var entries = (0..<Int.random(in: 0...12, using: &generator)).map { _ in Self.randomEntry(&generator) }
+            // 가끔 큰 항목을 끼워 하한 경로(인코드 없이 초과)를 지나게 한다
+            if !entries.isEmpty, Int.random(in: 0..<4, using: &generator) == 0 {
+                entries[Int.random(in: 0..<entries.count, using: &generator)].body = String(repeating: "가", count: .random(in: 300...1_200, using: &generator))
+            }
+            let builtIn = Bool.random(using: &generator)
+                ? PackStats.zero
+                : PackStats(needleCount: .random(in: 0...5, using: &generator), needleChars: .random(in: 0...30, using: &generator),
+                            bytes: .random(in: 0...300, using: &generator), items: .random(in: 0...3, using: &generator))
+            let limits = PackBudgetLimits(needleCount: .random(in: 0...25, using: &generator),
+                                          needleChars: .random(in: 0...150, using: &generator),
+                                          bytes: .random(in: 0...2_500, using: &generator),
+                                          items: .random(in: 0...14, using: &generator),
+                                          peakBytes: Int.random(in: 0..<10, using: &generator) < 3
+                                              ? .random(in: 0...6_000, using: &generator) : nil)
+
+            let usage = ActivePackBudget.userSnippetUsage(entries, builtIn: builtIn, limits: limits)
+            let exact = ActivePackBudget.evaluate(baseline: usage.stats + builtIn, packs: [], limits: limits).baselineOverflow
+            var encoded = 0
+            let load = ActivePackBudget.userSnippetLoad(entries, builtIn: builtIn, limits: limits) { entry, index in
+                encoded += 1
+                return PackStats.of(entry: entry, at: index)
+            }
+            let agrees: Bool
+            switch load.baseline {
+            case .fits(let stats): agrees = exact.isEmpty && stats == usage.stats
+            case .overflow(let dimensions): agrees = !exact.isEmpty && !dimensions.isEmpty && Set(dimensions).isSubset(of: Set(exact))
+            }
+            if !agrees || load.loadableCount != usage.loadableCount || encoded > min(entries.count, load.loadableCount + 1)
+                || !entries.allSatisfy({ PackStats.rawUTF8Bytes(of: $0) <= PackStats.serializedBytes(of: $0) }) {
+                mismatches.append("#\(round) n=\(entries.count) usage=\(usage) load=\(load) encoded=\(encoded)")
+            }
+            if encoded == load.loadableCount, load.loadableCount < entries.count { floorHits += 1 }
+            switch usage.loadableCount {
+            case entries.count: fits += 1
+            case 0: none += 1
+            default: truncated += 1
+            }
+        }
+        #expect(mismatches.isEmpty, "\(mismatches.count)건 — \(mismatches.prefix(3))")
+        // 분포 가드 — 세 갈래와 「인코드 없이 멈춤」(하한·개수) 경로를 고루 지나야 이 비교가 의미 있다
+        #expect(fits > 300 && truncated > 300 && none > 300 && floorHits > 300,
+                "전부 \(fits) · 일부 \(truncated) · 없음 \(none) · 인코드 없이 멈춤 \(floorHits)")
+    }
+
     // MARK: - 기준(옛 계산)
 
     /// 옛 `PackStats.of(entries:)` — 배열 전체를 한 번에 인코드

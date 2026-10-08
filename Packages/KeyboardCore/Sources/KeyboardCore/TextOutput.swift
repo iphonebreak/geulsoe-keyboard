@@ -8,4 +8,11 @@
 public protocol TextOutput: AnyObject {
     func insertText(_ text: String)
     func deleteBackward(_ count: Int)
+    /// 호스트 문서에 선택 영역이 있나(K4 — `ReplacementGate.allowsReplacement`). **유무만** 낸다 — 선택한 글자는 넘기지 않는다.
+    /// 쓰기는 아니지만 치환(지우고 넣기)이 안전한지가 이 값에 달려 있어 쓰기 인터페이스 옆에 둔다. 기본은 없음(시험 fake)
+    var hasSelectedText: Bool { get }
+}
+
+public extension TextOutput {
+    var hasSelectedText: Bool { false }
 }

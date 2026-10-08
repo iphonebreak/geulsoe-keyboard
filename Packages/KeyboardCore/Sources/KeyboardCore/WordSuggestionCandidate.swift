@@ -55,12 +55,15 @@ public enum WordSuggestionGate {
     ///   - hasPasteChip: 붙여넣기 칩(일반 텍스트·인증번호)이 떠 있다 — `[칩][✕]`만 보인다(D18, 2026-10-06).
     ///     ✕로 칩을 물리면 이 값이 거짓이 되어 지금 단어의 후보가 나온다. v1.2.0부터 둘이 한 줄에 함께 떠
     ///     말줄임으로 안 보였다(실기 세션 1 K7). 칩이 가린 동안은 sync뿐이라 이모지 기억은 버려지지 않는다(D16)
+    ///   - hasSelectedText: 호스트 문서에 선택 영역이 있다 — 추천단어 탭(`completeWord`)·이모지 칩(`replaceCurrentWord`)이
+    ///     같은 식으로 거절하므로 띄우지 않는다(K4, `ReplacementGate.allowsReplacement`)
     ///   - isDismissed: ✕로 내린 단어를 이어 치는 중
     ///   - isSuppressedAfterCursorMove: 커서 이동 뒤 다음 키 입력 전
     public static func allowsWords(
-        isSecureTextEntry: Bool, hasSnippet: Bool, hasPasteChip: Bool,
+        isSecureTextEntry: Bool, hasSnippet: Bool, hasPasteChip: Bool, hasSelectedText: Bool,
         isDismissed: Bool, isSuppressedAfterCursorMove: Bool
     ) -> Bool {
-        !isSecureTextEntry && !hasSnippet && !hasPasteChip && !isDismissed && !isSuppressedAfterCursorMove
+        !isSecureTextEntry && !hasSnippet && !hasPasteChip && ReplacementGate.allowsReplacement(hasSelectedText: hasSelectedText)
+            && !isDismissed && !isSuppressedAfterCursorMove
     }
 }

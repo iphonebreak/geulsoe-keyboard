@@ -390,11 +390,12 @@ struct WordSuggestionCandidateTests {
     @Test("후보 줄 게이트 — secure·채움글 칩·붙여넣기 칩(D18)·✕ 억제·커서 이동 억제 중 하나라도 있으면 추천단어(이모지 포함)를 계산하지 않는다 (4-4절)")
     func gate() {
         #expect(WordSuggestionGate.allowsWords(
-            isSecureTextEntry: false, hasSnippet: false, hasPasteChip: false,
+            isSecureTextEntry: false, hasSnippet: false, hasPasteChip: false, hasSelectedText: false,
             isDismissed: false, isSuppressedAfterCursorMove: false))
-        for blocked in 0..<5 {
+        for blocked in 0..<6 {
             #expect(!WordSuggestionGate.allowsWords(
                 isSecureTextEntry: blocked == 0, hasSnippet: blocked == 1, hasPasteChip: blocked == 2,
+                hasSelectedText: blocked == 5,   // K4 — 선택 영역
                 isDismissed: blocked == 3, isSuppressedAfterCursorMove: blocked == 4))
         }
     }
@@ -600,6 +601,7 @@ private struct PasteRowHarness {
     private var wordsAllowed: Bool {
         WordSuggestionGate.allowsWords(
             isSecureTextEntry: false, hasSnippet: snippet != nil, hasPasteChip: chip != nil,
+            hasSelectedText: chips.controller.hasSelectedText,
             isDismissed: false, isSuppressedAfterCursorMove: false)
     }
 
@@ -613,7 +615,10 @@ private struct PasteRowHarness {
             pasteSuggestion, hasFullAccess: hasFullAccess, isSecureTextEntry: false,
             isSuppressedByTyping: suppressedByTyping)
         snippet = SnippetChipGate.visibleSnippet(
-            matched, isDismissed: dismissedSnippetTail != nil, hasPasteChip: chip != nil)
+            matched, isDismissed: dismissedSnippetTail != nil, hasPasteChip: chip != nil,
+            allowsInsertion: ReplacementGate.allowsSnippetInsertion(
+                isHeldAfterInsertion: chips.controller.holdsSnippetsAfterInsertion,
+                hasSelectedText: chips.controller.hasSelectedText))
         chips.resolver = wordsAllowed ? baseResolver : nil
         chips.recompute(isUserEdit: userEdited)
         row = WordSuggestionCandidate.row(
@@ -706,7 +711,7 @@ struct PasteChipWordRowTests {
     func snippetPriorityUnchanged() {
         for hasPasteChip in [false, true] {
             #expect(!WordSuggestionGate.allowsWords(
-                isSecureTextEntry: false, hasSnippet: true, hasPasteChip: hasPasteChip,
+                isSecureTextEntry: false, hasSnippet: true, hasPasteChip: hasPasteChip, hasSelectedText: false,
                 isDismissed: false, isSuppressedAfterCursorMove: false))
         }
     }
@@ -847,9 +852,10 @@ struct PasteChipSnippetRowTests {
     @Test("채움글 칩 게이트 — 붙여넣기 칩·✕ 숨김 중 하나라도 있으면 없음")
     func snippetChipGate() {
         let matched = SnippetSuggestion(trigger: "새해인사", title: "새해 인사", body: "새해 복 많이 받으세요")
-        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: false, hasPasteChip: false) == matched)
-        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: true, hasPasteChip: false) == nil)
-        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: false, hasPasteChip: true) == nil)
-        #expect(SnippetChipGate.visibleSnippet(nil, isDismissed: false, hasPasteChip: false) == nil)
+        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: false, hasPasteChip: false, allowsInsertion: true) == matched)
+        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: true, hasPasteChip: false, allowsInsertion: true) == nil)
+        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: false, hasPasteChip: true, allowsInsertion: true) == nil)
+        #expect(SnippetChipGate.visibleSnippet(matched, isDismissed: false, hasPasteChip: false, allowsInsertion: false) == nil, "K1·K4")
+        #expect(SnippetChipGate.visibleSnippet(nil, isDismissed: false, hasPasteChip: false, allowsInsertion: true) == nil)
     }
 }
