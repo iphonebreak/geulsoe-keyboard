@@ -25,9 +25,10 @@ private let sha256BeforeBlankLine: [PackSample.Kind: String] = [
 
 /// 제작 기록 표의 xlsx SHA-256 — 1-e ④-가 `tools/generate_sample_xlsx.py` 산출물(`#출처`판·열 너비·본문 줄바꿈). 다시 만들면 기록과 함께 고친다.
 /// 2026-10-08 실기 피드백판 — 정보 줄 키·머리글 칸 굵게 · 정보 줄 묶음과 머리글 사이 빈 행 하나(셀 값은 그대로)
+/// 2026-10-08 실기 피드백 3 — 표 영역 칸 네 변 테두리 · 머리글 칸 연한 회색 채우기(셀 값·열 너비·숫자 서식은 그대로)
 private let recordedXLSXSHA256: [PackSample.Kind: String] = [
-    .numbered: "b4111b9aaad725023292b1eb2303a2649240f629c6a41fa58fabca946eec3f45",
-    .phrases: "2940e090dede7584f66eaddd229375c767765b5d9ee65a45f97f33d68e48ad38"
+    .numbered: "b1f9a27ec7347eba44d22a856c2c85bb72d51068ac46229b215e02dd4e4c9377",
+    .phrases: "fb88e798a2c1d02d0debdebf853ddaa669d6d347b209ff7e51f123e0fe82457e"
 ]
 
 /// 기획자 원본 이름 — 시험 픽스처(`Fixtures/`, 4단계에 원본을 그대로 복사)와 문서 폴더에 같은 이름으로 있다
@@ -65,10 +66,26 @@ private func sampleLayout(_ kind: PackSample.Kind) -> (meta: Int, header: Int, r
     return (meta, header, Array(1...meta) + Array(header...(header + data)))
 }
 
-/// 샘플 xlsx의 굵은 칸과 칸 스타일의 숫자 서식 — `xl/styles.xml`의 `fonts`(`<b/>`)·`cellXfs`(fontId·numFmtId)와 시트 칸의 `s`만 본다.
-/// 생성기·파이썬 검사기(L2)와 따로 읽는다
+/// 샘플의 표 영역 칸(실기 피드백 3, 2026-10-08) — 머리글 행부터 마지막 데이터 행까지 × 머리글 열(A·B·C). 정보 줄·빈 행은 들지 않는다
+private func sampleTableCells(_ kind: PackSample.Kind) -> Set<String> {
+    let layout = sampleLayout(kind)
+    return Set((layout.header...(layout.rows.last ?? layout.header)).flatMap { row in ["A", "B", "C"].map { "\($0)\(row)" } })
+}
+
+/// 샘플 xlsx의 굵은 칸·테두리 칸·채우기 칸과 칸 스타일의 숫자 서식 — `xl/styles.xml`의 `fonts`(`<b/>`)·`fills`·`borders`·
+/// `cellXfs`(fontId·fillId·borderId·numFmtId)와 시트 칸의 `s`·열의 `style`만 본다. 생성기·파이썬 검사기(L2~L4)와 따로 읽는다
 struct SampleCellStyles {
     private(set) var boldCells: Set<String> = []
+    /// 네 변 모두 가는 실선(`thin`)·자동/검정 색인 칸 — 실기 피드백 3(2026-10-08)
+    private(set) var thinBoxCells: Set<String> = []
+    /// 어느 변이든 선이 하나라도 있는 칸
+    private(set) var anyBorderCells: Set<String> = []
+    /// 단색(`solid`) 연한 회색 `FFD9D9D9` 채우기 칸(엑셀 「흰색, 배경 1, 15% 더 어둡게」)
+    private(set) var grayFillCells: Set<String> = []
+    /// 채우기가 있는 칸(무늬 `none`이 아닌 것 전부)
+    private(set) var anyFillCells: Set<String> = []
+    /// 테두리·채우기가 있는 열 기본 스타일(`<col style>`) — 있으면 새로 친 칸까지 번진다
+    private(set) var decoratedColumns: [String] = []
     /// `cellXfs` 순서의 numFmtId
     private(set) var numberFormats: [Int] = []
 
@@ -78,22 +95,51 @@ struct SampleCellStyles {
         let sheet = try ElementList(try archive.read("xl/worksheets/sheet1.xml", as: .worksheet))
         var boldFonts: Set<Int> = []
         var fontCount = 0
-        var xfFonts: [Int] = []
+        // fills — 무늬와 앞 색(rgb), borders — 변마다 (선 모양, 색 속성)
+        var fills: [(pattern: String, foreground: String?)] = []
+        var borders: [[String: (style: String?, color: [String: String])]] = []
+        let sides: Set<String> = ["left", "right", "top", "bottom", "diagonal"]
+        var xfs: [(font: Int, fill: Int, border: Int)] = []
         for element in styles.elements {
             switch (element.parent, element.name) {
             case ("fonts", "font"): fontCount += 1
             case ("font", "b") where [nil, "1", "true"].contains(element.attributes["val"]): boldFonts.insert(fontCount - 1)
+            case ("fills", "fill"): fills.append(("none", nil))
+            case ("fill", "patternFill"): fills[fills.count - 1].pattern = element.attributes["patternType"] ?? "none"
+            case ("patternFill", "fgColor"): fills[fills.count - 1].foreground = element.attributes["rgb"]
+            case ("borders", "border"): borders.append([:])
+            case ("border", let side) where sides.contains(side): borders[borders.count - 1][side] = (element.attributes["style"], [:])
+            case (let side?, "color") where sides.contains(side): borders[borders.count - 1][side]?.color = element.attributes
             case ("cellXfs", "xf"):
-                xfFonts.append(Int(element.attributes["fontId"] ?? "0") ?? 0)
-                numberFormats.append(Int(element.attributes["numFmtId"] ?? "0") ?? 0)
+                func id(_ name: String) -> Int { Int(element.attributes[name] ?? "0") ?? 0 }
+                xfs.append((id("fontId"), id("fillId"), id("borderId")))
+                numberFormats.append(id("numFmtId"))
             default: break
             }
         }
-        for element in sheet.elements where element.name == "c" {
-            let style = Int(element.attributes["s"] ?? "0") ?? 0
-            if xfFonts.indices.contains(style), boldFonts.contains(xfFonts[style]), let reference = element.attributes["r"] {
-                boldCells.insert(reference)
+        // 자동(`auto`)·색인 64(엑셀이 「자동」으로 쓰는 값)·검정 rgb만 받는다
+        func isThinAuto(_ side: (style: String?, color: [String: String])?) -> Bool {
+            guard let side, side.style == "thin" else { return false }
+            let color = side.color
+            return color.isEmpty || ["1", "true"].contains(color["auto"]) || color["indexed"] == "64" || color["rgb"] == "FF000000"
+        }
+        for element in sheet.elements {
+            guard let xf = Int(element.attributes[element.name == "col" ? "style" : "s"] ?? "0").flatMap({ xfs.indices.contains($0) ? xfs[$0] : nil })
+            else { continue }
+            let border = borders.indices.contains(xf.border) ? borders[xf.border] : [:]
+            let fill: (pattern: String, foreground: String?) = fills.indices.contains(xf.fill) ? fills[xf.fill] : ("none", nil)
+            let hasBorder = border.values.contains { $0.style != nil && $0.style != "none" }
+            let hasFill = fill.pattern != "none"
+            if element.name == "col" {
+                if hasBorder || hasFill { decoratedColumns.append("\(element.attributes["min"] ?? "?")~\(element.attributes["max"] ?? "?")") }
+                continue
             }
+            guard element.name == "c", let reference = element.attributes["r"] else { continue }
+            if boldFonts.contains(xf.font) { boldCells.insert(reference) }
+            if hasBorder { anyBorderCells.insert(reference) }
+            if ["left", "right", "top", "bottom"].allSatisfy({ isThinAuto(border[$0]) }) { thinBoxCells.insert(reference) }
+            if hasFill { anyFillCells.insert(reference) }
+            if fill.pattern == "solid" && fill.foreground?.uppercased() == "FFD9D9D9" { grayFillCells.insert(reference) }
         }
     }
 
@@ -441,6 +487,62 @@ struct PackSampleWorkbookTests {
         let draft = try ImportHelper.draft(sheet.map { $0.joined(separator: "\t") }.joined(separator: "\n"))
         #expect(draft.mode == .numbered && draft.items.map(\.n) == [1, 12] && draft.skipped.isEmpty)
         #expect(draft.meta.name == "사자성어 예시 팩" && draft.meta.license == "제작자 자체 작성")
+    }
+
+    @Test("★ 실기 피드백 3(2026-10-08) — 표 영역(머리글 행~마지막 데이터 행 × 머리글 열)의 모든 칸에 네 변 가는 실선(자동 색) · 정보 줄·빈 행·열 기본 스타일에는 테두리 0",
+          arguments: PackSample.Kind.allCases)
+    func tableBorders(_ kind: PackSample.Kind) throws {
+        let styles = try SampleCellStyles(try bundledXLSXData(kind))
+        let table = sampleTableCells(kind)
+        #expect(table.count == (kind == .numbered ? 63 : 48))
+        #expect(styles.thinBoxCells == table)
+        #expect(styles.anyBorderCells == table, "표 밖 테두리 \(styles.anyBorderCells.subtracting(table).sorted())")
+        #expect(styles.decoratedColumns.isEmpty)
+    }
+
+    @Test("★ 실기 피드백 3 — 머리글 칸만 단색 연한 회색(FFD9D9D9) 채우기 · 글자는 그대로 굵게 · 다른 칸·열 기본 스타일에는 채우기 0",
+          arguments: PackSample.Kind.allCases)
+    func headerFill(_ kind: PackSample.Kind) throws {
+        let styles = try SampleCellStyles(try bundledXLSXData(kind))
+        let header = Set(["A", "B", "C"].map { "\($0)\(sampleLayout(kind).header)" })
+        #expect(styles.grayFillCells == header)
+        #expect(styles.anyFillCells == header, "머리글 밖 채우기 \(styles.anyFillCells.subtracting(header).sorted())")
+        #expect(header.isSubset(of: styles.boldCells))
+    }
+
+    @Test("★ 실기 피드백 3 — 테두리·채우기는 값·종류 판정에 영향 없음: 번호 열 데이터만 숫자 칸, 나머지는 글 칸 · 날짜(지원 안 함)·빈 칸 0",
+          arguments: PackSample.Kind.allCases)
+    func decorationKeepsCellKinds(_ kind: PackSample.Kind) throws {
+        var reader = try XLSXWorkbookReader.open(try bundledXLSXData(kind))
+        let table = try reader.table(for: try #require(reader.sheets.first))
+        let header = sampleLayout(kind).header
+        var numbers = 0
+        for row in table.rows {
+            for (column, cell) in row.cells.enumerated() {
+                let numberColumn = kind == .numbered && column == 0 && row.number > header
+                switch cell {
+                case .number: numbers += 1; #expect(numberColumn, "\(row.number)행 \(column + 1)열")
+                case .text: #expect(!numberColumn, "\(row.number)행 \(column + 1)열")
+                case .blank, .unsupported: Issue.record("\(row.number)행 \(column + 1)열: \(cell)")
+                }
+            }
+        }
+        #expect(numbers == (kind == .numbered ? 20 : 0))
+    }
+
+    @Test("★ 실기 피드백 3 — 3-B 시트 그림의 테두리 칸·채우기 칸이 번호형 샘플 xlsx와 같다(그림이 보이는 행까지 — 표 영역 · 머리글 칸)")
+    func guideSheetDecorationMatchesSample() throws {
+        let sheet = PackImportCopy.guideSheet
+        let styles = try SampleCellStyles(try bundledXLSXData(.numbered))
+        let columns = ["A", "B", "C"]
+        func cells(_ rule: (Int, Int) -> Bool) -> Set<String> {
+            Set(sheet.indices.flatMap { row in sheet[row].indices.filter { rule(row, $0) }.map { "\(columns[$0])\(row + 1)" } })
+        }
+        let shown = { (reference: String) in (Int(reference.dropFirst()) ?? .max) <= sheet.count }
+        #expect(cells(PackImportCopy.guideSheetHasBorder(row:column:)) == styles.thinBoxCells.filter(shown))
+        #expect(cells(PackImportCopy.guideSheetIsFilled(row:column:)) == styles.grayFillCells.filter(shown))
+        // 그림의 표 영역은 머리글과 항목 둘 — 3행 × 3칸
+        #expect(cells(PackImportCopy.guideSheetHasBorder(row:column:)).count == 9)
     }
 
     @Test("★ 번들 xlsx 샘플은 그대로 팩이 된다 — 번들 CSV와 같은 판정 · 시트 이름이 팩 이름 기본값이지만 `#이름`이 이긴다 · 파일 출처가 미리 골라진다",

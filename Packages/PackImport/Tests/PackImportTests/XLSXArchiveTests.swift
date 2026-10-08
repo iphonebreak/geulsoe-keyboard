@@ -21,15 +21,15 @@ struct ArchiveSample: Sendable, CustomTestStringConvertible {
     ]
 
     /// 1-e ④-가 스크립트 판(`tools/generate_sample_xlsx.py`) — 파트 7개, `docProps`·테마 없음. 크기는 제작 기록 「엔트리 원본 크기」
-    /// (2026-10-08 실기 피드백판 — 굵은 글꼴·빈 행 자리로 시트·스타일 파트만 커졌다)
+    /// (2026-10-08 실기 피드백판 — 굵은 글꼴·빈 행 자리로 시트·스타일 파트만 커졌다. 실기 피드백 3 — 표 테두리·머리글 채우기로 다시 시트·스타일만)
     static let bundled: [ArchiveSample] = [
         ArchiveSample(file: "sample-numbered.xlsx", entries: [
             "[Content_Types].xml": 817, "_rels/.rels": 297, "xl/workbook.xml": 332, "xl/_rels/workbook.xml.rels": 566,
-            "xl/worksheets/sheet1.xml": 3_062, "xl/styles.xml": 1_281, "xl/sharedStrings.xml": 2_979,
+            "xl/worksheets/sheet1.xml": 3_302, "xl/styles.xml": 2_035, "xl/sharedStrings.xml": 2_979,
         ], parts: required),
         ArchiveSample(file: "sample-phrases.xlsx", entries: [
             "[Content_Types].xml": 817, "_rels/.rels": 297, "xl/workbook.xml": 331, "xl/_rels/workbook.xml.rels": 566,
-            "xl/worksheets/sheet1.xml": 2_502, "xl/styles.xml": 1_281, "xl/sharedStrings.xml": 2_757,
+            "xl/worksheets/sheet1.xml": 2_682, "xl/styles.xml": 2_035, "xl/sharedStrings.xml": 2_757,
         ], parts: required),
     ]
 

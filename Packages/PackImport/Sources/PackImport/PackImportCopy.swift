@@ -89,6 +89,17 @@ public enum PackImportCopy {
     public static func guideSheetIsBold(row: Int, column: Int) -> Bool {
         row == guideSheetHeaderRow || (row < guideSheetHeaderRow && column == 0 && guideSheet[row][column].hasPrefix("#"))
     }
+
+    /// 시트 그림에서 네 변 테두리가 있는 칸 — 표 영역(머리글 행부터 마지막 항목까지 × 머리글 열). 정보 줄·빈 행에는 없다.
+    /// 샘플 xlsx의 테두리 칸과 같은 규칙이다(시험이 대조한다 — 실기 피드백 3, 2026-10-08)
+    public static func guideSheetHasBorder(row: Int, column: Int) -> Bool {
+        row >= guideSheetHeaderRow && column < guideSheet[guideSheetHeaderRow].count
+    }
+
+    /// 시트 그림에서 채우기(연한 회색)가 있는 칸 — 머리글 칸. 샘플 xlsx의 채우기 칸과 같은 규칙이다(시험이 대조한다)
+    public static func guideSheetIsFilled(row: Int, column: Int) -> Bool {
+        row == guideSheetHeaderRow
+    }
     public static let guideColumns = [
         "번호형은 번호 · 제목 · 본문, 문구형은 단축어 · 제목 · 본문.",
         "열 순서는 상관없고 영어 이름(number·trigger·title·body)도 돼요.",

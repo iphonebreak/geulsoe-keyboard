@@ -255,31 +255,56 @@ struct PackImportGuideView: View {
 
     private func numbered(_ index: Int, _ title: String) -> String { "\(index). \(title)" }
 
-    /// 스프레드시트 모양 — 열 머리(A·B·C)와 행 번호, 정보 줄(#…) 키는 파랑. 굵게는 정보 줄 키와 머리글 칸(샘플 xlsx와 같다 —
-    /// `PackImportCopy.guideSheetIsBold`). 정보 줄 묶음과 머리글 사이 빈 행은 행 번호만 보인다
+    /// 스프레드시트 모양 — 열 머리(A·B·C)와 행 번호, 정보 줄(#…) 키는 파랑. 샘플 xlsx와 같은 규칙으로 굵게(정보 줄 키·머리글 칸)·
+    /// 네 변 선(표 영역 — 머리글부터 항목까지)·채우기(머리글 칸)를 입힌다(`PackImportCopy.guideSheetIsBold`·`guideSheetHasBorder`·
+    /// `guideSheetIsFilled`). 정보 줄 묶음과 머리글 사이 빈 행은 행 번호만 보인다.
+    /// 선이 열 폭 전체로 이어지도록 표 칸이 열을 채운다 — 글 폭대로 들어가면 그 폭, 안 들어가면(큰 글자) 행 폭을 열마다 나눈다
     private var sheetGrid: some View {
-        Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
+        ViewThatFits(in: .horizontal) {
+            sheetTable.fixedSize(horizontal: true, vertical: false)
+            sheetTable
+        }
+        .font(.caption)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// 칸 사이 간격 대신 칸 안쪽 여백 — 이웃 칸의 선이 경계에서 겹치도록 Grid 간격은 0이다.
+    /// 색은 의미색(선 systemGray2 · 채우기 systemGray4 — 다크 모드에서 함께 바뀐다. 샘플의 검정 선·`FFD9D9D9`를 흉내 내지 않는다)
+    private var sheetTable: some View {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
             GridRow {
-                Text(verbatim: "")
+                sheetCell(Text(verbatim: ""))
                 ForEach(["A", "B", "C"], id: \.self) { column in
-                    Text(verbatim: column).foregroundStyle(.secondary)
+                    sheetCell(Text(verbatim: column).foregroundStyle(.secondary))
                 }
             }
             ForEach(Array(PackImportCopy.guideSheet.enumerated()), id: \.offset) { index, row in
                 GridRow {
-                    Text(verbatim: "\(index + 1)").foregroundStyle(.secondary)
+                    sheetCell(Text(verbatim: "\(index + 1)").foregroundStyle(.secondary))
                     ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
-                        Text(cell)
-                            .fontWeight(PackImportCopy.guideSheetIsBold(row: index, column: column) ? .semibold : .regular)
-                            .foregroundStyle(cell.hasPrefix("#") ? Color.accentColor : Color.primary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
+                        sheetCell(
+                            Text(cell)
+                                .fontWeight(PackImportCopy.guideSheetIsBold(row: index, column: column) ? .semibold : .regular)
+                                .foregroundStyle(cell.hasPrefix("#") ? Color.accentColor : Color.primary)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                        )
+                        // 글을 줄여도 칸은 열 폭·행 높이를 채운다 — 선이 칸마다 어긋나지 않게
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .background(PackImportCopy.guideSheetIsFilled(row: index, column: column) ? Color(.systemGray4) : Color.clear)
+                        .overlay {
+                            if PackImportCopy.guideSheetHasBorder(row: index, column: column) {
+                                Rectangle().stroke(Color(.systemGray2), lineWidth: 0.5)
+                            }
+                        }
                     }
                 }
             }
         }
-        .font(.caption)
-        .accessibilityElement(children: .combine)
+    }
+
+    private func sheetCell(_ content: some View) -> some View {
+        content.padding(.horizontal, 4).padding(.vertical, 3)
     }
 }
 

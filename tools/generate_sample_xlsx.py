@@ -10,6 +10,10 @@
   - 행 자리 = 정보 줄 묶음(1행부터) · **빈 행 하나** · 머리글 · 데이터(사장님 실기 2026-10-08). xlsx는 빈 행을 담지 않으므로
     행 번호만 하나 띄운다(파서는 빈 레코드를 어디서든 무시한다). 정보 줄이 없으면 1행부터 빈 행 없이.
   - **굵게** = 정보 줄 키 칸(A열 `#이름`·`#틀`·`#출처`)과 머리글 칸만 — 글꼴 bold 하나. 숫자 서식은 모두 일반(numFmtId 0).
+  - **표 테두리** = 머리글 행부터 마지막 데이터 행까지 × 머리글 열의 **모든 칸** 네 변 가는 실선(thin, 자동 색 — 엑셀이 쓰는 색인 64).
+    빈 칸도 서식만 있는 `<c r s/>`로 써서 선을 잇는다. 정보 줄·빈 행에는 선 없음. **머리글 채우기** = 머리글 칸만 단색 `FFD9D9D9`
+    (엑셀 「흰색, 배경 1, 15% 더 어둡게」 — 테마 파트가 없으므로 rgb로). 열 기본 스타일에는 선·채우기를 넣지 않는다(새로 친 칸으로 번지지 않게)
+    — 실기 피드백 3(2026-10-08).
   - 번호 열(머리글 「번호」)의 정수만 숫자 셀(엑셀이 CSV를 열 때처럼, 일반 서식). 나머지는 전부 공유 문자열.
     수식·날짜 서식·불리언·숫자 서식 칸은 만들지 않는다(6-4·R19). 병합·숨김 없음.
   - 열 너비 = 글자 길이에 맞춤(`<col width customWidth>`). 한글 등 넓은 글자(동아시아 W·F·A)는 2칸으로 센다.
@@ -127,10 +131,17 @@ def build_parts(name, records):
     number_column = header.index("번호") if "번호" in header else None
     column_count = max(len(cells) for cells in records)
     body_column = column_count - 1
+    table_width = len(header)           # 표 영역의 열 = 머리글 열
+    if body_column == 0:
+        fail(f"{name}: 열이 하나뿐이다 — 정보 줄 키 칸과 본문 열이 겹친다")
     gap = 1 if header_index else 0      # 정보 줄 묶음과 머리글 사이 빈 행(정보 줄이 있을 때만)
 
-    def bold(index, column):
-        return index == header_index or (index < header_index and column == 0)
+    def style_of(index, column):
+        """스타일 색인(아래 cellXfs) — 표 칸(머리글·데이터)은 테두리, 머리글은 + 굵게·채우기, 정보 줄 키 칸은 굵게만. 본문 열은 + 줄바꿈"""
+        wrap = 1 if column == body_column else 0
+        if index >= header_index and column < table_width:
+            return (5 if index == header_index else 3) + wrap
+        return 2 if index < header_index and column == 0 else wrap
 
     # 공유 문자열(처음 나온 순서, 중복 제거 — 엑셀과 같다)과 셀
     strings, string_index, string_refs = [], {}, 0
@@ -138,13 +149,17 @@ def build_parts(name, records):
     for index, cells in enumerate(records):
         row_number = index + 1 + (gap if index >= header_index else 0)
         cells_xml = []
-        for column, text in enumerate(cells):
+        span = max(len(cells), table_width) if index >= header_index else len(cells)
+        for column in range(span):
+            text = cells[column] if column < len(cells) else ""
+            reference = f"{column_letter(column)}{row_number}"
+            style_index = style_of(index, column)
+            style = f' s="{style_index}"' if style_index else ""
             if text == "":
+                if index >= header_index and column < table_width:
+                    cells_xml.append(f'<c r="{reference}"{style}/>')     # 값 없이 서식만 — 표 테두리를 잇는다
                 continue
             check_cell(name, row_number, text)
-            reference = f"{column_letter(column)}{row_number}"
-            style_index = (2 if bold(index, column) else 0) + (1 if column == body_column else 0)
-            style = f' s="{style_index}"' if style_index else ""
             if column == number_column and index > header_index and re.fullmatch(r"[0-9]+", text):
                 cells_xml.append(f'<c r="{reference}"{style}><v>{int(text)}</v></c>')
                 continue
@@ -186,21 +201,37 @@ def build_parts(name, records):
     shared_strings = (f'{DECLARATION}<sst xmlns="{NS_MAIN}" count="{string_refs}" uniqueCount="{len(strings)}">'
                       f'{"".join(shared_item(text) for text in strings)}</sst>')
 
-    # 스타일 — 0: 표준(세로 가운데), 1: 표준 + 줄바꿈(본문 열), 2: 굵게, 3: 굵게 + 줄바꿈(본문 열의 머리글 칸).
-    # 모두 일반 서식(numFmtId 0) — 날짜·숫자 서식 없음. 글꼴 1 = 글꼴 0 + 굵게
+    # 스타일 — 0: 표준(세로 가운데), 1: 표준 + 줄바꿈(본문 열), 2: 굵게(정보 줄 키 칸),
+    # 3: 표 칸(테두리), 4: 표 칸 + 줄바꿈, 5: 머리글(굵게·채우기·테두리), 6: 머리글 + 줄바꿈(본문 열의 머리글 칸).
+    # 모두 일반 서식(numFmtId 0) — 날짜·숫자 서식 없음. 글꼴 1 = 글꼴 0 + 굵게. 채우기 0·1은 엑셀이 늘 두는 자리(none·gray125),
+    # 채우기 2 = 단색 연한 회색. 테두리 1 = 네 변 가는 실선 · 자동 색(색인 64 — 엑셀이 「자동」으로 쓰는 값)
     font = '<sz val="11"/><name val="맑은 고딕"/><family val="2"/><charset val="129"/>'
+    thin = '<color indexed="64"/>'
+    middle = '<alignment vertical="center"/>'
+    wrapped = '<alignment vertical="center" wrapText="1"/>'
+
+    def xf(font_id, fill_id, border_id, alignment, applies):
+        flags = "".join(f' apply{kind}="1"' for kind in applies)
+        return f'<xf numFmtId="0" fontId="{font_id}" fillId="{fill_id}" borderId="{border_id}" xfId="0"{flags}>{alignment}</xf>'
+
+    cell_xfs = [
+        xf(0, 0, 0, middle, ()),
+        xf(0, 0, 0, wrapped, ("Alignment",)),
+        xf(1, 0, 0, middle, ("Font",)),
+        xf(0, 0, 1, middle, ("Border",)),
+        xf(0, 0, 1, wrapped, ("Border", "Alignment")),
+        xf(1, 2, 1, middle, ("Font", "Fill", "Border")),
+        xf(1, 2, 1, wrapped, ("Font", "Fill", "Border", "Alignment")),
+    ]
     styles = (f'{DECLARATION}<styleSheet xmlns="{NS_MAIN}">'
               f'<fonts count="2"><font>{font}</font><font><b/>{font}</font></fonts>'
-              '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
-              '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
-              '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"><alignment vertical="center"/></xf></cellStyleXfs>'
-              '<cellXfs count="4">'
-              '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment vertical="center"/></xf>'
-              '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>'
-              '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"><alignment vertical="center"/></xf>'
-              '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1">'
-              '<alignment vertical="center" wrapText="1"/></xf>'
-              '</cellXfs>'
+              '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+              '<fill><patternFill patternType="solid"><fgColor rgb="FFD9D9D9"/><bgColor indexed="64"/></patternFill></fill></fills>'
+              '<borders count="2"><border><left/><right/><top/><bottom/><diagonal/></border>'
+              f'<border><left style="thin">{thin}</left><right style="thin">{thin}</right><top style="thin">{thin}</top>'
+              f'<bottom style="thin">{thin}</bottom><diagonal/></border></borders>'
+              f'<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0">{middle}</xf></cellStyleXfs>'
+              f'<cellXfs count="{len(cell_xfs)}">{"".join(cell_xfs)}</cellXfs>'
               '<cellStyles count="1"><cellStyle name="표준" xfId="0" builtinId="0"/></cellStyles>'
               '</styleSheet>')
 
