@@ -255,7 +255,8 @@ struct PackImportGuideView: View {
 
     private func numbered(_ index: Int, _ title: String) -> String { "\(index). \(title)" }
 
-    /// 스프레드시트 모양 — 열 머리(A·B·C)와 행 번호, 정보 줄(#…)은 파랑, 머리글 행은 굵게
+    /// 스프레드시트 모양 — 열 머리(A·B·C)와 행 번호, 정보 줄(#…) 키는 파랑. 굵게는 정보 줄 키와 머리글 칸(샘플 xlsx와 같다 —
+    /// `PackImportCopy.guideSheetIsBold`). 정보 줄 묶음과 머리글 사이 빈 행은 행 번호만 보인다
     private var sheetGrid: some View {
         Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
             GridRow {
@@ -267,9 +268,9 @@ struct PackImportGuideView: View {
             ForEach(Array(PackImportCopy.guideSheet.enumerated()), id: \.offset) { index, row in
                 GridRow {
                     Text(verbatim: "\(index + 1)").foregroundStyle(.secondary)
-                    ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
+                    ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
                         Text(cell)
-                            .fontWeight(index == PackImportCopy.guideSheetHeaderRow ? .semibold : .regular)
+                            .fontWeight(PackImportCopy.guideSheetIsBold(row: index, column: column) ? .semibold : .regular)
                             .foregroundStyle(cell.hasPrefix("#") ? Color.accentColor : Color.primary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)

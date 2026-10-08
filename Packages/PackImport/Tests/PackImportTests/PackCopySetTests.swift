@@ -52,8 +52,9 @@ struct PackCopySetTests {
             #expect(PackNoticeCopy.emptyListFooter
                     == "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
             #expect(PackImportCopy.heroTitle == "CSV 파일 가져오기")
-            // 둘째 줄(번호형·문구형 둘 다 돼요)을 뺐다 — 판별 문구 한 줄만(사장님 실기 2026-10-08)
-            #expect(PackImportCopy.heroMessage == "첫 줄에 머리글이 있는 CSV 파일을 골라요. UTF-8을 권해요.")
+            // 둘째 줄(번호형·문구형 둘 다 돼요)을 뺐다 — 판별 문구 한 줄만(사장님 실기 2026-10-08). 「첫 줄에」도 뺐다(실기 피드백 2 —
+            // 정보 줄·빈 줄이 머리글 위에 와도 된다)
+            #expect(PackImportCopy.heroMessage == "머리글이 있는 CSV 파일을 골라요. UTF-8을 권해요.")
             #expect(PackImportCopy.pickFile == "CSV 파일 가져오기")   // 「고르기」 → 「가져오기」(사장님 실기 2026-10-07)
             #expect(PackImportCopy.guideTitle == "CSV로 팩 만드는 법")
             #expect(PackImportCopy.otherFileRow == nil)
@@ -85,7 +86,7 @@ struct PackCopySetTests {
             #expect(PackNoticeCopy.emptyListFooter
                     == "엑셀 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
             #expect(PackImportCopy.heroTitle == "엑셀 파일 그대로 가져오기")
-            #expect(PackImportCopy.heroMessage == "첫 줄에 머리글이 있는 엑셀 파일(.xlsx)을 골라요.")   // 둘째 줄 뺌(2026-10-08)
+            #expect(PackImportCopy.heroMessage == "머리글이 있는 엑셀 파일(.xlsx)을 골라요.")   // 둘째 줄 뺌 · 「첫 줄에」 뺌(2026-10-08)
             #expect(PackImportCopy.pickFile == "엑셀 파일 고르기")
             #expect(PackImportCopy.guideTitle == "엑셀로 팩 만드는 법")
             #expect(PackImportCopy.otherFileRow == PackCopySet.Row(title: "CSV 파일 가져오기", detail: "구글 시트·Numbers·메모장에서 만든 CSV도 돼요"))

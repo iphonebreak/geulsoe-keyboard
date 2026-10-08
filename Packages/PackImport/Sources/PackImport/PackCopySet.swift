@@ -51,7 +51,8 @@ public enum PackCopySet: String, CaseIterable, Sendable {
     public struct Lines: Sendable {
         /// 2-B 빈 상태의 첫 문장(뒤 문장은 공유)
         let listIntro: String
-        /// 3-A 주 버튼 절 — 제목 · 설명(판별 문구 한 줄 — 공유하던 둘째 줄은 2026-10-08에 뺐다) · 버튼
+        /// 3-A 주 버튼 절 — 제목 · 설명(판별 문구 한 줄 — 공유하던 둘째 줄은 2026-10-08에 뺐다) · 버튼.
+        /// 판별 문구는 머리글 **자리**를 말하지 않는다(「첫 줄에」를 뺐다 — 정보 줄·빈 줄이 머리글 위에 와도 된다, 실기 피드백 2)
         let heroTitle: String
         let heroLead: String
         let pickFile: String
@@ -85,7 +86,7 @@ extension PackCopySet.Lines {
     static let csv = PackCopySet.Lines(
         listIntro: "CSV 파일로 만든 채움글 묶음(팩)을 가져와요.",
         heroTitle: "CSV 파일 가져오기",
-        heroLead: "첫 줄에 머리글이 있는 CSV 파일을 골라요. UTF-8을 권해요.",
+        heroLead: "머리글이 있는 CSV 파일을 골라요. UTF-8을 권해요.",
         pickFile: "CSV 파일 가져오기",
         guideTitle: "CSV로 팩 만드는 법",
         otherFileRow: nil,
@@ -109,7 +110,7 @@ extension PackCopySet.Lines {
     static let xlsx = PackCopySet.Lines(
         listIntro: "엑셀 파일로 만든 채움글 묶음(팩)을 가져와요.",
         heroTitle: "엑셀 파일 그대로 가져오기",
-        heroLead: "첫 줄에 머리글이 있는 엑셀 파일(.xlsx)을 골라요.",
+        heroLead: "머리글이 있는 엑셀 파일(.xlsx)을 골라요.",
         pickFile: "엑셀 파일 고르기",
         guideTitle: "엑셀로 팩 만드는 법",
         otherFileRow: PackCopySet.Row(title: "CSV 파일 가져오기", detail: "구글 시트·Numbers·메모장에서 만든 CSV도 돼요"),

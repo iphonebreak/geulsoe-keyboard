@@ -76,6 +76,14 @@ enum PackCopyLint {
 
     static func bannedWords(in text: String) -> [String] { bannedWords.filter(text.contains) }
 
+    /// 실기 피드백 2(2026-10-08) — 머리글 자리를 「첫 줄」로 말하지 않는다: 정보 줄(#…)·빈 줄이 머리글 위에 와도 된다(판정 규칙).
+    /// 머리글을 말하는 문구에만 건다 — 「예시 본문 첫 줄…」(시트 그림의 칸)처럼 본문의 첫 줄을 말하는 글은 대상이 아니다
+    static let headerPositionWords = ["첫 줄", "첫줄", "첫 행", "첫째 줄", "맨 윗줄"]
+
+    static func headerPositionWords(in text: String) -> [String] {
+        text.contains("머리글") ? headerPositionWords.filter(text.contains) : []
+    }
+
     /// U6를 앱 리터럴에 걸 파일 — 외부 채움글 화면(목록·상세·순서·가져오기·폼·안전망·정리). 앱 전체로 넓히면 기존 성경 기능 문구가 걸린다
     static func isPackScreenFile(_ name: String) -> Bool {
         name.hasPrefix("PackImport") || ["ExternalPackViews.swift", "PackSafetyNetViews.swift", "SnippetCleanupView.swift"].contains(name)
@@ -439,5 +447,24 @@ struct PackCopyLintTests {
         for text in PackCopySet.$previewing.withValue(set, operation: { allScreenCopy }) {
             #expect(PackCopyLint.bannedWords(in: text).isEmpty, "\(text)")
         }
+    }
+
+    // MARK: 머리글 자리 (실기 피드백 2, 2026-10-08)
+
+    @Test("★ 실기 피드백 2 — 두 판의 화면 문구 전부에서 머리글 자리를 「첫 줄」로 말하지 않는다(정보 줄·빈 줄이 위에 와도 된다)",
+          arguments: PackCopySet.allCases)
+    func noFirstLineHeader(_ set: PackCopySet) {
+        for text in PackCopySet.$previewing.withValue(set, operation: { allScreenCopy }) {
+            #expect(PackCopyLint.headerPositionWords(in: text).isEmpty, "\(text)")
+        }
+    }
+
+    @Test("머리글 자리 규칙은 옛 문구를 실제로 잡고, 본문의 첫 줄을 말하는 시트 그림 칸은 잡지 않는다")
+    func headerPositionRuleCatches() {
+        for old in ["첫 줄에 머리글이 있는 엑셀 파일(.xlsx)을 골라요.", "첫 줄은 머리글", "머리글을 찾지 못했어요. 첫 줄(머리글)을 확인해 주세요."] {
+            #expect(!PackCopyLint.headerPositionWords(in: old).isEmpty, "\(old)")
+        }
+        #expect(PackImportCopy.guideSheet.joined().contains("예시 본문 첫 줄…"))
+        #expect(PackCopyLint.headerPositionWords(in: "예시 본문 첫 줄…").isEmpty)
     }
 }

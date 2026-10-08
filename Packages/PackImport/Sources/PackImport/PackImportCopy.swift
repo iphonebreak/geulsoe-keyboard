@@ -69,18 +69,26 @@ public enum PackImportCopy {
     // 배열 원소가 곧 문장이다 — 문장 글자는 나누기 전과 같다(`PackGuideSentenceTests`)
 
     public static var guideTitle: String { lines.guideTitle }
-    public static let guideHeaderSection = "첫 줄은 머리글"
-    /// 시트 그림 — 샘플과 같은 **가짜 내용**(U6). 행마다 A·B·C 칸
+    /// 1절 제목 — 머리글 **자리**를 「첫 줄」로 말하지 않는다: 정보 줄·빈 줄이 머리글 위에 와도 된다(판정 규칙 — 실기 피드백 2, 2026-10-08)
+    public static let guideHeaderSection = "머리글"
+    /// 시트 그림 — 샘플과 같은 **가짜 내용**(U6)·**같은 모양**(번호형 샘플 xlsx — 정보 줄 묶음 · 빈 행 하나 · 머리글 · 항목, 실기 피드백 2).
+    /// 행마다 A·B·C 칸. 빈 행은 칸이 모두 빈 글이다(화면은 행 번호만 보인다)
     public static let guideSheet: [[String]] = [
         ["#이름", "사자성어 예시 팩", ""],
         ["#틀", "사자성어 {n}번", "성어 {n}번"],
         ["#출처", "제작자 자체 작성", ""],
+        ["", "", ""],
         ["번호", "제목", "본문"],
         ["1", "예시 제목 하나", "예시 본문 첫 줄…"],
         ["12", "예시 제목 둘", "예시 본문 한 줄"]
     ]
-    /// 시트 그림에서 정보 줄(`#…`) 다음의 머리글 행 — 굵게 보인다
-    public static let guideSheetHeaderRow = 3
+    /// 시트 그림의 머리글 행(0부터) — 정보 줄 셋과 빈 행 하나 다음(샘플 xlsx의 5행)
+    public static let guideSheetHeaderRow = 4
+
+    /// 시트 그림에서 굵게 보이는 칸 — 정보 줄 키(A열 `#…`)와 머리글 칸. 샘플 xlsx의 굵은 칸과 같은 규칙이다(시험이 대조한다)
+    public static func guideSheetIsBold(row: Int, column: Int) -> Bool {
+        row == guideSheetHeaderRow || (row < guideSheetHeaderRow && column == 0 && guideSheet[row][column].hasPrefix("#"))
+    }
     public static let guideColumns = [
         "번호형은 번호 · 제목 · 본문, 문구형은 단축어 · 제목 · 본문.",
         "열 순서는 상관없고 영어 이름(number·trigger·title·body)도 돼요.",
@@ -102,7 +110,9 @@ public enum PackImportCopy {
     // MARK: - 3-E 붙여넣기
 
     public static let pasteHeader = "표를 복사해 붙여 넣어요"
-    public static let pasteFooter = "첫 줄은 머리글(번호·제목·본문 또는 단축어·제목·본문)이어야 해요. 엑셀·구글 시트에서 칸을 골라 복사하면 그대로 붙어요."
+    /// 머리글 자리는 판정 규칙대로 말한다 — 머리글 위에는 정보 줄·빈 줄만 올 수 있다(붙여넣기도 파일과 같은 판정, 실기 피드백 2)
+    public static let pasteFooter = "머리글(번호·제목·본문 또는 단축어·제목·본문)이 있어야 해요. 머리글 위에는 정보 줄(#…)과 빈 줄만 둘 수 있어요. "
+        + "엑셀·구글 시트에서 칸을 골라 복사하면 그대로 붙어요."
     public static let pastePrivacy = "클립보드는 「붙여넣기」를 눌렀을 때만 읽어요. 붙여 넣은 내용은 이 기기 안에서만 읽어요."
     public static let readButton = "읽기"
     public static let clearButton = "모두 지우기"
@@ -480,7 +490,7 @@ public enum PackImportCopy {
         case .fileTooLarge:
             kind == .file ? "파일이 너무 커요. 항목을 나눠 여러 팩으로 만들어 주세요." : "붙여 넣은 글이 너무 길어요. 항목을 나눠 여러 팩으로 만들어 주세요."
         case .emptyFile:
-            (kind == .file ? "파일에" : "붙여 넣은 글에") + " 내용이 없어요. 첫 줄에 머리글을 쓰고 항목을 넣어 주세요."
+            (kind == .file ? "파일에" : "붙여 넣은 글에") + " 내용이 없어요. 머리글을 쓰고 그 아래에 항목을 넣어 주세요."
         case .unsupportedEncoding:
             "이 파일의 글자 방식은 지원하지 않아요. 「CSV UTF-8」로 저장해 주세요."
         case .invalidUTF8AfterBOM:
@@ -501,7 +511,8 @@ public enum PackImportCopy {
         case .tooManyLines, .tooManyRecords:
             "항목이 너무 많아요. 여러 팩으로 나눠 주세요."
         case .headerNotRecognized:
-            "머리글을 찾지 못했어요. 첫 줄(머리글)을 확인해 주세요."
+            // 정보 줄(#…)·빈 줄이 아닌 첫 줄에서 아는 열 이름을 못 찾았다 — 위에 표 제목 같은 줄이 있거나 머리글이 없다(머리글 예시는 화면이 함께 보인다)
+            "머리글을 찾지 못했어요. 머리글 위에는 정보 줄(#…)과 빈 줄만 둘 수 있어요."
         case .columnCountMismatch(let record, let line):
             "칸 수가 머리글과 달라요. \(position(record: record, line: line)) 근처의 쉼표나 따옴표를 확인해 주세요."
         case .duplicateHeader:

@@ -33,7 +33,7 @@ private func exhaustive(_ reason: SkipReason) {
 /// 위치는 시안 4-F·4-G 예시 값(12번째 항목 · 40번째 줄) — 숫자 검사가 이 둘만 지운다
 private let failureTable: [(PackImportFailure, String)] = [
     (.fileTooLarge, "파일이 너무 커요. 항목을 나눠 여러 팩으로 만들어 주세요."),
-    (.emptyFile, "파일에 내용이 없어요. 첫 줄에 머리글을 쓰고 항목을 넣어 주세요."),
+    (.emptyFile, "파일에 내용이 없어요. 머리글을 쓰고 그 아래에 항목을 넣어 주세요."),
     (.unsupportedEncoding, "이 파일의 글자 방식은 지원하지 않아요. 「CSV UTF-8」로 저장해 주세요."),
     (.invalidUTF8AfterBOM, "UTF-8이라고 표시된 파일인데 깨진 글자가 있어요. 파일이 손상됐을 수 있어요."),
     (.invalidUTF16, "UTF-16이라고 표시된 파일인데 깨진 글자가 있어요. 파일이 손상됐을 수 있어요. 「CSV UTF-8」로 다시 저장해 주세요."),
@@ -45,7 +45,7 @@ private let failureTable: [(PackImportFailure, String)] = [
      "12번째 항목(40번째 줄) 근처에서 닫는 따옴표 뒤에 글자가 더 있어요. 칸 안의 따옴표는 두 번(\"\") 써 주세요."),
     (.tooManyLines, "항목이 너무 많아요. 여러 팩으로 나눠 주세요."),
     (.tooManyRecords, "항목이 너무 많아요. 여러 팩으로 나눠 주세요."),
-    (.headerNotRecognized, "머리글을 찾지 못했어요. 첫 줄(머리글)을 확인해 주세요."),
+    (.headerNotRecognized, "머리글을 찾지 못했어요. 머리글 위에는 정보 줄(#…)과 빈 줄만 둘 수 있어요."),
     (.columnCountMismatch(record: 12, line: 40), "칸 수가 머리글과 달라요. 12번째 항목(40번째 줄) 근처의 쉼표나 따옴표를 확인해 주세요."),
     (.duplicateHeader, "같은 이름의 열이 두 번 있어요. 하나만 남겨 주세요."),
     (.duplicateHeaderAlias, "같은 뜻의 열이 두 개 있어요(예: 「본문」과 「body」). 하나만 남겨 주세요."),
@@ -112,7 +112,7 @@ struct PackImportCopyMappingTests {
         #expect(PackImportCopy.failureMessage(.structural(.fileTooLarge), source: .paste)
                 == "붙여 넣은 글이 너무 길어요. 항목을 나눠 여러 팩으로 만들어 주세요.")
         #expect(PackImportCopy.failureMessage(.structural(.emptyFile), source: .paste)
-                == "붙여 넣은 글에 내용이 없어요. 첫 줄에 머리글을 쓰고 항목을 넣어 주세요.")
+                == "붙여 넣은 글에 내용이 없어요. 머리글을 쓰고 그 아래에 항목을 넣어 주세요.")
         #expect(PackImportCopy.failureMessage(.structural(.templateInPhrasesMode), source: .paste)
                 == "단축어 열이 있는 표에는 「#틀」 줄을 쓸 수 없어요.")
         #expect(PackImportCopy.failureMessage(.structural(.headerNotRecognized), source: .paste)
@@ -222,6 +222,26 @@ struct PackImportCopyMappingTests {
         #expect(PackImportCopy.revertDelimiter(.init(failed: .semicolon, previous: nil)) == "칸 나누기 다시 고르기")
         #expect(PackImportCopy.revertDelimiterFooter(.file) == "되돌리면 파일을 처음부터 다시 읽어요.")
         #expect(PackImportCopy.revertDelimiterFooter(.paste) == "되돌리면 붙여 넣은 표를 처음부터 다시 읽어요.")
+    }
+
+    @Test("★ 실기 피드백 2(2026-10-08) — 머리글 자리를 「첫 줄」로 말하지 않는다: 3-B 1절 제목 · 붙여넣기 풋터")
+    func headerPlacementLines() {
+        #expect(PackImportCopy.guideHeaderSection == "머리글")
+        #expect(PackImportCopy.pasteFooter == "머리글(번호·제목·본문 또는 단축어·제목·본문)이 있어야 해요. 머리글 위에는 정보 줄(#…)과 빈 줄만 둘 수 있어요. "
+                + "엑셀·구글 시트에서 칸을 골라 복사하면 그대로 붙어요.")
+    }
+
+    @Test("★ 실기 피드백 2 — 문구가 말하는 규칙 = 판정: 머리글 위의 정보 줄·빈 줄은 붙여넣기·파일 모두 받고, 다른 줄이 있으면 머리글을 찾지 못한다")
+    func headerPlacementRuleHolds() throws {
+        let table = ["", "#이름\t예시 팩", "", "#출처\t자체 작성", "", "단축어\t본문", "인사\t안녕하세요"]
+        let pasted = try ImportHelper.draft(table.joined(separator: "\n"))
+        #expect(pasted.entries.count == 1 && pasted.meta.name == "예시 팩" && pasted.meta.license == "자체 작성")
+        let file = try ImportHelper.draft(data: Data(table.joined(separator: "\r\n").utf8))
+        #expect(PackVerdict(file) == PackVerdict(pasted))
+        // 머리글 위에 정보 줄도 빈 줄도 아닌 줄(표 제목 따위)이 있으면 — 4-G 「머리글을 찾지 못했어요」
+        for above in ["상용구 모음", "#이름\t예시 팩\n상용구 모음"] {
+            #expect(throws: PackImportFailure.headerNotRecognized) { try PackImporter.read(text: above + "\n단축어\t본문\n인사\t안녕하세요") }
+        }
     }
 
     @Test("★ R27 — 만드는 법 시트 그림·정보 줄 안내의 키는 `#출처`")

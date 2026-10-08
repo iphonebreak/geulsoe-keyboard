@@ -11,7 +11,14 @@ import TadakDomain
 
 /// 제작 기록 표의 SHA-256 — 샘플을 다시 만들면 기록과 이 표를 함께 고친다(기록의 「다시 만들 때」).
 /// 2026-10-07 개정(R27) — 정보 줄 키 `#권리` → `#출처` 한 곳만 바꿨다(기록의 「변경 이력」)
+/// 2026-10-08 실기 피드백 2 — 정보 줄 묶음과 머리글 사이에 빈 줄(CRLF) 하나만 넣었다(xlsx 샘플과 같은 자리)
 private let recordedSHA256: [PackSample.Kind: String] = [
+    .numbered: "d6ef527f901f44a619d77b2add03e263abba3e0d930ea9a8889ba513a9b01424",
+    .phrases: "e856978949137ff598c96e070b60bfb5279e1310ef85fcbfb698e14b3ec7776a"
+]
+
+/// 빈 줄을 넣기 전(R27 판)의 SHA-256 — 새 판에서 그 빈 줄 하나를 빼면 이 바이트로 돌아가야 한다(BOM·줄 끝·열 순서·나머지 바이트 그대로)
+private let sha256BeforeBlankLine: [PackSample.Kind: String] = [
     .numbered: "425eb2c44b904b5779a64e01be07c5d2ef73effa140d7873d1bfba71187549f1",
     .phrases: "e97413f0853cca93b6ef6043fd8d8be0b9f15a0fc0dffb41cd69d04a2ba1ef9d"
 ]
@@ -48,8 +55,9 @@ private func bundledXLSXData(_ kind: PackSample.Kind) throws -> Data {
 
 private func sha256(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 
-/// xlsx 샘플의 엑셀 행 자리(사장님 실기 피드백 2026-10-08) — 정보 줄 묶음(1행부터) · **빈 행 하나** · 머리글 · 데이터.
-/// 번호형은 정보 줄 3 · 데이터 20(머리글 5행), 문구형은 2 · 15(머리글 4행). CSV 샘플에는 빈 줄이 없다(바꾸지 않았다)
+/// 샘플의 엑셀 행 자리(사장님 실기 피드백 2026-10-08) — 정보 줄 묶음(1행부터) · **빈 행 하나** · 머리글 · 데이터.
+/// 번호형은 정보 줄 3 · 데이터 20(머리글 5행), 문구형은 2 · 15(머리글 4행). CSV 샘플도 같은 자리에 빈 줄 하나(실기 피드백 2) —
+/// 그래서 CSV 레코드 번호와 xlsx 행 번호가 같다
 private func sampleLayout(_ kind: PackSample.Kind) -> (meta: Int, header: Int, rows: [Int]) {
     let meta = kind == .numbered ? 3 : 2
     let header = meta + 2
@@ -236,8 +244,8 @@ struct PackSampleBundleTests {
         let url = try #require(csvFile(kind).bundledURL)
         let text = try PackTextDecoder.decode(Data(contentsOf: url)).text
         let records = try CSVRecordParser.parse(text, delimiter: .comma).records
-        // 검사가 실제 셀을 돈다 — 정보 줄 + 머리글 + 데이터(번호형 3 + 1 + 20 · 문구형 2 + 1 + 15)
-        #expect(records.count == (kind == .numbered ? 24 : 18))
+        // 검사가 실제 셀을 돈다 — 정보 줄 + 빈 줄 + 머리글 + 데이터(번호형 3 + 1 + 1 + 20 · 문구형 2 + 1 + 1 + 15)
+        #expect(records.count == (kind == .numbered ? 25 : 19))
         for cell in records.flatMap(\.cells) { #expect(!startsDangerously(cell), "\(kind): \(cell.debugDescription)") }
     }
 
@@ -275,6 +283,32 @@ struct PackSampleBundleTests {
         let pack = try PackCompiler.compile(draft, form: form.packForm)
         #expect(pack.name == (kind == .numbered ? "사자성어 예시 팩" : "업무 상용구 예시"))
         #expect(pack.license == "글쇠 고정 샘플 — 자체 작성 문구(가짜 내용)")
+    }
+
+    @Test("★ 실기 피드백 2(2026-10-08) — CSV 샘플도 정보 줄 묶음과 머리글 사이에 빈 줄 하나: 비지 않은 레코드 번호가 xlsx 샘플의 행 번호와 같다",
+          arguments: PackSample.Kind.allCases)
+    func blankLineBeforeHeader(_ kind: PackSample.Kind) throws {
+        let data = try Data(contentsOf: try #require(csvFile(kind).bundledURL))
+        let records = try CSVRecordParser.parse(try PackTextDecoder.decode(data).text, delimiter: .comma).records
+        let layout = sampleLayout(kind)
+        #expect(records.indices.filter { !records[$0].isBlank }.map { $0 + 1 } == layout.rows)
+        // 빈 줄은 정말 빈 줄 하나(`,,`가 아니다) — 위는 마지막 정보 줄 `#출처`, 아래는 머리글. 물리 줄 번호도 xlsx 행 번호와 같다
+        #expect(records.count == layout.rows.last && records[layout.meta].cells == [""])
+        #expect(records[layout.meta - 1].cells.first == "#출처")
+        let header = records[layout.header - 1]
+        #expect(header.cells == (kind == .numbered ? ["번호", "제목", "본문"] : ["단축어", "제목", "본문"]) && header.line == layout.header)
+    }
+
+    @Test("★ 실기 피드백 2 — 바뀐 곳은 그 빈 줄(CRLF 두 바이트) 하나: 빼면 앞 판 바이트(BOM·CRLF·열 순서·나머지 그대로)", arguments: PackSample.Kind.allCases)
+    func onlyBlankLineAdded(_ kind: PackSample.Kind) throws {
+        let data = try Data(contentsOf: try #require(csvFile(kind).bundledURL))
+        let blank = try #require(data.range(of: Data("\r\n\r\n".utf8)))
+        // 처음 나오는 빈 줄이 곧 정보 줄 묶음 끝이다 — 그 앞은 정보 줄뿐
+        let before = String(decoding: data[..<blank.lowerBound].dropFirst(3), as: UTF8.self)
+        #expect(before.components(separatedBy: "\r\n").allSatisfy { $0.hasPrefix("#") })
+        var previous = data
+        previous.removeSubrange(blank.lowerBound..<(blank.lowerBound + 2))
+        #expect(sha256(previous) == sha256BeforeBlankLine[kind])
     }
 
     @Test("★ R27 — 번들 샘플의 정보 줄은 `#출처` 한 줄이고 옛 `#권리`는 없다(바뀐 곳은 그 키 하나 — 값은 그대로)", arguments: PackSample.Kind.allCases)
@@ -387,6 +421,26 @@ struct PackSampleWorkbookTests {
         let layout = sampleLayout(kind)
         #expect(styles.boldCells == Set((1...layout.meta).map { "A\($0)" } + ["A", "B", "C"].map { "\($0)\(layout.header)" }))
         #expect(!styles.numberFormats.isEmpty && styles.numberFormats.allSatisfy { $0 == 0 })
+    }
+
+    @Test("★ 실기 피드백 2 — 3-B 시트 그림은 번호형 샘플과 같은 모양: 정보 줄 셋 · 빈 행 하나 · 머리글(5행) · 굵은 칸이 샘플 xlsx와 같다 · 그대로 붙여 넣으면 팩이 된다")
+    func guideSheetMatchesSample() throws {
+        let sheet = PackImportCopy.guideSheet
+        let layout = sampleLayout(.numbered)
+        let headerRow = PackImportCopy.guideSheetHeaderRow
+        #expect(headerRow + 1 == layout.header)
+        #expect(sheet.prefix(layout.meta).allSatisfy { $0.first?.hasPrefix("#") == true })
+        #expect(sheet[layout.meta] == ["", "", ""])
+        #expect(sheet[headerRow] == ["번호", "제목", "본문"])
+        let columns = ["A", "B", "C"]
+        let bold = sheet.indices.flatMap { row in
+            sheet[row].indices.filter { PackImportCopy.guideSheetIsBold(row: row, column: $0) }.map { "\(columns[$0])\(row + 1)" }
+        }
+        #expect(Set(bold) == (try SampleCellStyles(try bundledXLSXData(.numbered)).boldCells))
+        // 그림을 표로 옮겨 붙여 넣은 꼴 — 정보 줄·빈 줄·머리글이 판정 규칙대로 읽힌다(문구가 말하는 규칙과 같다)
+        let draft = try ImportHelper.draft(sheet.map { $0.joined(separator: "\t") }.joined(separator: "\n"))
+        #expect(draft.mode == .numbered && draft.items.map(\.n) == [1, 12] && draft.skipped.isEmpty)
+        #expect(draft.meta.name == "사자성어 예시 팩" && draft.meta.license == "제작자 자체 작성")
     }
 
     @Test("★ 번들 xlsx 샘플은 그대로 팩이 된다 — 번들 CSV와 같은 판정 · 시트 이름이 팩 이름 기본값이지만 `#이름`이 이긴다 · 파일 출처가 미리 골라진다",
