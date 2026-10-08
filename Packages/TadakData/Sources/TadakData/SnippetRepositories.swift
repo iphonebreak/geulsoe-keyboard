@@ -33,11 +33,12 @@ public struct BundledSnippetRepository: SnippetRepository {
 
 /// App Group을 통한 사용자 정의 채움글 저장소.
 ///
-/// `AppGroupSettingsRepository`와 같은 단방향이다 — `save()`는 컨테이너 앱 전용이고,
-/// 키보드 익스텐션은 `entries()`만 쓴다 (읽기는 Full Access 불필요).
+/// **읽기 전용** — 키보드 익스텐션도 이 타입을 쓴다(읽기는 Full Access 불필요). 쓰기는 앱 전용 모듈 PackImport의
+/// `AppGroupUserSnippetStore`가 `PackStore` 커밋 안에서만 한다(외부 채움글 1-b — 키보드 바이너리에 쓰기 코드가 실리지 않게).
 public struct AppGroupSnippetRepository: SnippetRepository {
 
-    private static let key = "keyboard.userSnippets"
+    /// App Group `UserDefaults` 키 — 쓰는 쪽(PackImport)도 같은 키를 쓴다
+    public static let storageKey = "keyboard.userSnippets"
     private let suiteName: String
 
     public init(suiteName: String = AppGroupSettingsRepository.appGroupIdentifier) {
@@ -47,21 +48,11 @@ public struct AppGroupSnippetRepository: SnippetRepository {
     /// 사용자 문구를 읽는다. 접근 불가·데이터 없음이면 빈 배열 — 실패하지 않는다.
     public func entries() -> [SnippetEntry] {
         guard let defaults = UserDefaults(suiteName: suiteName),
-              let data = defaults.data(forKey: Self.key),
+              let data = defaults.data(forKey: Self.storageKey),
               let entries = try? JSONDecoder().decode([SnippetEntry].self, from: data)
         else {
             return []
         }
         return entries
-    }
-
-    /// 사용자 문구를 쓴다. **컨테이너 앱에서만 호출한다** (Phase 6 관리 화면).
-    /// - Returns: 저장에 성공했는지. 익스텐션에서 Full Access 없이 호출하면 `false`.
-    @discardableResult
-    public func save(_ entries: [SnippetEntry]) -> Bool {
-        guard let defaults = UserDefaults(suiteName: suiteName),
-              let data = try? JSONEncoder().encode(entries) else { return false }
-        defaults.set(data, forKey: Self.key)
-        return true
     }
 }

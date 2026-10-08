@@ -313,7 +313,9 @@ struct DateSnippetRelativeDayTests {
         ("오늘 날짜", "2026. 9. 27."),
         ("내일 날짜", "2026. 9. 28."),
         ("어제 날짜", "2026. 9. 26."),
-        ("모레 날짜", "2026. 9. 29.")
+        ("모레 날짜", "2026. 9. 29."),
+        ("내일모레 날짜", "2026. 9. 29."),     // 표준어 「내일모레」 = 모레(사장님 결정 2026-10-08, 검증 ⓛ1)
+        ("내일 모레 날짜", "2026. 9. 29.")
     ])
     func relativeDays(tail: String, expected: String) {
         #expect(Fixture.body(tail, at: Fixture.date(2026, 9, 27)) == expected)

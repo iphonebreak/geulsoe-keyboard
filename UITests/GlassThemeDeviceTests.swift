@@ -371,13 +371,13 @@ final class GlassThemeDeviceTests: XCTestCase {
         tap(at: CGPoint(x: 155, y: 800))   // 툴바 탭
         Thread.sleep(forTimeInterval: 0.8)
         shot("intro-0-toolbar-tab")
-        let row = app.descendants(matching: .any)
-            .matching(NSPredicate(format: "label BEGINSWITH %@", "채움글")).firstMatch
+        // 접근성 식별자로 그 줄(버튼)만 집는다 — 라벨 「채움글…」의 첫 요소는 절 머리 같은 다른 요소일 수 있다(검증 L3, 2026-10-07)
+        let row = app.buttons["toolbar.snippetsRow"]
         if row.waitForExistence(timeout: 2), row.isHittable {
             row.tap()
-            metrics["intro.row"] = "label"
+            metrics["intro.row"] = "identifier"
         } else {
-            tap(at: CGPoint(x: 196, y: 690))
+            tap(at: CGPoint(x: 196, y: 690))   // 「추천」·「채움글」 절을 나누기(`bf2730a`) 전 좌표 — 나눈 뒤로는 재지 않았다
             metrics["intro.row"] = "fallback"
         }
         for (delay, name) in [(1.6, "intro-1-typing"), (2.4, "intro-2-typed"), (2.0, "intro-3-chip"), (1.8, "intro-4-body")] {
