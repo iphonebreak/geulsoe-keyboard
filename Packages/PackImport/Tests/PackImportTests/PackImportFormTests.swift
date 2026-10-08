@@ -932,6 +932,97 @@ struct PackImportCommitStoreTests {
     }
 }
 
+// MARK: - 저장 `source` — 세션이 읽은 형식 그대로(7절 진단용 — 로그·분석에는 쓰지 않는다)
+
+/// 가져오는 길 셋 — 같은 문구 표를 xlsx 파일·CSV 파일·붙여넣기로
+enum StoredSourceRoute: String, CaseIterable, Sendable {
+    case workbook, csvFile, paste
+
+    var source: PackImportSource {
+        switch self {
+        case .workbook:
+            .file(WorkbookBuilder.workbook(grid: [["단축어", "제목", "본문"], ["회사주소", "회사 주소", "예시 주소 한 줄"],
+                                                  ["새해인사", "새해 인사", "예시 인사 한 줄"]]))
+        case .csvFile: .file(Data([0xEF, 0xBB, 0xBF]) + Data(phrasesCSV.utf8))   // BOM — 글자 확인 없이 미리보기로
+        case .paste: .paste(phrasesCSV)
+        }
+    }
+
+    var expected: StoredExternalPack.Source { self == .workbook ? .xlsx : .csv }
+}
+
+/// 세션(xlsx를 받는 판)으로 끝까지 읽은 미리보기 초안 — 화면이 확정에 넘기는 그 값(`PackImportFlowView.openForm`)
+private func sessionDraft(_ route: StoredSourceRoute) throws -> PackDraft {
+    var session = PackImportSession(acceptsWorkbookFiles: true)
+    let started = session.start(route.source)
+    let run = try #require(started)
+    let received = session.receive(PackImportSession.compute(run, library: nil))
+    #expect(received)
+    let preview: PackImportPreview? = if case .preview(let value) = session.phase { value } else { nil }
+    return try #require(preview).draft
+}
+
+private extension Store {
+    /// 목록이 지금 가리키는 그 팩 변환본의 `source`
+    func storedSource(_ id: String) throws -> StoredExternalPack.Source {
+        let library = root.appendingPathComponent("library", isDirectory: true)
+        let list = try JSONDecoder().decode(PackLibrary.self, from: Data(contentsOf: library.appendingPathComponent("library.json")))
+        let file = try #require(list.packs[id]?.file)
+        let data = try Data(contentsOf: library.appendingPathComponent("packs", isDirectory: true).appendingPathComponent(file))
+        return try JSONDecoder().decode(StoredExternalPack.self, from: data).source
+    }
+}
+
+@Suite("외부 채움글 — 저장 source는 세션이 읽은 형식 그대로")
+struct PackImportStoredSourceTests {
+
+    @Test("★ 새 팩 — xlsx로 읽었으면 .xlsx, CSV 파일·붙여넣기는 .csv", arguments: StoredSourceRoute.allCases)
+    func importNew(route: StoredSourceRoute) async throws {
+        let store = Store()
+        defer { store.cleanup() }
+        let draft = try sessionDraft(route)
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)
+        try await run(&confirmation, confirmation.confirm(filledForm(draft, name: "새 팩")), client: store.client)
+        let completion = try #require(confirmation.completion)
+        #expect(completion.kind == .imported)
+        #expect(try store.storedSource(completion.packID) == route.expected)
+    }
+
+    @Test("★ 꺼 둔 채로 가져오기(D1)도 같은 형식", arguments: StoredSourceRoute.allCases)
+    func importDisabled(route: StoredSourceRoute) async throws {
+        let store = Store(limits: PackBudgetLimits(needleCount: 100, needleChars: 195, bytes: 2_000_000, items: 1_000))
+        defer { store.cleanup() }
+        _ = await store.client.importPack(phrasesPack("큰 팩", prefix: string(18, "큰"), count: 10), source: .csv)
+        let draft = try sessionDraft(route)
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)
+        try await run(&confirmation, confirmation.confirm(filledForm(draft, name: "새 팩")), client: store.client)
+        #expect(confirmation.notice?.actions == [.importDisabled])
+        try await run(&confirmation, confirmation.importDisabled(), client: store.client)
+        let completion = try #require(confirmation.completion)
+        #expect(completion.kind == .importedDisabled)
+        #expect(try store.storedSource(completion.packID) == route.expected)
+    }
+
+    @Test("★ 같은 이름 바꾸기(U3) — 옛 변환본의 형식이 아니라 이번에 읽은 형식", arguments: StoredSourceRoute.allCases)
+    func replace(route: StoredSourceRoute) async throws {
+        let store = Store()
+        defer { store.cleanup() }
+        let old: StoredExternalPack.Source = route.expected == .xlsx ? .csv : .xlsx
+        _ = await store.client.importPack(phrasesPack("우리 회사 상용구", prefix: "옛", count: 3), source: old)
+        let existing = try #require(store.store.summaries().first)
+        #expect(try store.storedSource(existing.id) == old)
+
+        let draft = try sessionDraft(route)
+        var confirmation = PackImportConfirmation(draft: draft, library: store.library)
+        let asked = confirmation.confirm(filledForm(draft, name: "우리 회사 상용구"))
+        #expect(asked == nil)
+        try await run(&confirmation, confirmation.chooseReplace(), client: store.client)
+        let completion = try #require(confirmation.completion)
+        #expect(completion.kind == .replaced && completion.packID == existing.id)
+        #expect(try store.storedSource(existing.id) == route.expected)
+    }
+}
+
 // MARK: - 문구 표(5단계) — 매핑 전부 · 숫자 (U6·금칙어·xlsx는 6단계 `PackCopyLintTests`가 한 곳에서 본다)
 
 /// 5단계가 내는 문구 — 문구 검사(숫자 · `allScreenCopy`의 U6·금칙어·xlsx)를 받는다. 부를 때마다 지금 판으로 만든다

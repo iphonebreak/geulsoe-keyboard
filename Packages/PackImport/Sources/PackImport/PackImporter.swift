@@ -147,6 +147,8 @@ public struct PackDraft: Equatable, Sendable {
     public var delimiter: CSVDelimiter?
     /// 자동 판정(5-2)이 채택한 구분자 — 구분자를 골라 읽었어도 같은 원본의 판정이다. **둘 이상일 때만** 미리보기가 「칸 나누기」를 보인다(R29). xlsx는 빈 배열
     public var delimiterCandidates: [CSVDelimiter]
+    /// (xlsx) 통합 문서로 읽었다 — 저장 변환본의 `source`(진단용, 7절)가 이것을 따른다. CSV 파일·붙여넣기는 거짓
+    public var readFromWorkbook: Bool
     /// (xlsx) 읽은 시트의 이름 — **4-D 목록에 보인 그대로**(`PackSheetNames.display` — 정리·「시트 n」·「이름 (k)」). 화면에만 쓴다.
     /// 로그·분석·오류 값에 싣지 않는다(6-4·AC-34). CSV는 nil
     public var sheetName: String?
@@ -354,6 +356,7 @@ public enum PackImporter {
             throw .workbook(error)
         }
         var draft = try PackRecordReader.read(table)
+        draft.readFromWorkbook = true
         draft.sheetName = PackSheetNames.display(reader.sheets.map(\.name))[index]
         draft.suggestedPackName = chosen.suggestedPackName
         return .draft(draft)
@@ -601,7 +604,7 @@ enum PackRecordReader {
 
         let (entries, items, duplicates) = rows.finish(mode: header.mode)
         return PackDraft(encoding: nil, hadBOM: false, needsEncodingConfirmation: false, delimiter: delimiter,
-                         delimiterCandidates: delimiter.map { [$0] } ?? [], sheetName: nil, suggestedPackName: nil, hiddenRowCount: rows.acceptedHidden,
+                         delimiterCandidates: delimiter.map { [$0] } ?? [], readFromWorkbook: false, sheetName: nil, suggestedPackName: nil, hiddenRowCount: rows.acceptedHidden,
                          hiddenColumnCount: Set(header.columns.values).intersection(hiddenColumns).count,
                          mode: header.mode, meta: meta, entries: entries, items: items,
                          skipped: rows.skipped, dataRecordCount: rows.dataRecordCount, acceptedRecordCount: rows.accepted,

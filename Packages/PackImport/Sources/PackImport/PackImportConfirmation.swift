@@ -220,7 +220,8 @@ public struct PackImportConfirmation: Equatable, Sendable {
 
     // MARK: - 메인 밖에서 할 일
 
-    /// 최종 컴파일(전역 큐 — 성경 전체 n) → `PackStoreClient`로 가져오기·바꾸기(메인 밖 직렬 큐). 소스는 CSV(붙여넣기도 같은 파서)
+    /// 최종 컴파일(전역 큐 — 성경 전체 n) → `PackStoreClient`로 가져오기·바꾸기(메인 밖 직렬 큐). 저장 `source`(진단용)는 세션이 읽은
+    /// 형식 그대로 — 통합 문서로 읽었으면 xlsx, CSV 파일·붙여넣기는 csv(`PackDraft.readFromWorkbook` — 다시 판별하지 않는다)
     public static func perform(_ work: Work, client: PackStoreClient,
                                queue: DispatchQueue = .global(qos: .userInitiated)) async -> Result {
         let compiled: Swift.Result<ExternalPack, PackCompileFailure> = await withCheckedContinuation { continuation in
@@ -237,11 +238,12 @@ public struct PackImportConfirmation: Equatable, Sendable {
         case .failure(let failure): return .compileFailed(failure)
         case .success(let value): pack = value
         }
+        let source: StoredExternalPack.Source = work.draft.readFromWorkbook ? .xlsx : .csv
         let outcome = switch work.action {
         case .importNew(let enabled):
-            await client.importPack(pack, source: .csv, enabled: enabled, expectedRevision: work.expectedRevision)
+            await client.importPack(pack, source: source, enabled: enabled, expectedRevision: work.expectedRevision)
         case .replace(let id, _):
-            await client.replacePack(id, with: pack, source: .csv, expectedRevision: work.expectedRevision)
+            await client.replacePack(id, with: pack, source: source, expectedRevision: work.expectedRevision)
         }
         // 4-M 「이렇게 써 보세요」 — 저장한 팩의 상세 예시를 그대로(팩 상세와 같은 계산 — 지금 뜨는 단축어·이 팩이 쓰는 틀부터, N-2)
         guard case .accepted(let accepted) = outcome.result, let packID = work.action.packID ?? accepted.packID else {
