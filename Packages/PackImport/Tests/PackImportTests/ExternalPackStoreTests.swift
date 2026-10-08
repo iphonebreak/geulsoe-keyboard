@@ -2035,6 +2035,43 @@ struct UnfinishedCommitTests {
         #expect(try filesMentioning("DELMARK", in: h).isEmpty)
     }
 
+    /// 다음 실행의 재게시가 실패하는 두 갈래 — 목록 쓰기 실패(앱 전용 폴더 쓰기 금지)·재게시 도중 종료
+    enum RepublishFailure: CaseIterable, Sendable { case listWriteDenied, terminated }
+
+    /// 지금 세대를 지우는 경로는 `maintain`의 `purgeBelow = 현재 + 1`(④–⑤ 사이에 끝난 지우기·바꾸기)뿐이고 평소엔 같은 실행의 재게시가
+    /// 곧 덮는다 — 재게시가 실패할 때만 「지금 세대는 지우지 않는다」 가드가 키보드의 snapshot을 지킨다(검증 L-3 · AM1)
+    @Test("★ A6 — 지우기가 목록 뒤·세대 앞에서 끝나고 다음 실행의 재게시도 실패하면 지금 세대는 남는다 — 키보드가 snapshot을 잃지 않는다",
+          arguments: RepublishFailure.allCases)
+    func currentGenerationSurvivesFailedRepublish(_ failure: RepublishFailure) throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: h.sandbox.library.path) }
+        let a = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))   // g1
+        let b = try h.importedID(h.store.importPack(pack("나", chars: 10), source: .csv))   // g2
+        h.store.crashPointForTesting = .beforePacksGeneration
+        _ = h.store.deletePack(b)                                                     // 목록은 세대 3·purgeBelow 3, 세대는 2
+        #expect(h.generations.packsGeneration == 2, "준비 — 커밋 지점 전 종료")
+
+        let reopened = h.reopenedStore()
+        switch failure {
+        case .listWriteDenied:
+            try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: h.sandbox.library.path)
+        case .terminated:
+            reopened.crashPointForTesting = .beforeLibrary
+        }
+        reopened.maintain()
+        #expect(h.generations.packsGeneration == 2, "전제 — 재게시가 마무리되지 않았다")
+        #expect(h.sandbox.generationNames().contains("g2"), "지금 세대는 purgeBelow 아래여도 지우지 않는다")
+        #expect(h.load().includedPackIDs == [a, b], "키보드는 지금 세대를 그대로 읽는다 — 마무리는 다음 실행")
+
+        // 다음 실행이 성공하면 마무리한다 — 지우기 세대만 남는다
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: h.sandbox.library.path)
+        h.reopenedStore().maintain()
+        #expect(h.generations.packsGeneration == 3)
+        #expect(h.sandbox.generationNames() == ["g3"])
+        #expect(h.load().includedPackIDs == [a])
+    }
+
     @Test("A2 — 세대 뒤에 남은 고아 세대(커밋 지점 전 종료)는 다음 실행이 지운다 — 지금 세대·바로 앞 세대만 남는다")
     func orphanGenerationAboveCurrentIsRemoved() throws {
         let h = Harness()
@@ -2105,7 +2142,11 @@ struct StoredPackCountTests {
         library.order.append(.pack("extra"))
         try JSONEncoder().encode(library).write(to: libraryURL(h))
 
+        #expect(library.packs[ids[0]]?.isEnabled == true && library.packs[ids[1]]?.isEnabled == false, "전제 — 켜진 팩·꺼진 팩")
         #expect(h.store.replacePack(ids[1], with: pack("팩1", chars: 6), source: .csv) == .rejected(.gate(.tooManyPacks), rechecked: false))
+        // 켜진 팩 바꾸기도 — 게이트(`judgeActivation`)는 수를 보지 않으므로 이 경로는 목록 수 검사만 막는다(검증 L-4 · AM9a)
+        #expect(h.store.replacePack(ids[0], with: pack("팩0", chars: 7), source: .csv) == .rejected(.gate(.tooManyPacks), rechecked: false),
+                "켜진 팩 바꾸기도 거부")
         #expect(h.store.deletePack("extra").isAccepted, "줄이는 쪽은 막지 않는다")
         #expect(h.store.replacePack(ids[1], with: pack("팩1", chars: 6), source: .csv).isAccepted)
     }

@@ -268,6 +268,7 @@ struct SelectionReplacementTests {
         let operations = output.operations
         #expect(controller.replaceCurrentWord("주소", with: "🏠 주소") == false)
         #expect(output.operations == operations)
+        #expect(controller.isComposing, "조합 상태도 그대로 — 거절은 조합 확정 전이다")
         output.hasSelectedText = false
         #expect(controller.replaceCurrentWord("주소", with: "🏠 주소"))
         #expect(output.text == "🏠 주소")
@@ -279,6 +280,7 @@ struct SelectionReplacementTests {
         let operations = output.operations
         #expect(controller.completeWord("주소록") == false)
         #expect(output.operations == operations)
+        #expect(controller.isComposing, "조합 상태도 그대로 — 거절은 조합 확정 전이다")
         output.hasSelectedText = false
         #expect(controller.completeWord("주소록"))
         #expect(output.text == "주소록")
