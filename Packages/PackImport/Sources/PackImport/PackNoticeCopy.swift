@@ -205,6 +205,9 @@ public enum PackNoticeCopy {
     public static let infoFooter = "출처는 가져올 때 확인한 문구 그대로예요."
     public static let templatesHeader = "단축어 틀"
     public static let templatesFooter = "같은 틀을 두 팩이 쓰면 위에 있는 팩이 가져요. 고유한 앞 글자(예: 고사성어 {n}번)를 쓰면 겹치지 않아요."
+    /// 팩 상세에는 틀 편집이 없다(U3 — 바꾸는 길은 가져오기 하나). 그 길을 알려 준다 — 같은 이름이면 가져오기가 「바꾸기」를 묻고 자리·켬/끔은 유지(9-1).
+    /// 상세 화면 틀 편집은 1.3.x 검토(사장님 2026-10-08)
+    public static let templatesEditHint = "틀을 고치거나 더하려면 파일을 다시 가져와요. 가져오기 화면에서 틀을 고치고 「바꾸기」를 고르면 목록 자리와 켬/끔은 그대로예요."
 
     /// 틀 상태 배지(10-4 ③) — 사용 중 · 뒤 순서 · 가려짐
     public static func patternBadge(_ status: PackStanding.PatternStatus) -> String {

@@ -57,6 +57,8 @@ struct PackImpactCopyTests {
         #expect(PackNoticeCopy.templatesHeader == "단축어 틀")
         #expect(PackNoticeCopy.templatesFooter
                 == "같은 틀을 두 팩이 쓰면 위에 있는 팩이 가져요. 고유한 앞 글자(예: 고사성어 {n}번)를 쓰면 겹치지 않아요.")
+        #expect(PackNoticeCopy.templatesEditHint   // 틀 편집은 다시 가져오기 한 길(U3) — 그 길을 알려 준다(사장님 2026-10-08)
+                == "틀을 고치거나 더하려면 파일을 다시 가져와요. 가져오기 화면에서 틀을 고치고 「바꾸기」를 고르면 목록 자리와 켬/끔은 그대로예요.")
         #expect(PackNoticeCopy.patternBadge(.owned(sharedWith: [])) == "사용 중")
         #expect(PackNoticeCopy.patternBadge(.outranked(by: "a")) == "뒤 순서")
         #expect(PackNoticeCopy.patternBadge(.shadowed(by: ["장"])) == "가려짐")
@@ -168,7 +170,7 @@ var stage3Copy: [String] {
         PackNoticeCopy.userSlotTitle, PackNoticeCopy.userSlotDetail, PackNoticeCopy.enabledValue, PackNoticeCopy.disabledValue,
         PackNoticeCopy.cancel, PackNoticeCopy.moveUpAction, PackNoticeCopy.moveDownAction,
         PackNoticeCopy.useToggle, PackNoticeCopy.infoHeader, PackNoticeCopy.kindLabel, PackNoticeCopy.licenseLabel, PackNoticeCopy.infoFooter,
-        PackNoticeCopy.templatesHeader, PackNoticeCopy.templatesFooter, PackNoticeCopy.hiddenTriggersHeader(count: 37),
+        PackNoticeCopy.templatesHeader, PackNoticeCopy.templatesFooter, PackNoticeCopy.templatesEditHint, PackNoticeCopy.hiddenTriggersHeader(count: 37),
         PackNoticeCopy.hiddenTriggerBadge, PackNoticeCopy.usageHeader, PackNoticeCopy.usageFooter, PackNoticeCopy.deletePackButton,
         PackNoticeCopy.usageResult("예시 제목 둘"), PackNoticeCopy.usageResult(body: "예시 본문 첫 줄\n둘째 줄"),
         PackNoticeCopy.deleteTitle(name: "회사 상용구"), PackNoticeCopy.deleteMessage(itemCount: 37), PackNoticeCopy.deleteMessage(itemCount: 0),

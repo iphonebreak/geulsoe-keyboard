@@ -245,7 +245,7 @@ struct ExternalPackDetailView: View {
                 } header: {
                     Text(PackNoticeCopy.templatesHeader(premise))
                 } footer: {
-                    Text(PackNoticeCopy.templatesFooter)
+                    Text(PackNoticeCopy.templatesFooter + "\n" + PackNoticeCopy.templatesEditHint)
                 }
             }
             if !standing.hiddenTriggers.isEmpty {
