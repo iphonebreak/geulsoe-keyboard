@@ -45,7 +45,7 @@ public enum PackImportCopy {
 
     public static func sampleDetail(_ kind: PackSample.Kind) -> String {
         switch kind {
-        case .numbered: "사자성어·상용 영어처럼 번호로 고르는 자료"
+        case .numbered: "사자성어 + 번호로 치면 문구가 떠요"   // 문구형 줄 「단축어를 치면 문구가 떠요」와 같은 꼴(사장님 실기 2026-10-08)
         case .phrases: "단축어를 치면 문구가 떠요"
         }
     }

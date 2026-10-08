@@ -614,7 +614,7 @@ struct PackSampleShareTests {
         #expect(xlsxFile(.numbered).displayName == "번호형 샘플.xlsx" && xlsxFile(.phrases).displayName == "문구형 샘플.xlsx")
         #expect(PackImportCopy.sampleShareLabel(xlsxFile(.numbered)) == "번호형 샘플 엑셀 받기")
         #expect(PackImportCopy.sampleShareLabel(csvFile(.phrases)) == "문구형 샘플 CSV 받기")
-        #expect(PackImportCopy.sampleDetail(.numbered) == "사자성어·상용 영어처럼 번호로 고르는 자료")
+        #expect(PackImportCopy.sampleDetail(.numbered) == "사자성어 + 번호로 치면 문구가 떠요")
         #expect(PackImportCopy.sampleDetail(.phrases) == "단축어를 치면 문구가 떠요")
         #expect(PackImportCopy.sampleFormatLabel(.csv) == "CSV" && PackImportCopy.sampleFormatLabel(.xlsx) == "엑셀")
         #expect(PackImportCopy.sampleShareLabel(csvFile(.numbered)) == "번호형 샘플 CSV 받기")
