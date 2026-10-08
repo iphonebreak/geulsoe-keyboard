@@ -8,15 +8,16 @@
 /// 판에 넣지 않은 것: 가져온 파일 **형식**에 따라 갈리는 문구(xlsx 출처의 「시트 이름」·수식·병합 사유 등)는 판이 아니라 xlsx 파서(1-e)와 함께 온다 —
 /// xlsx 중심판에서도 CSV를 가져오면 CSV 문구가 맞기 때문이다.
 /// **xlsx를 받는지는 판을 따른다**(`acceptsWorkbookFiles`, 1-e ③ 코디네이터 결정) — CSV 전용판은 파일 고르기가 xlsx를 보이지 않고 가져오기도
-/// xlsx로 읽지 않는다(없는 기능을 열지 않는다 — AC-35). 그래서 판 전환(`selected`) 한 줄이 곧 xlsx 열기다(④ 게이트 뒤).
+/// xlsx로 읽지 않는다(없는 기능을 열지 않는다 — AC-35). 그래서 판 전환(`selected`) 한 줄이 곧 xlsx 열기다(R38 — 1.3.0에서 열었다).
 public enum PackCopySet: String, CaseIterable, Sendable {
-    /// CSV 전용판 — 1.3.0이 내는 판(R12: xlsx가 출시 게이트를 못 넘어도 CSV만으로 나갈 수 있게)
+    /// CSV 전용판 — R12의 대비책(xlsx가 출시 게이트를 못 넘어도 CSV만으로 나갈 수 있게). 1.3.0은 이 판이 아니다(R38) — 문구·시험은 그대로 둔다
     case csv
-    /// xlsx 중심판 — 「엑셀 파일 그대로 가져오기」가 주 안내, CSV는 「그 밖의 방법」(R11). xlsx 파서(1-e)가 게이트를 넘은 뒤에 고른다
+    /// xlsx 중심판 — 「엑셀 파일 그대로 가져오기」가 주 안내, CSV는 「그 밖의 방법」(R11). **1.3.0이 내는 판**(R38 — 1-e 게이트 준비 뒤 사장님 승인 2026-10-08)
     case xlsx
 
-    /// ★ 이 빌드의 판 — **판을 고르는 곳은 이 한 줄뿐이다.** 1-e 게이트 전에는 `.csv`(시험 `PackCopySetTests.selectedIsCSV`가 지킨다)
-    public static let selected: PackCopySet = .csv
+    /// ★ 이 빌드의 판 — **판을 고르는 곳은 이 한 줄뿐이다.** 1.3.0은 `.xlsx`(R38 — 시험 `PackCopySetTests.selectedIsXLSX`가 지킨다).
+    /// CSV 전용판으로 되돌리면 그 시험과 「지금 판」을 단정한 시험(`acceptanceFollowsCopySet`·`pickerTypes`·`prepareForSharing`·`sectionCopy`)을 함께 뒤집는다
+    public static let selected: PackCopySet = .xlsx
 
     /// 다른 판의 문구를 볼 때만 묶는다(시험 — `PackCopySet.$previewing.withValue(.xlsx) { … }`). 앱은 묶지 않는다
     @TaskLocal public static var previewing: PackCopySet?

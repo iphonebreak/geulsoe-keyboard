@@ -4,7 +4,7 @@ import TadakDomain
 @testable import PackImport
 
 // 외부 채움글 1-c 4단계 — 가져오기 문구 표 `PackImportCopy`(계획서 `external-snippet-packs-1c-plan.md` 4-4절 · 5절 4행 ②,
-// 시안 `docs/design/external-snippet-packs/index.html` 3-A·3-B·3-E·4-A~4-C·4-E~4-I, 4-G 표). **CSV 전용판**(AC-35 — xlsx 안내 0).
+// 시안 `docs/design/external-snippet-packs/index.html` 3-A·3-B·3-E·4-A~4-C·4-E~4-I, 4-G 표). 판이 바꾸는 줄은 `PackCopySetTests`가 두 판으로 본다(1.3.0은 xlsx 중심판 — R38, CSV 전용판의 AC-35는 `PackCopyLintTests`).
 // 사유 → 문구 매핑은 **전부**(새 사유가 생기면 아래 `exhaustive` switch가 컴파일되지 않는다). 오류 문구에 파일 내용·파일 이름이 없다(AC-34).
 // 숫자 검사는 1~3단계와 같은 잣대 — 숫자는 위치·개수·필드 상한(편집기가 이미 보이는 값)만 허용한다. U6·금칙어·xlsx(AC-35)는 6단계 `PackCopyLintTests`가 한 곳에서 본다.
 

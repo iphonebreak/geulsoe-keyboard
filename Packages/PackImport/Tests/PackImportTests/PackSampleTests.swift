@@ -360,14 +360,17 @@ struct PackSampleShareTests {
         }
     }
 
-    @Test("공유 준비(메인 밖) — 판이 꺼낼 수 있는 파일만 준비된다. 지금 판(CSV 전용판)은 번들의 xlsx 샘플을 꺼내지 않는다(1-e ④)")
+    // 준비는 전역 큐에서 돌아 `$previewing`(작업 지역 값)이 닿지 않는다 — 늘 이 빌드의 판(`selected`)을 따른다. 그래서 CSV 전용판이 xlsx를
+    // 꺼내지 않는 것은 준비가 부르는 `exportCopy` 층에서 본다(`PackSampleEditionTests.csvEditionHidesWorkbookSamples`)
+    @Test("공유 준비(메인 밖) — 판이 꺼낼 수 있는 파일만 준비된다. 지금 판(1.3.0 — xlsx 중심판, R38)은 번들의 xlsx 샘플도 꺼낸다(1-e ④)")
     func prepareForSharing() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("PackSampleShareTests-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let xlsx = PackSample.File(kind: .numbered, format: .xlsx)
-        #expect(PackCopySet.selected == .csv && xlsx.bundledURL == nil)
+        #expect(PackCopySet.selected == .xlsx && xlsx.bundledURL != nil)
         let prepared = await PackSample.prepareForSharing([csvFile(.numbered), csvFile(.phrases), xlsx], into: directory)
-        #expect(Set(prepared.keys) == [csvFile(.numbered), csvFile(.phrases)])
+        #expect(Set(prepared.keys) == [csvFile(.numbered), csvFile(.phrases), xlsx])
         #expect(prepared[csvFile(.phrases)]?.lastPathComponent == "문구형 샘플.csv")
+        #expect(prepared[xlsx]?.lastPathComponent == "번호형 샘플.xlsx")
     }
 }

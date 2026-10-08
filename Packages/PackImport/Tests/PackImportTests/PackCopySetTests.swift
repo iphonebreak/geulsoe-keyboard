@@ -33,10 +33,10 @@ private func screenCopy(_ set: PackCopySet) -> [String] {
 @Suite("외부 채움글 1-c 6단계 ① — 문구 두 벌(CSV 전용판 / xlsx 중심판)")
 struct PackCopySetTests {
 
-    @Test("★ 1.3.0 빌드는 CSV 전용판이다(R12) — xlsx 중심판으로 바꾸는 것은 1-e 출시 게이트를 넘은 뒤 이 시험과 함께")
-    func selectedIsCSV() {
-        #expect(PackCopySet.selected == .csv)
-        #expect(PackCopySet.current == .csv)
+    @Test("★ 1.3.0 빌드는 xlsx 중심판이다(R38 — 1-e 게이트 준비 뒤 사장님 승인 2026-10-08). CSV 전용판(R12 대비책)으로 되돌리면 이 시험과 함께")
+    func selectedIsXLSX() {
+        #expect(PackCopySet.selected == .xlsx)
+        #expect(PackCopySet.current == .xlsx)
     }
 
     @Test("판을 묶지 않으면 표는 고른 판을 따르고, 묶으면 그 판을 따른다")

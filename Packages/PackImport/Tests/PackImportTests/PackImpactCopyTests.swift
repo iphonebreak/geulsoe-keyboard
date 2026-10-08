@@ -24,12 +24,15 @@ private func name(_ id: String) -> String { names[id] ?? PackNoticeCopy.unnamedP
 @Suite("외부 채움글 1-c 3단계 — 문구 (2-B·2-C · 2-E·2-F · U1)")
 struct PackImpactCopyTests {
 
-    @Test("★ 2-B·2-C — 절 제목·추가 줄·빈 상태 풋터(CSV판)·「내 채움글 (우선순위)」 줄(목록 풋터·머리글 버튼은 없다 — R30)")
+    @Test("★ 2-B·2-C — 절 제목·추가 줄·빈 상태 풋터(두 판)·「내 채움글 (우선순위)」 줄(목록 풋터·머리글 버튼은 없다 — R30)")
     func sectionCopy() {
         #expect(PackNoticeCopy.externalSectionTitle == "외부 채움글")
         #expect(PackNoticeCopy.addPack == "외부 채움글 추가")
-        #expect(PackNoticeCopy.emptyListFooter
+        #expect(PackCopySet.$previewing.withValue(.csv) { PackNoticeCopy.emptyListFooter }
                 == "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
+        // 지금 판(1.3.0 — xlsx 중심판, R38)
+        #expect(PackNoticeCopy.emptyListFooter
+                == "엑셀 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
         // 2-C 목록 풋터(「위에 있는 줄이 먼저 떠요 …」)는 뺐다 — 팩이 있으면 풋터가 없다(사장님 실기 2026-10-07, `ExternalSectionFooterTests`)
         #expect(PackNoticeCopy.userSlotTitle == "내 채움글 (우선순위)")
         #expect(PackNoticeCopy.userSlotDetail == "길게 눌러 끌면 우선순위가 바뀌어요 · 문구는 아래 「내 채움글」 절에서")

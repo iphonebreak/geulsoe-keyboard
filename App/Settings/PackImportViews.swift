@@ -5,7 +5,7 @@ import TadakDomain
 
 // 외부 채움글 1-c 4단계 — 가져오기 입구: 3-A 첫 화면 · 3-B 만드는 법 · 3-C 샘플 받기(6단계) · 3-D 파일 고르기 · 3-E 붙여넣기
 // (계획서 `external-snippet-packs-1c-plan.md` 3-2절·5절 4·6행, 시안 `docs/design/external-snippet-packs/index.html` 3-A~3-E).
-// 문구는 전부 `PackImportCopy` — 판(`PackCopySet`, 1.3.0은 CSV 전용판)이 바꾸는 줄도 그 표가 판에서 읽는다. 이 화면에 문구를 직접 쓰지 않는다
+// 문구는 전부 `PackImportCopy` — 판(`PackCopySet`, 1.3.0은 xlsx 중심판 — R38)이 바꾸는 줄도 그 표가 판에서 읽는다. 이 화면에 문구를 직접 쓰지 않는다
 // (U6·금칙어·숫자·AC-35 검사가 `swift test`로 돈다 — AC-35 검색은 이 파일의 문자열도 본다).
 // 고른 파일·붙인 글은 `PackImportFlowView`(4-A~4-I)가 읽는다.
 //
@@ -19,7 +19,7 @@ let packImportContentTypes: [UTType] = PackImportFileTypes.allowed(for: .selecte
 
 // MARK: - 3-A 첫 화면
 
-/// 「외부 채움글 추가」 — 주 버튼 하나(CSV 파일 가져오기) · 처음이라면(만드는 법 · 샘플 받기) · 그 밖의 방법(붙여넣기)
+/// 「외부 채움글 추가」 — 주 버튼 하나(판의 파일 가져오기 — xlsx판은 엑셀, CSV판은 CSV) · 처음이라면(만드는 법 · 샘플 받기) · 그 밖의 방법(붙여넣기, xlsx판은 CSV 파일도)
 struct PackImportStartView: View {
     /// 가져오기를 마쳤다(4-M) — 채움글 화면으로 돌아가 그 팩 행을 강조한다(U5). 가져오기 시트가 **닫힌 뒤** 부른다
     let onFinished: @MainActor (_ packID: String) -> Void

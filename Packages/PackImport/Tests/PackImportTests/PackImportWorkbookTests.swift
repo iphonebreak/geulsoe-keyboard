@@ -797,11 +797,11 @@ private let twoSheets = WorkbookBuilder.workbook([
 @Suite("외부 채움글 1-e ③ — 가져오기 상태기계: xlsx 입력 · 시트 고르기 (AC-36)")
 struct PackWorkbookSessionTests {
 
-    @Test("★ 판이 xlsx를 받는지 — CSV 전용판은 받지 않는다(AC-35), 지금 판은 CSV 전용판 그대로")
+    @Test("★ 판이 xlsx를 받는지 — CSV 전용판은 받지 않는다(AC-35), 지금 판(1.3.0 — xlsx 중심판, R38)은 받는다")
     func acceptanceFollowsCopySet() {
-        #expect(PackCopySet.selected == .csv && !PackCopySet.selected.acceptsWorkbookFiles && PackCopySet.xlsx.acceptsWorkbookFiles)
-        #expect(!PackImportSession().acceptsWorkbookFiles)
-        #expect(PackCopySet.$previewing.withValue(.xlsx) { PackImportSession().acceptsWorkbookFiles })
+        #expect(PackCopySet.selected == .xlsx && PackCopySet.selected.acceptsWorkbookFiles && !PackCopySet.csv.acceptsWorkbookFiles)
+        #expect(PackImportSession().acceptsWorkbookFiles)
+        #expect(!PackCopySet.$previewing.withValue(.csv) { PackImportSession().acceptsWorkbookFiles })
     }
 
     @Test("★ 파일 고르기 형식 — CSV 전용판은 CSV·TSV·글만, xlsx 중심판은 xlsx(org.openxmlformats.spreadsheetml.sheet)를 앞에 더한다")
@@ -813,7 +813,7 @@ struct PackWorkbookSessionTests {
         let workbook = try #require(xlsx.first)
         #expect(workbook.identifier == "org.openxmlformats.spreadsheetml.sheet")
         #expect(workbook.preferredFilenameExtension == "xlsx")
-        #expect(PackImportFileTypes.allowed(for: .selected) == csv)
+        #expect(PackImportFileTypes.allowed(for: .selected) == xlsx)   // 앱 선택기(`packImportContentTypes`)가 읽는 값 — 1.3.0은 xlsx 중심판(R38)
     }
 
     @Test("★ 시트 하나 — 글자 확인·시트 고르기 없이 바로 미리보기, 칸 나누기 고르기 없음")
