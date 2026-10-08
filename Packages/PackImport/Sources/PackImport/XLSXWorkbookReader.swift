@@ -25,17 +25,18 @@ public struct XLSXWorkbookReader: Sendable {
         /// 팩 이름 칸의 기본값 — 엑셀 `Sheet1`, 구글 `시트1`처럼 앱이 붙인 이름이면 비워 둔다(6-4 P-10 보강 `[판단]`)
         public var suggestedPackName: String? { Self.suggestedPackName(forSheetName: name) }
 
-        /// 앞뒤 공백을 뗀 이름. 비었거나 `Sheet1`·`Sheet N`·`시트1`·`시트 N` 꼴(대소문자 무시, 숫자 앞 공백 하나까지)이면 nil
+        /// 목록 이름과 **같은 정리**(`PackSheetNames.cleaned` — 문자 정리·줄바꿈과 공백 묶음은 공백 하나·앞뒤 공백 뗌)를 거친 이름.
+        /// 보이는 글자가 없거나, `Sheet1`·`Sheet N`·`시트1`·`시트 N` 꼴(대소문자 무시, 숫자 앞 공백 하나까지)이거나, 이름 상한(`PackLimits.name`)을
+        /// 넘으면 nil(메타 값과 같은 규칙 — 거부하지 않고 채우지 않는다, 5-6). 원래 이름에서 바로 만든다 — 목록의 구별 표시(「시트 n」·「 (k)」)는 싣지 않는다
         public static func suggestedPackName(forSheetName name: String) -> String? {
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return nil }
-            let lowered = trimmed.lowercased()
+            guard let cleaned = PackSheetNames.cleaned(name), PackLimits.name.admits(cleaned) else { return nil }
+            let lowered = cleaned.lowercased()
             for prefix in ["sheet", "시트"] where lowered.hasPrefix(prefix) {
                 var rest = lowered.dropFirst(prefix.count)
                 if rest.first == " " { rest = rest.dropFirst() }
                 if !rest.isEmpty, rest.allSatisfy({ $0.isASCII && $0.isNumber }) { return nil }
             }
-            return trimmed
+            return cleaned
         }
     }
 

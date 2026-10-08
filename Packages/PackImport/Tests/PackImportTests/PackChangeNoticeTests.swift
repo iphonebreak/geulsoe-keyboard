@@ -374,9 +374,9 @@ private let countSentinels = ["37개", "41개"]
 @Suite("외부 채움글 1-c 1단계 — 문구 표 검사 (한도 숫자 0 · 해요체)")
 struct PackNoticeCopyLintTests {
 
-    @Test("★ 8절 #3 — 한도 숫자를 쓰지 않는다: 숫자는 「외 n개」의 개수뿐")
-    func noLimitNumbers() {
-        for text in stage1To3Copy {
+    @Test("★ 8절 #3 — 한도 숫자를 쓰지 않는다: 숫자는 「외 n개」의 개수뿐 — 두 판 모두(검증 G2)", arguments: PackCopySet.allCases)
+    func noLimitNumbers(_ set: PackCopySet) {
+        for text in PackCopySet.$previewing.withValue(set, operation: { stage1To3Copy }) {
             var withoutCount = text.replacingOccurrences(of: #"외 \d+개"#, with: "", options: .regularExpression)
             for sentinel in countSentinels { withoutCount = withoutCount.replacingOccurrences(of: sentinel, with: "") }
             #expect(!withoutCount.contains { $0.isNumber }, "\(text)")

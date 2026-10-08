@@ -552,7 +552,7 @@ struct PackWorkbookSheetInfoTests {
         var rows = [WorkbookRow.text(["번호", "본문"]), WorkbookRow.text(["1", "가"])]
         if let metaName { rows.insert(WorkbookRow.text(["#이름", metaName]), at: 0) }
         let draft = try WorkbookHelper.draft(WorkbookBuilder.workbook(rows, name: sheetName))
-        #expect(draft.sheetName == PackTextSanitizer.sanitize(sheetName).text, "화면에 그릴 이름은 문자 정리 뒤(S7)")
+        #expect(draft.sheetName == PackSheetNames.display([sheetName]).first, "화면에 그릴 이름은 목록과 같은 정리 뒤(S7·게이트 준비)")
         #expect(PackImportForm(draft: draft).name == expected)
         #expect(draft.meta.name == metaName, "시트 이름은 정보 줄 값이 아니다 — 폼의 「파일에서」 표시를 받지 않는다")
     }
@@ -668,6 +668,94 @@ struct PackWorkbookSheetChoiceTests {
         #expect(try WorkbookHelper.sheets(data) == [PackSheetSummary(name: "번호", rowCount: 3), PackSheetSummary(name: "깨짐", rowCount: nil)])
         #expect(WorkbookHelper.failure(data, sheet: 1) == .workbook(.invalidCellReference))
         #expect(try WorkbookHelper.draft(data, sheet: 0).items.count == 2)
+    }
+}
+
+// MARK: - 시트 이름 표시 정리 (게이트 준비 — 사장님 결정 2026-10-08, 검증 `verify-ext-1e-123.md` 2절 끝 관찰)
+
+@Suite("외부 채움글 1-e 게이트 준비 — 시트 이름 표시 정리(빈 이름 「시트 n」·같은 모양 「이름 (k)」·줄바꿈은 공백 하나)")
+struct PackSheetNameDisplayTests {
+
+    private static let rows = [WorkbookRow.text(["번호", "본문"]), WorkbookRow.text(["1", "가"])]
+
+    @Test("★ 목록 이름 표 — 정리(S7) 뒤 보이는 글자가 없으면 「시트 n」(n = 목록 자리), 같은 모양은 뒤 것부터 「이름 (k)」, 줄바꿈·탭·공백 묶음은 공백 하나", arguments: [
+        // 정상 — 그대로(대소문자가 다르면 다른 모양)
+        (["번호", "인사"], ["번호", "인사"]),
+        (["Sheet", "sheet", "가", "가나"], ["Sheet", "sheet", "가", "가나"]),
+        // ⓐ 빈 이름 — 문자 정리가 다 지운 이름(`_x200B_`·`_x202E_`)·공백뿐·보이지 않는 글자뿐(한글 채움 문자·홀로 선 ZWJ·변이 선택자)
+        (["가", "\u{200B}"], ["가", "시트 2"]),
+        (["\u{200B}\u{202E}", "   ", "\u{3164}", "\u{200D}", "\u{FE0F}", "\u{3164} \u{3164}"], ["시트 1", "시트 2", "시트 3", "시트 4", "시트 5", "시트 6"]),
+        // ⓑ 같은 모양 둘 — 정리가 뺀 제로폭 공백 · 보이지 않는 글자(ZWNJ·변이 선택자 — 이름에는 남기고 구별만) · NFC/NFD
+        (["가", "가\u{200B}"], ["가", "가 (2)"]),
+        (["가", "가\u{200C}"], ["가", "가\u{200C} (2)"]),
+        (["★", "★\u{FE0F}"], ["★", "★\u{FE0F} (2)"]),
+        (["한", "\u{1112}\u{1161}\u{11AB}"], ["한", "한 (2)"]),
+        // ⓑ 같은 모양 셋 — 앞뒤 공백·제로폭 공백, 사이에 다른 이름
+        (["가", " 가 ", "나", "가\u{200B}"], ["가", "가 (2)", "나", "가 (3)"]),
+        // ⓑ 「이름 (k)」가 다른 시트의 실제 이름과 겹치면 그 k를 건너뛴다(뒤에 있어도) — 결과는 모두 다른 모양
+        (["가", "가", "가 (2)"], ["가", "가 (3)", "가 (2)"]),
+        (["가 (2)", "가", "가"], ["가 (2)", "가", "가 (3)"]),
+        // ⓐ×ⓑ — 「시트 n」이 실제 이름과 같은 모양이면 「시트 n」 쪽이 뒤라 구별된다
+        (["시트 2", "\u{200B}"], ["시트 2", "시트 2 (2)"]),
+        (["\u{200B}", "시트 1"], ["시트 1", "시트 1 (2)"]),
+        // ⓒ 줄바꿈(`_x000A_`)·CRLF·탭·U+2028·전각 공백·공백 묶음 → 공백 하나, 앞뒤는 뗀다
+        (["가\n나"], ["가 나"]),
+        (["가\r\n\t나", "\n다\n", "라\u{2028}마", "바\u{3000}\u{3000}사", "아   자"], ["가 나", "다", "라 마", "바 사", "아 자"]),
+        // ⓒ×ⓑ — 줄바꿈만 다른 두 이름은 정리하면 같은 모양
+        (["가\n나", "가 나"], ["가 나", "가 나 (2)"]),
+    ] as [([String], [String])])
+    func displayTable(_ names: [String], expected: [String]) {
+        let shown = PackSheetNames.display(names)
+        #expect(shown == expected)
+        #expect(Set(shown.map(PackSheetNames.appearance)).count == shown.count, "보이는 모양이 모두 다르다")
+        #expect(!shown.contains { $0.contains(where: { $0.isNewline || $0 == "\t" }) }, "줄바꿈·탭이 남지 않는다")
+    }
+
+    @Test("★ 문구 표 — 「시트 n」·「이름 (k)」는 문구 표 한 곳(U6·금칙어·숫자 lint는 `workbookOnlyCopy`가 돈다). 「시트 n」은 팩 이름 기본값 꼴(시트 N)이다")
+    func copy() {
+        #expect(PackImportCopy.untitledSheetName(3) == "시트 3")
+        #expect(PackImportCopy.duplicateSheetName("인사", 2) == "인사 (2)")
+        #expect(workbookOnlyCopy.contains(PackImportCopy.untitledSheetName(37)) && workbookOnlyCopy.contains(PackImportCopy.duplicateSheetName("인사", 37)))
+        #expect(XLSXWorkbookReader.Sheet.suggestedPackName(forSheetName: PackImportCopy.untitledSheetName(3)) == nil)
+    }
+
+    @Test("★ 통합 문서 경로 — 고르기 목록·초안의 이름은 같은 규칙(n은 숨긴 시트를 뺀 목록 자리), 팩 이름 기본값은 원래 이름을 정리한 것(「시트 n」·「 (k)」 없음)")
+    func throughWorkbook() throws {
+        let data = WorkbookBuilder.workbook([
+            WorkbookBuilder.sheet("숨김", Self.rows, state: "hidden", index: 1),
+            WorkbookBuilder.sheet("업무", Self.rows, index: 2),
+            WorkbookBuilder.sheet("업무_x200B_", Self.rows, index: 3),
+            WorkbookBuilder.sheet("_x200B_", Self.rows, index: 4),
+            WorkbookBuilder.sheet("가_x000A_나", Self.rows, index: 5),
+            WorkbookBuilder.sheet("Sheet_x000A_1", Self.rows, index: 6),
+        ])
+        #expect(try WorkbookHelper.sheets(data).map(\.name) == ["업무", "업무 (2)", "시트 3", "가 나", "Sheet 1"])
+        let expected: [(sheetName: String, packName: String?)] = [("업무", "업무"), ("업무 (2)", "업무"), ("시트 3", nil), ("가 나", "가 나"), ("Sheet 1", nil)]
+        for (index, want) in expected.enumerated() {
+            let draft = try WorkbookHelper.draft(data, sheet: index)
+            #expect(draft.sheetName == want.sheetName, "\(index)")
+            #expect(draft.suggestedPackName == want.packName, "\(index)")
+            #expect(PackImportForm(draft: draft).name == (want.packName ?? ""), "\(index)")
+        }
+    }
+
+    @Test("★ 보이는 시트가 하나뿐이어도 같은 규칙 — 빈 이름은 「시트 1」, 팩 이름 칸은 비운다")
+    func singleUntitledSheet() throws {
+        let data = WorkbookBuilder.workbook([WorkbookBuilder.sheet("숨김", Self.rows, state: "hidden", index: 1),
+                                             WorkbookBuilder.sheet("_x200B__x3164_", Self.rows, index: 2)])
+        let draft = try WorkbookHelper.draft(data)
+        #expect(draft.sheetName == "시트 1" && draft.suggestedPackName == nil && PackImportForm(draft: draft).name == "")
+    }
+
+    @Test("같은 모양이 많아도 한 번에 정해진다 — 3,000개(실제 이름 「가 (k)」가 섞여도) 모두 다른 모양, 1초 안")
+    func manyDuplicates() {
+        let names = (0..<3_000).map { $0 % 3 == 2 ? "가 (\($0))" : "가" }
+        let started = Date()
+        let shown = PackSheetNames.display(names)
+        let elapsed = Date().timeIntervalSince(started)
+        #expect(Set(shown.map(PackSheetNames.appearance)).count == names.count)
+        #expect(Array(shown.prefix(3)) == ["가", "가 (3)", "가 (2)"], "둘째 「가」는 실제 이름 「가 (2)」를 건너뛴다")
+        #expect(elapsed < 1, "\(elapsed)")
     }
 }
 

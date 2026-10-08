@@ -147,8 +147,13 @@ public struct PackDraft: Equatable, Sendable {
     public var delimiter: CSVDelimiter?
     /// 자동 판정(5-2)이 채택한 구분자 — 구분자를 골라 읽었어도 같은 원본의 판정이다. **둘 이상일 때만** 미리보기가 「칸 나누기」를 보인다(R29). xlsx는 빈 배열
     public var delimiterCandidates: [CSVDelimiter]
-    /// (xlsx) 읽은 시트의 이름 — 화면과 팩 이름 기본값(`suggestedPackName`)에만 쓴다. 로그·분석·오류 값에 싣지 않는다(6-4·AC-34). CSV는 nil
+    /// (xlsx) 읽은 시트의 이름 — **4-D 목록에 보인 그대로**(`PackSheetNames.display` — 정리·「시트 n」·「이름 (k)」). 화면에만 쓴다.
+    /// 로그·분석·오류 값에 싣지 않는다(6-4·AC-34). CSV는 nil
     public var sheetName: String?
+    /// 팩 이름 칸의 기본값 후보 — (xlsx) 시트의 원래 이름을 목록과 같은 규칙으로 정리한 것(`XLSXWorkbookReader.Sheet.suggestedPackName` —
+    /// 앱이 붙인 이름(`Sheet1`·`시트1`)·빈 이름·이름 상한 초과는 nil, 목록의 구별 표시 「시트 n」·「 (k)」는 싣지 않는다). `#이름`이 있으면 폼은
+    /// 그쪽을 쓴다. CSV는 nil
+    public var suggestedPackName: String?
     /// (xlsx) 받은 행 가운데 숨긴 행 수 — 미리보기 「숨긴 행 N개도 가져와요」(6-4: 읽되 알린다). CSV는 0
     public var hiddenRowCount: Int
     /// (xlsx) 가져오는 열(번호·단축어·제목·본문) 가운데 숨긴 열 수 — 「숨긴 열 N개도 가져와요」. CSV는 0
@@ -178,14 +183,6 @@ public struct PackDraft: Equatable, Sendable {
     public var requiresConfirmation: Bool { skippedRatio >= PackLimits.skipRatioRequiringConfirmation }
     /// 유효 레코드 0이면 영구 비활성(5-5)
     public var isImportable: Bool { acceptedRecordCount > 0 }
-
-    /// 팩 이름 칸의 기본값 후보 — (xlsx) 시트 이름. 앱이 붙인 이름(`Sheet1`·`시트1`)·빈 이름은 nil(6-4 P-10 보강), 문자 정리(11절) 뒤
-    /// 이름 상한(`PackLimits.name`)을 넘으면 nil(메타 값과 같은 규칙 — 거부하지 않고 채우지 않는다, 5-6). `#이름`이 있으면 폼은 그쪽을 쓴다
-    public var suggestedPackName: String? {
-        guard let sheetName, let suggested = XLSXWorkbookReader.Sheet.suggestedPackName(forSheetName: sheetName) else { return nil }
-        let name = PackTextSanitizer.sanitize(suggested).text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !name.isEmpty && PackLimits.name.admits(name) ? name : nil
-    }
 }
 
 public enum PackImportOutcome: Equatable, Sendable {
@@ -196,7 +193,7 @@ public enum PackImportOutcome: Equatable, Sendable {
 
 /// (xlsx) 시트 고르기 화면의 한 줄(4-D) — 이름은 화면에만(로그·분석·오류 값에 싣지 않는다, AC-34)
 public struct PackSheetSummary: Equatable, Sendable {
-    /// 시트 이름(`_xHHHH_`를 푼 것)
+    /// 목록에 보일 이름(`_xHHHH_`를 푼 뒤 `PackSheetNames.display` — 정리·「시트 n」·「이름 (k)」)
     public let name: String
     /// 대략의 행 수 — 비지 않은 행(정보 줄·머리글 포함). 목록을 만들 때 읽지 못한 시트는 nil(고르면 그때 거부된다)
     public let rowCount: Int?
@@ -357,22 +354,20 @@ public enum PackImporter {
             throw .workbook(error)
         }
         var draft = try PackRecordReader.read(table)
-        draft.sheetName = displayName(chosen.name)
+        draft.sheetName = PackSheetNames.display(reader.sheets.map(\.name))[index]
+        draft.suggestedPackName = chosen.suggestedPackName
         return .draft(draft)
     }
 
     /// 시트 고르기 목록 — 표시 시트마다 대략의 행 수. 한 독자의 해제 총량(①)을 나눠 쓰므로 큰 시트 뒤의 시트는 총량에 걸릴 수 있다 —
     /// 그 시트(와 읽지 못한 시트)는 행 수 없이 보이고, 고르면 새로 연 독자가 다시 읽는다(②-6 12번)
+    /// 이름은 `PackSheetNames.display` — 제어·방향 재정의·제로폭 문자를 뺀 뒤(보안 검토 S7 — 표시 위장) 빈 이름·같은 모양·줄바꿈을 정리한다
+    /// (게이트 준비). 길이는 ②의 시트 이름 상한(255B)에 묶여 있다
     private static func sheetSummaries(_ reader: inout XLSXWorkbookReader) -> [PackSheetSummary] {
-        reader.sheets.map { sheet in
-            PackSheetSummary(name: displayName(sheet.name), rowCount: try? reader.table(for: sheet).rows.count)
+        let names = PackSheetNames.display(reader.sheets.map(\.name))
+        return reader.sheets.enumerated().map { index, sheet in
+            PackSheetSummary(name: names[index], rowCount: try? reader.table(for: sheet).rows.count)
         }
-    }
-
-    /// 화면에 그릴 시트 이름 — `_xHHHH_`로 들어온 제어·방향 재정의·제로폭 문자를 문자 정리(11절)로 뺀다(보안 검토 S7 — 표시 위장).
-    /// 길이는 ②의 시트 이름 상한(255B)에 묶여 있다
-    static func displayName(_ name: String) -> String {
-        PackTextSanitizer.sanitize(name).text
     }
 }
 
@@ -606,7 +601,7 @@ enum PackRecordReader {
 
         let (entries, items, duplicates) = rows.finish(mode: header.mode)
         return PackDraft(encoding: nil, hadBOM: false, needsEncodingConfirmation: false, delimiter: delimiter,
-                         delimiterCandidates: delimiter.map { [$0] } ?? [], sheetName: nil, hiddenRowCount: rows.acceptedHidden,
+                         delimiterCandidates: delimiter.map { [$0] } ?? [], sheetName: nil, suggestedPackName: nil, hiddenRowCount: rows.acceptedHidden,
                          hiddenColumnCount: Set(header.columns.values).intersection(hiddenColumns).count,
                          mode: header.mode, meta: meta, entries: entries, items: items,
                          skipped: rows.skipped, dataRecordCount: rows.dataRecordCount, acceptedRecordCount: rows.accepted,

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import TadakDomain
 @testable import PackImport
 
 // 외부 채움글 1-e ② — xlsx XML → `RawTable` **정상 경로·셀 정책**(PDR 6-4·6-5b, AC-31·36). 합성 워크북은 `XLSXFixture`로 짓는다.
@@ -329,10 +330,18 @@ struct XLSXWorkbookListTests {
         #expect(try table(fixture).rows.count == 1)
     }
 
-    @Test("★ 시트 이름 → 팩 이름 기본값 — Sheet1·Sheet N·시트1·시트 N 꼴과 빈 이름은 비워 둔다(6-4)", arguments: [
+    @Test("★ 시트 이름 → 팩 이름 기본값 — Sheet1·Sheet N·시트1·시트 N 꼴과 빈 이름은 비워 둔다(6-4). 목록 이름과 같은 정리(게이트 준비 ⓐⓒ)를 거친다", arguments: [
         ("Sheet1", nil), ("Sheet 2", nil), ("sheet12", nil), ("SHEET3", nil), ("시트1", nil), ("시트 2", nil), ("  Sheet1  ", nil), ("   ", nil),
         ("사자성어", "사자성어"), ("Sheet1 복사본", "Sheet1 복사본"), ("시트", "시트"), ("Sheet", "Sheet"), ("  업무 상용구 ", "업무 상용구"),
         ("Sheet_1", "Sheet_1"), ("Sheet1a", "Sheet1a"),
+        // 게이트 준비 — 문자 정리 뒤 빈 이름·보이는 글자 없음은 비움(ⓐ), 줄바꿈·탭·공백 묶음은 공백 하나(ⓒ — 그 뒤에 기본 이름 꼴을 본다)
+        ("\u{200B}", nil), ("\u{3164}", nil), ("Sheet\u{200B}1", nil), ("시트\n2", nil), ("Sheet\t\t3", nil),
+        ("가\n나", "가 나"), ("업무\r\n\n상용구", "업무 상용구"), ("인사\u{200B}말", "인사말"),
+        // 사용자가 직접 쓴 「(2)」는 이름이다 — 목록의 구별 표시 「 (k)」는 이 함수를 지나지 않는다
+        ("가 (2)", "가 (2)"),
+        // 이름 상한(`PackLimits.name`)은 정리 **뒤** 길이로 — 줄바꿈 묶음이 공백 하나가 되어 상한 안이면 받는다
+        (String(repeating: "가", count: PackLimits.name.characters + 1), nil),
+        (String(repeating: "가", count: PackLimits.name.characters - 2) + "\n\n\n가", String(repeating: "가", count: PackLimits.name.characters - 2) + " 가"),
     ] as [(String, String?)])
     func packNameSuggestion(_ name: String, expected: String?) {
         #expect(XLSXWorkbookReader.Sheet.suggestedPackName(forSheetName: name) == expected)

@@ -230,6 +230,12 @@ public enum PackImportCopy {
     /// 고른 시트를 읽지 못한 거부 화면에서 고르기 화면으로
     public static let chooseAnotherSheet = "다른 시트 고르기"
 
+    /// 시트 줄의 이름 — 문자 정리(S7) 뒤 보이는 글자가 없는 이름(`_x200B_`만 등) 대신. n은 **목록에 보이는 자리**(숨긴 시트 제외, 1부터).
+    /// 팩 이름 기본값에는 쓰지 않는다(`PackSheetNames`)
+    public static func untitledSheetName(_ position: Int) -> String { "시트 \(position)" }
+    /// 시트 줄의 이름 — 같은 모양의 이름이 앞에 이미 있을 때 뒤 시트부터 구별(「인사 (2)」). 목록 전용 — 팩 이름 기본값에는 붙이지 않는다
+    public static func duplicateSheetName(_ name: String, _ ordinal: Int) -> String { "\(name) (\(ordinal))" }
+
     /// 시트 줄의 보조 글 — 대략의 행 수(정보 줄·머리글 포함). 읽지 못한 시트는 nil(아무것도 쓰지 않는다)
     public static func sheetRowCount(_ count: Int?) -> String? {
         guard let count else { return nil }

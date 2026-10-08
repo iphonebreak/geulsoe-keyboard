@@ -432,15 +432,20 @@ var workbookOnlyCopy: [String] {
     texts += [PackImportCopy.sheetTitle, PackImportCopy.sheetHeader, PackImportCopy.sheetFooter, PackImportCopy.reviewSheetAgain,
               PackImportCopy.chooseAnotherSheet, PackImportCopy.hiddenRows(37), PackImportCopy.hiddenColumns(37)]
     texts += [PackImportCopy.sheetRowCount(37), PackImportCopy.sheetRowCount(0)].compactMap { $0 }
+    texts += [PackImportCopy.untitledSheetName(37), PackImportCopy.duplicateSheetName("인사", 37)]   // 4-D 목록 이름(게이트 준비 ⓐⓑ)
     texts += skipTable.flatMap { [PackImportCopy.skipTitle(SkippedRecord(row: 12, reason: $0.0)), PackImportCopy.skipFix(SkippedRecord(row: 12, reason: $0.0))] }
     return texts
 }
 
-/// 숫자 검사가 지우는 것 — 글자 방식 이름 · 시안 예시(사자성어 12번 · 007 · 1-2) · 표시 위치·개수(12번째·40번째·37·41·57%) ·
+/// 숫자 검사가 지우는 것 — 글자 방식 이름 · 시안 예시(사자성어 12번 · 007 · 1-2 · 1/2 → 1월 2일) · 표시 위치·개수(12번째·40번째·37·41·57%) ·
 /// 편집기·파일 형식이 이미 사용자에게 보이는 **필드 상한**(단축어 10개·40자, 제목 60자, 본문 3,000자 — P-8 잠정, 번호 1~9999, #틀 1~8개).
-/// 예산 한도(R2) 숫자는 여기에 없다 — 들어가면 검사에 걸린다
-private let stage4AllowedNumbers = ["UTF-8", "UTF-16", "CP949", "사자성어 12번", "007", "1-2", "12번째", "40번째", "37개", "37행",
-                                    "37줄", "41개", "57%", "10개까지", "40자까지", "60자까지", "3,000자까지", "1~9999", "1~8개"]
+/// 예산 한도(R2) 숫자는 여기에 없다 — 들어가면 검사에 걸린다.
+/// 「1/2 → 1월 2일」은 xlsx 중심판 3-B 3절의 날짜 칸 예시다 — CSV판의 `007`·`1-2`와 같은 이유(숫자·날짜로 **바뀌는 모양**을 보여 주는 예시이지
+/// 한도가 아니다). 두 판을 돌게 된 뒤(검증 G2) 허용했다 — 사장님 결정 2026-10-08. 예시를 통째로 두어 다른 자리의 `1/2`는 걸린다.
+/// 「시트 37」·「인사 (37)」은 4-D 목록 이름의 **표시 위치**(목록 자리·구별 번호 — 「12번째」와 같은 종류)다
+private let stage4AllowedNumbers = ["UTF-8", "UTF-16", "CP949", "사자성어 12번", "007", "1-2", "1/2 → 1월 2일", "12번째", "40번째", "37개", "37행",
+                                    "37줄", "41개", "57%", "10개까지", "40자까지", "60자까지", "3,000자까지", "1~9999", "1~8개",
+                                    "시트 37", "인사 (37)"]
 
 /// 표시 개수 — 「외 n개」와 4-I 「같은 단축어 n개」
 private let countPatterns = [#"외 \d+개"#, #"같은 단축어 \d+개"#]
@@ -448,9 +453,9 @@ private let countPatterns = [#"외 \d+개"#, #"같은 단축어 \d+개"#]
 @Suite("외부 채움글 1-c 4단계 — 문구 검사 (숫자)")
 struct PackImportCopyLintTests {
 
-    @Test("★ 숫자는 허용 목록뿐 — 예산 한도 숫자 0(8절 #3)")
-    func onlyAllowedNumbers() {
-        for text in stage4Copy {
+    @Test("★ 숫자는 허용 목록뿐 — 예산 한도 숫자 0(8절 #3) — 두 판 모두(검증 G2)", arguments: PackCopySet.allCases)
+    func onlyAllowedNumbers(_ set: PackCopySet) {
+        for text in PackCopySet.$previewing.withValue(set, operation: { stage4Copy }) {
             var rest = countPatterns.reduce(text) { $0.replacingOccurrences(of: $1, with: "", options: .regularExpression) }
             for allowed in stage4AllowedNumbers { rest = rest.replacingOccurrences(of: allowed, with: "") }
             #expect(!rest.contains { $0.isNumber }, "\(text)")

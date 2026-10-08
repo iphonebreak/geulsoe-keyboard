@@ -1056,9 +1056,9 @@ struct PackFormCopyTests {
         #expect(!allReviewStatuses.compactMap(PackFormCopy.templateStatusLabel).contains("선택됨"))
     }
 
-    @Test("★ 숫자는 필드 상한·시안 예시뿐 — 예산 한도 숫자 0")
-    func onlyAllowedNumbers() {
-        for text in stage5Copy {
+    @Test("★ 숫자는 필드 상한·시안 예시뿐 — 예산 한도 숫자 0 — 두 판 모두(검증 G2)", arguments: PackCopySet.allCases)
+    func onlyAllowedNumbers(_ set: PackCopySet) {
+        for text in PackCopySet.$previewing.withValue(set, operation: { stage5Copy }) {
             var rest = text.replacingOccurrences(of: #"「[^」]*」 · [\d,]+개"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"(건너뛴|외) [\d,]+개"#, with: "", options: .regularExpression)
             for allowed in stage5AllowedNumbers { rest = rest.replacingOccurrences(of: allowed, with: "") }
