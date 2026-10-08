@@ -314,13 +314,21 @@ struct PackCopyLintTests {
         }
     }
 
-    @Test("★ AC-35 — 앱(`App/`) 소스에 직접 쓴 문자열에도 xlsx 언급 0(주석 제외)")
+    @Test("★ AC-35 — CSV 전용판이면 앱(`App/`) 소스에 직접 쓴 문자열에도 xlsx 언급 0(주석 제외)")
     func appSourceHasNoXLSX() throws {
         let literals = try appStringLiterals()
         // 검색이 실제로 돈다 — 앱이 직접 쓴 문구 하나가 잡혀야 한다(SnippetCleanupView의 접근성 힌트)
         #expect(literals.contains { $0.file == "SnippetCleanupView.swift" && $0.literal == "고치기" })
         #expect(literals.count > 100)
-        for (file, literal) in literals { #expect(PackCopyLint.xlsxMentions(in: literal).isEmpty, "\(file): \(literal)") }
+        let mentions = literals.filter { !PackCopyLint.xlsxMentions(in: $0.literal).isEmpty }
+        // 1.3.0은 xlsx 중심판(R38) — 앱이 판과 무관하게 직접 쓴 문장(처리방침 「엑셀(xlsx)·CSV 파일」, `1fe54c9`)이 xlsx를 말해도 된다.
+        // **CSV 전용판으로 되돌리면 이 검사가 다시 켜져** 그 문장들을 잡는다 — 판 전환 한 줄만 바꾸고 처리방침을 그대로 두는 일을 막는다
+        if PackCopySet.selected == .csv {
+            for (file, literal) in mentions { Issue.record("\(file): \(literal)") }
+        } else {
+            #expect(mentions.allSatisfy { $0.file == "PrivacyPolicyView.swift" },
+                    "xlsx판에서도 판과 무관한 앱 문구에 xlsx를 쓰는 곳은 처리방침뿐이다 — 화면 문구는 판 문구 표(PackCopySet)로: \(mentions.map(\.file))")
+        }
     }
 
     @Test("★ 검증 F-4 ② — 앱(`App/`) 소스에 직접 쓴 문자열도 금칙어 0(앱 전체), 외부 채움글 화면 파일은 U6도 0")
