@@ -1360,7 +1360,7 @@ struct LibraryRecoveryTests {
 
         // 원래 목록은 지우지 않고 옆에 보관한다 — 이름 규칙 library.damaged-<UTC>.json
         #expect(backupName == "library.damaged-20261006T074222Z.json")
-        let backupURL = h.sandbox.library.appendingPathComponent(backupName)
+        let backupURL = h.sandbox.library.appendingPathComponent(try #require(backupName))
         try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: backupURL.path)
         #expect(try Data(contentsOf: backupURL) == original)
 
@@ -1854,5 +1854,259 @@ struct PackImpactStoreTests {
         h.store.maintain()
         #expect(h.store.packDetail(broken)?.summary.status == .unavailable, "준비 — 앱 실행 검사가 읽을 수 없는 팩으로 남겼다")
         #expect(h.store.packEntries(broken) == nil)
+    }
+}
+
+// MARK: - codex 반론(v1.3.0 앱) A1·A2·A5·A6 — 도중 종료·정리 실패·저장 팩 수
+
+/// 시험이 만든 snapshot 세대 폴더를 쓰기 금지로(안의 파일을 지울 수 없게) — 정리 실패를 흉내 낸다. 시험 끝 `cleanup`이 권한을 되돌린다
+private func lockGenerations(_ h: Harness, _ names: [String], writable: Bool) throws {
+    for name in names {
+        try FileManager.default.setAttributes([.posixPermissions: writable ? 0o755 : 0o555],
+                                              ofItemAtPath: h.sandbox.snapshot.appendingPathComponent(name).path)
+    }
+}
+
+@Suite("codex 반론 v1.3.0 앱 A1 — 목록이 없는데 팩 파일·복구 기록이 있으면 빈 목록이 아니다")
+struct MissingLibraryTests {
+
+    @Test("★ A1 — 옛 복구가 목록을 옮긴 뒤 종료(보관본 있음)·목록만 사라짐(보관본 없음): 다음 실행이 팩 파일을 지우지 않고 복구 안내로",
+          arguments: [true, false])
+    func missingLibraryNeedsRecovery(withBackup: Bool) throws {
+        let h = Harness(user: [entry("원래")])
+        defer { h.sandbox.cleanup() }
+        let a = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        let b = try h.importedID(h.store.importPack(pack("상용 영어", chars: 10), source: .csv))
+        let c = try h.importedID(h.store.importPack(pack("꺼 둔 팩", chars: 10), source: .csv, enabled: false))
+        let files = packFileNames(h)
+        if withBackup {
+            try FileManager.default.moveItem(at: libraryURL(h),
+                                             to: h.sandbox.library.appendingPathComponent("library.damaged-20261006T074222Z.json"))
+        } else {
+            try FileManager.default.removeItem(at: libraryURL(h))
+        }
+
+        let reopened = h.reopenedStore()
+        reopened.maintain()
+        #expect(packFileNames(h) == files, "변환본을 하나도 지우지 않는다 — 꺼진 팩은 공유 사본도 없다")
+        #expect(reopened.libraryStatus() == .missing)
+        #expect(!reopened.isLibraryReadable)
+        #expect(PackNoticeCopy.libraryBanner(.missing) == PackNoticeCopy.libraryBanner(.corrupt), "1-c AC-5 — 같은 복구 안내")
+        #expect(PackNoticeCopy.externalSectionFooter(isEmpty: true, libraryStatus: .missing) == PackNoticeCopy.unreadableListFooter)
+        #expect(h.load().includedPackIDs == [a, b], "키보드는 마지막 snapshot 그대로 — 빈 snapshot으로 덮지 않는다")
+        #expect(reopened.importPack(pack("새 팩", chars: 10), source: .csv) == .rejected(.libraryUnreadable, rechecked: false),
+                "빈 목록으로 판정해 새 목록을 쓰지 않는다")
+        #expect(!FileManager.default.fileExists(atPath: libraryURL(h).path))
+
+        #expect(reopened.recoveryPreview() == 3)
+        guard case .recovered(3, 0, _) = reopened.recoverLibrary(now: recoveryTime) else { Issue.record("복구돼야 한다"); return }
+        #expect(reopened.summaries().map(\.id) == [a, b, c])
+        #expect(reopened.libraryStatus() == .readable)
+        #expect(packFileNames(h) == files)
+    }
+
+    @Test("A1 — 처음 가져오기가 목록 쓰기 전에 끝나도 「목록 없음」 오탐이 아니다(처음 커밋은 목록을 먼저 만든다) — 남은 변환본은 정리")
+    func firstImportInterruptedIsNotMissing() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        h.store.crashPointForTesting = .beforeLibrary
+        _ = h.store.importPack(pack("회사 상용구", chars: 10), source: .csv)
+        #expect(!packFileNames(h).isEmpty, "준비 — 커밋 전 변환본이 남았다")
+        let reopened = h.reopenedStore()
+        #expect(reopened.libraryStatus() == .readable)
+        reopened.maintain()
+        #expect(packFileNames(h).isEmpty, "커밋되지 않은 가져오기의 변환본은 정리")
+        #expect(reopened.recoveryPreview() == nil)
+        #expect(reopened.importPack(pack("다시", chars: 10), source: .csv).isAccepted)
+    }
+
+    @Test("★ A1 — 새 복구는 원래 목록을 옮기지 않는다: 보관본을 만든 뒤 종료돼도 목록은 제자리, 다음 실행도 복구 안내",
+          arguments: LibraryDamage.allCases)
+    func recoveryKeepsOriginalUntilNewList(_ kind: LibraryDamage) throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        _ = try h.importedID(h.store.importPack(pack("회사 상용구", chars: 10), source: .csv))
+        _ = try h.importedID(h.store.importPack(pack("상용 영어", chars: 10), source: .csv, enabled: false))
+        let files = packFileNames(h)
+        _ = try damage(h, kind)
+        h.store.crashPointForTesting = .recoveryBeforeWrite
+        _ = h.store.recoverLibrary(now: recoveryTime)
+        #expect(FileManager.default.fileExists(atPath: libraryURL(h).path), "종료 지점 — 원래 목록이 제자리에 있다")
+
+        let reopened = h.reopenedStore()
+        reopened.maintain()
+        #expect(reopened.libraryStatus() == kind.status)
+        #expect(packFileNames(h) == files)
+        guard case .recovered(2, 0, _) = reopened.recoverLibrary(now: recoveryTime) else { Issue.record("복구돼야 한다"); return }
+        #expect(reopened.libraryStatus() == .readable)
+        #expect(packFileNames(h) == files)
+    }
+}
+
+@Suite("codex 반론 v1.3.0 앱 A2·A6 — 커밋 도중 종료·정리 실패 뒤 다음 실행이 마무리")
+struct UnfinishedCommitTests {
+
+    @Test("★ A2 — 바꾸기가 목록 뒤·세대 앞에서 끝나면 다음 실행이 다시 게시한다(순서가 같아도) — 앱 == 키보드, 옛 내용 0")
+    func unfinishedReplaceIsRepublished() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let id = try h.importedID(h.store.importPack(pack("OLDMARK", chars: 10), source: .csv))
+        let other = try h.importedID(h.store.importPack(pack("나", chars: 10), source: .csv))
+        h.store.crashPointForTesting = .beforePacksGeneration
+        _ = h.store.replacePack(id, with: pack("NEWMARK", chars: 12), source: .csv)
+        #expect(h.store.summaries().first?.name == "NEWMARK", "준비 — 앱 목록은 새 내용")
+        #expect(h.load().packs[id] == pack("OLDMARK", chars: 10), "준비 — 키보드는 옛 내용(같은 순서)")
+
+        let reopened = h.reopenedStore()
+        reopened.maintain()
+        let loaded = h.load()
+        #expect(loaded.packs[id] == pack("NEWMARK", chars: 12))
+        #expect(loaded.includedPackIDs == [id, other])
+        #expect(loaded.includedPackIDs == reopened.evaluation().included, "AC-8")
+        #expect(try filesMentioning("OLDMARK", in: h).isEmpty, "A6 — 바꾸기 전 내용이 남은 파일 0")
+        #expect(h.sandbox.generationNames() == ["g\(h.generations.packsGeneration)"])
+
+        // 한 번 마무리하면 다음 실행은 다시 쓰지 않는다
+        let generation = h.generations.packsGeneration
+        h.reopenedStore().maintain()
+        #expect(h.generations.packsGeneration == generation)
+    }
+
+    @Test("★ A6 — 지우기·바꾸기가 커밋 뒤·정리 전에 끝나면 다음 실행이 옛 snapshot 세대·변환본을 지운다", arguments: [true, false])
+    func cleanupInterruptedIsFinishedOnLaunch(deletes: Bool) throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let id = try h.importedID(h.store.importPack(pack("OLDMARK", chars: 10), source: .csv))     // g1
+        let kept = try h.importedID(h.store.importPack(pack("KEEPMARK", chars: 10), source: .csv))  // g2
+        #expect(h.store.saveUserSnippet(entry("문구"), editing: nil).isAccepted)                    // g3
+        h.store.crashPointForTesting = .beforeCleanup
+        if deletes {
+            _ = h.store.deletePack(id)
+        } else {
+            _ = h.store.replacePack(id, with: pack("NEWMARK", chars: 10), source: .csv)
+        }
+        #expect(try !filesMentioning("OLDMARK", in: h).isEmpty, "준비 — 정리 전 종료라 옛 내용이 남았다")
+
+        let reopened = h.reopenedStore()
+        reopened.maintain()
+        #expect(try filesMentioning("OLDMARK", in: h).isEmpty, "옛 내용이 남은 파일 0(변환본·snapshot·검사 기록)")
+        #expect(h.sandbox.generationNames() == ["g\(h.generations.packsGeneration)"], "지우기·바꾸기 세대만 남는다")
+        #expect(h.load().includedPackIDs == (deletes ? [kept] : [id, kept]))
+
+        // 그 뒤 평소 커밋은 지금 규칙 그대로 — 바로 앞 세대를 남긴다
+        #expect(reopened.saveUserSnippet(entry("문구2"), editing: nil).isAccepted)
+        #expect(h.sandbox.generationNames().count == 2)
+    }
+
+    @Test("★ A6 — 지우기 뒤 정리가 실패하면(옛 세대·변환본을 못 지움) 다음 실행이 다시 지운다")
+    func failedCleanupIsRetriedOnLaunch() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let gone = try h.importedID(h.store.importPack(pack("DELMARK", chars: 10), source: .csv))   // g1
+        let kept = try h.importedID(h.store.importPack(pack("KEEPMARK", chars: 10), source: .csv)) // g2
+        #expect(h.store.saveUserSnippet(entry("문구"), editing: nil).isAccepted)                    // g3
+        let old = h.sandbox.generationNames()
+        let packs = h.sandbox.library.appendingPathComponent("packs")
+        try lockGenerations(h, old, writable: false)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: packs.path)
+        #expect(h.store.deletePack(gone).isAccepted, "정리 실패는 커밋 실패가 아니다")
+        try lockGenerations(h, old, writable: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: packs.path)
+        #expect(try !filesMentioning("DELMARK", in: h).isEmpty, "준비 — 지우지 못한 옛 내용이 남았다")
+
+        let reopened = h.reopenedStore()
+        reopened.maintain()
+        #expect(try filesMentioning("DELMARK", in: h).isEmpty, "다음 실행이 다시 지운다")
+        #expect(h.sandbox.generationNames() == ["g\(h.generations.packsGeneration)"])
+        #expect(h.load().includedPackIDs == [kept])
+    }
+
+    @Test("A6 — 정리 실패 뒤 다음 커밋도 다시 지운다(실행을 기다리지 않는다)")
+    func failedCleanupIsRetriedOnNextCommit() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        let gone = try h.importedID(h.store.importPack(pack("DELMARK", chars: 10), source: .csv))
+        _ = try h.importedID(h.store.importPack(pack("KEEPMARK", chars: 10), source: .csv))
+        let old = h.sandbox.generationNames()
+        try lockGenerations(h, old, writable: false)
+        #expect(h.store.deletePack(gone).isAccepted)
+        try lockGenerations(h, old, writable: true)
+        #expect(h.store.saveUserSnippet(entry("문구"), editing: nil).isAccepted)
+        #expect(try filesMentioning("DELMARK", in: h).isEmpty)
+    }
+
+    @Test("A2 — 세대 뒤에 남은 고아 세대(커밋 지점 전 종료)는 다음 실행이 지운다 — 지금 세대·바로 앞 세대만 남는다")
+    func orphanGenerationAboveCurrentIsRemoved() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        _ = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))   // g1
+        _ = try h.importedID(h.store.importPack(pack("나", chars: 10), source: .csv))   // g2
+        h.store.crashPointForTesting = .beforePacksGeneration
+        _ = h.store.saveUserSnippet(entry("문구"), editing: nil)                        // g3 폴더만
+        #expect(h.sandbox.generationNames() == ["g1", "g2", "g3"])
+        h.reopenedStore().maintain()
+        #expect(h.generations.packsGeneration == 3, "마무리 게시")
+        #expect(h.sandbox.generationNames() == ["g2", "g3"])
+    }
+
+    @Test("★ A2 — 목록을 쓰기 전에 끝난 가져오기의 고아 세대는 다시 게시하지 않아도 지운다 — 커밋 안 된 팩 내용이 공유 폴더에 남지 않는다")
+    func uncommittedImportSnapshotIsRemoved() throws {
+        let h = Harness()
+        defer { h.sandbox.cleanup() }
+        _ = try h.importedID(h.store.importPack(pack("가", chars: 10), source: .csv))   // g1
+        _ = try h.importedID(h.store.importPack(pack("나", chars: 10), source: .csv))   // g2
+        h.store.crashPointForTesting = .beforeLibrary
+        _ = h.store.importPack(pack("UNCOMMITTED", chars: 10), source: .csv)          // 변환본·g3 폴더만
+        #expect(h.sandbox.generationNames() == ["g1", "g2", "g3"])
+        #expect(try !filesMentioning("UNCOMMITTED", in: h).isEmpty)
+        h.reopenedStore().maintain()
+        #expect(h.generations.packsGeneration == 2, "커밋되지 않았다 — 다시 게시할 것이 없다")
+        #expect(h.sandbox.generationNames() == ["g1", "g2"])
+        #expect(try filesMentioning("UNCOMMITTED", in: h).isEmpty, "변환본·고아 세대 모두")
+    }
+}
+
+@Suite("codex 반론 v1.3.0 앱 A5 — 저장 팩 수는 목록 전체(꺼진 팩·읽을 수 없는 팩 포함)로 센다")
+struct StoredPackCountTests {
+
+    private static func sixteen(_ h: Harness) throws -> [String] {
+        try (0..<PackLimits.externalPacks).map { index in
+            try h.importedID(h.store.importPack(pack("팩\(index)", chars: 5), source: .csv, enabled: index % 2 == 0))
+        }
+    }
+
+    @Test("★ A5 — 16개 중 하나를 읽을 수 없어도 가져오기(켠 채·꺼 둔 채)는 「팩이 너무 많아요」", arguments: [true, false])
+    func unreadablePackStillCounts(enabled: Bool) throws {
+        let h = Harness(limits: .candidate)
+        defer { h.sandbox.cleanup() }
+        let ids = try Self.sixteen(h)
+        try removePackFiles(h, of: ids[3])
+        #expect(h.store.unreadablePackIDs() == [ids[3]])
+        #expect(h.store.importPack(pack("열일곱", chars: 5), source: .csv, enabled: enabled)
+                == .rejected(.gate(.tooManyPacks), rechecked: false))
+        #expect(h.store.order.compactMap(\.packID).count == PackLimits.externalPacks)
+    }
+
+    @Test("★ A5 — 바꾸기도 목록 수로 본다: 16개면 받고, 이미 16개를 넘은 목록(옛 우회로 생긴)이면 거부")
+    func replaceChecksStoredCount() throws {
+        let h = Harness(limits: .candidate)
+        defer { h.sandbox.cleanup() }
+        let ids = try Self.sixteen(h)
+        #expect(h.store.replacePack(ids[0], with: pack("팩0", chars: 6), source: .csv).isAccepted, "16개 — 수가 늘지 않는 바꾸기")
+
+        // 옛 빌드의 우회로 생긴 17개 목록을 흉내 낸다 — 변환본 하나를 새 id로 복사해 목록에 더한다
+        var library = try JSONDecoder().decode(PackLibrary.self, from: Data(contentsOf: libraryURL(h)))
+        let packs = h.sandbox.library.appendingPathComponent("packs")
+        let source = try #require(library.packs[ids[1]])
+        var stored = try JSONDecoder().decode(StoredExternalPack.self, from: Data(contentsOf: packs.appendingPathComponent(source.file)))
+        stored.packID = "extra"
+        try JSONEncoder().encode(stored).write(to: packs.appendingPathComponent("extra-r1.json"))
+        library.packs["extra"] = PackLibrary.Entry(file: "extra-r1.json", isEnabled: false, stored: stored)
+        library.order.append(.pack("extra"))
+        try JSONEncoder().encode(library).write(to: libraryURL(h))
+
+        #expect(h.store.replacePack(ids[1], with: pack("팩1", chars: 6), source: .csv) == .rejected(.gate(.tooManyPacks), rechecked: false))
+        #expect(h.store.deletePack("extra").isAccepted, "줄이는 쪽은 막지 않는다")
+        #expect(h.store.replacePack(ids[1], with: pack("팩1", chars: 6), source: .csv).isAccepted)
     }
 }

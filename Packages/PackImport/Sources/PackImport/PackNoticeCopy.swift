@@ -103,7 +103,7 @@ public enum PackNoticeCopy {
         let damaged = "외부 채움글 목록을 읽을 수 없어요. 가져온 팩 파일은 지우지 않았어요. 복구하기 전에는 채움글을 저장하거나 지울 수 없어요."
         switch status {
         case .readable: return nil
-        case .unreadable, .corrupt: return damaged
+        case .unreadable, .corrupt, .missing: return damaged
         case .unknownSchema:
             return damaged + "\n새 버전의 글쇠에서 만든 목록 같아요. 앱을 최신 버전으로 올리면 다시 읽힐 수 있어요. 복구하면 이 기기의 팩 목록을 다시 만들어요."
         }

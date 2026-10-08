@@ -133,6 +133,14 @@ public enum PackImportCopy {
         "\(PackNoticeCopy.number(lines))줄" + (delimiter.map { " · \(delimiterLabel): \(delimiterName($0))" } ?? "")
     }
 
+    /// 개요 한 줄 — 3MB를 넘어 세지 않은 글이면 「읽기」를 눌렀을 때와 같은 「너무 길어요」(codex 반론 #3)
+    public static func pasteSummary(_ overview: PackPasteOverview) -> String {
+        overview.isTooLarge ? pasteTooLarge : pasteSummary(lines: overview.lines, delimiter: overview.delimiter)
+    }
+
+    /// 붙여 넣은 글이 3MB를 넘는다 — 「읽기」 실패 문구와 같은 글(새 문구가 아니다)
+    public static var pasteTooLarge: String { failureMessage(.structural(.fileTooLarge), source: .paste) }
+
     // MARK: - 4-A 읽는 중 · 공통 버튼
 
     public static let flowTitle = "가져오기"

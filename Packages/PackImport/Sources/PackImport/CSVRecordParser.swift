@@ -55,9 +55,10 @@ public enum CSVRecordParser {
     }
 
     /// `parse`와 같되 오류가 나도 **그 앞까지 모은 레코드**를 함께 돌려준다 — 후보 시험이 quote 오류 전에 머리글을
-    /// 인정했는지 보려고 쓴다(재검증 N1). 오류가 났을 때의 `physicalLines`는 그 지점까지의 줄이다
+    /// 인정했는지 보려고 쓴다(재검증 N1). 오류가 났을 때의 `physicalLines`는 그 지점까지의 줄이다.
+    /// `cancellation`이 있으면 몇 천 글자마다 취소를 본다 — 취소되면 그 자리에서 멈추고 그 앞까지를 돌려준다(부르는 쪽이 버린다, codex 반론 #3)
     static func scan(
-        _ text: String, delimiter: CSVDelimiter, maxNonBlankRecords: Int? = nil
+        _ text: String, delimiter: CSVDelimiter, maxNonBlankRecords: Int? = nil, cancellation: PackCancellation? = nil
     ) -> (result: CSVParseResult, failure: CSVParseError?) {
         var records: [CSVRecord] = []
         var nonBlankCount = 0
@@ -72,8 +73,19 @@ public enum CSVRecordParser {
         var state = State.cellStart
         let separator = delimiter.rawValue
 
+        /// 칸 하나를 레코드에 — **13칸(`RawTable.columnLimit` = 메타 12 + 넘침 1)까지만 배열을 늘린다**(codex 반론 #3). 넘친 칸은 마지막 칸
+        /// 하나로 접고 먼저 온 비지 않은 칸이 남는다 — xlsx 표와 같은 접기라 메타(> 12칸)·머리글(> 8열)·데이터(머리글보다 넓음) 판정이
+        /// 두 형식에서 같다(AC-32). 쉼표만 수백만 개인 줄이 셀 배열을 수백만 칸으로 늘리지 않는다
+        func appendCell(_ value: String) {
+            if cells.count < RawTable.columnLimit {
+                cells.append(value)
+            } else if cells[RawTable.columnLimit - 1].isEmpty, !value.isEmpty {
+                cells[RawTable.columnLimit - 1] = value
+            }
+        }
+
         func endRecord() {
-            cells.append(cell)
+            appendCell(cell)
             let record = CSVRecord(cells: cells, line: recordLine)
             if !record.isBlank { nonBlankCount += 1 }
             records.append(record)
@@ -87,8 +99,17 @@ public enum CSVRecordParser {
             (CSVParseResult(records: records, physicalLines: line, strayQuoteCount: strayQuotes), failure)
         }
 
+        var steps = 0
+        var cancelled = false
         for character in text {
             if let maxNonBlankRecords, nonBlankCount >= maxNonBlankRecords { break }
+            if let cancellation {
+                steps &+= 1
+                if steps & 0xFFF == 0, cancellation.poll() {
+                    cancelled = true
+                    break
+                }
+            }
             // 글자가 있는 줄만 센다 — 마지막 줄바꿈 뒤의 빈 자리는 줄이 아니다
             if line > PackLimits.physicalLines { return failed(.tooManyLines) }
             let isNewline = character == "\n" || character == "\r" || character == "\r\n"
@@ -105,7 +126,7 @@ public enum CSVRecordParser {
                     cell.append("\"")           // `""` → `"`
                     state = .quoted
                 } else if character == separator {
-                    cells.append(cell)
+                    appendCell(cell)
                     cell = ""
                     state = .cellStart
                 } else if isNewline {
@@ -120,7 +141,7 @@ public enum CSVRecordParser {
                     state = .quoted
                     hasContent = true
                 } else if character == separator {
-                    cells.append(cell)
+                    appendCell(cell)
                     cell = ""
                     state = .cellStart
                     hasContent = true
@@ -142,7 +163,7 @@ public enum CSVRecordParser {
             }
         }
 
-        let stopped = maxNonBlankRecords.map { nonBlankCount >= $0 } ?? false
+        let stopped = cancelled || (maxNonBlankRecords.map { nonBlankCount >= $0 } ?? false)
         if !stopped {
             switch state {
             case .quoted:
@@ -160,5 +181,21 @@ public enum CSVRecordParser {
 
     private static func isLineEnd(_ character: Character) -> Bool {
         character == "\n" || character == "\r" || character == "\r\n"
+    }
+}
+
+/// 계산 중 취소 확인(codex 반론 #3) — 부르는 쪽 확인은 몇 천 글자마다 한 번만 부르고, **한 번 참을 보면** 그 뒤로는 묻지 않고 참이다
+/// (취소를 본 뒤 남은 단계가 다시 계산하거나 다시 묻지 않게). 한 계산 안에서만 쓴다 — 스레드를 넘기지 않는다
+final class PackCancellation {
+    private let check: () -> Bool
+    private(set) var isCancelled = false
+
+    init(_ check: @escaping () -> Bool) {
+        self.check = check
+    }
+
+    func poll() -> Bool {
+        if !isCancelled, check() { isCancelled = true }
+        return isCancelled
     }
 }

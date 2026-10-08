@@ -70,6 +70,10 @@ public struct XLSXArchive: Sendable {
         guard declared <= limits.outputLimit(for: kind) else { throw .partTooLarge }
         guard declared <= limits.totalOutputBytes - ledger.total else { throw .totalOutputExceeded }
         guard declared <= limits.compressionRatio * entry.compressedSize else { throw .compressionRatioExceeded }
+        // ★ 풀기 **전에** 선언 크기를 장부에 올린다(codex 반론 #4) — 해제는 선언 + 1바이트를 넘지 않으므로 이것이 이번 일의 상한이다. 풀고 나서
+        //   CRC·크기·손상으로 실패해도 그 몫은 돌려받지 않는다: 실패한 해제를 세지 않으면 깨진 시트를 여럿 둔 파일이 시트 목록(행 수)에서 합계
+        //   상한을 넘게 풀게 했다. 성공한 해제는 예전과 같은 양(실제 출력 == 선언)이 오른다. 다른 사본과 함께 써도 더하기 자체가 상한을 본다
+        guard ledger.add(declared, limit: limits.totalOutputBytes) else { throw .totalOutputExceeded }
 
         let payload = bytes[entry.dataStart..<(entry.dataStart + entry.compressedSize)]
         let output: [UInt8]
@@ -85,8 +89,6 @@ public struct XLSXArchive: Sendable {
         }
         guard output.count == declared else { throw .sizeMismatch }
         guard CRC32.checksum(output) == entry.crc else { throw .crcMismatch }
-        // 위의 사전 검사와 여기 더하기 사이에 다른 사본이 더했을 수 있다 — 더하기 자체가 상한을 다시 본다
-        guard ledger.add(output.count, limit: limits.totalOutputBytes) else { throw .totalOutputExceeded }
         return Data(output)
     }
 }

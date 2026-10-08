@@ -26,6 +26,8 @@ import TadakDomain
 /// 새 변환본 파일 → 새 snapshot `g<N+1>`(팩 파일 → manifest) → 내 채움글 → 목록(`library.json`) → `userSnippetsGeneration`
 /// → **`packsGeneration = N+1`(커밋 지점)** → 안 쓰는 변환본·옛 세대 정리(현재 − 2 이하, 9절·8-2) → 알림(신호일 뿐).
 /// 커밋 지점 전에 실패하면 새로 쓴 것을 지우고 이전 상태를 그대로 둔다(9-2 ⑥).
+/// 오류가 아니라 **앱이 도중에 끝나면** 되돌릴 기회가 없다 — 목록에 이 커밋의 세대(`generation`)와 정리 몫(`purgeBelow`)을 함께 적어
+/// 다음 실행(`maintain`)이 게시를 마무리하고 옛 내용을 지운다(codex 반론 #2·#6). 처음 커밋은 목록부터 만든다(반론 #1 — `.missing` 판정).
 ///
 /// 팩 본문·단축어·이름·권리는 사용자 입력이다 — 로그·네트워크 0. 저장은 앱 전용 폴더와 App Group 공유 폴더뿐이다.
 public final class PackStore: @unchecked Sendable {
@@ -82,6 +84,20 @@ public final class PackStore: @unchecked Sendable {
     private var contentChecks: [String: PackContentCheck]?
     /// 시험 전용 갈고리 — 큐 안에서 판정과 쓰기 사이에 부른다(직렬성 결정적 시험, 검증 F5 ④). 제품에서는 nil
     var beforeWriteForTesting: (@Sendable () -> Void)?
+
+    /// 시험 전용 — 쓰는 도중 **앱이 끝난 것처럼** 이 지점에서 멈춘다(그 뒤는 아무것도 하지 않는다 — 되돌리기·정리·알림 없음).
+    /// 시험은 이 저장소를 버리고 같은 위치로 다시 열어(`maintain`) 다음 실행을 흉내 낸다(codex 반론 #1·#2·#6). 제품에서는 nil
+    enum CrashPoint: Sendable {
+        /// ①②③ 뒤 · ④ 목록 앞
+        case beforeLibrary
+        /// ④ 목록 뒤 · ⑤ 커밋 지점(`packsGeneration`) 앞
+        case beforePacksGeneration
+        /// ⑤ 뒤 · ⑥ 정리 앞
+        case beforeCleanup
+        /// 복구 — 원래 목록을 보관한 뒤 · 새 목록을 쓰기 앞
+        case recoveryBeforeWrite
+    }
+    var crashPointForTesting: CrashPoint?
 
     /// - Parameters:
     ///   - libraryRoot: **앱 전용** 폴더 — 변환본(꺼진 팩 포함)과 목록
@@ -234,8 +250,11 @@ public final class PackStore: @unchecked Sendable {
     }
 
     /// 목록 복구(R24) — **사용자가 확인한 뒤에만** 부른다. 변환본 폴더를 훑어 목록을 다시 만들고 **모두 꺼진 채** 불러온다(순서·켬/끔은
-    /// 알 수 없다). 원래 목록은 지우지 않고 옆에 `library.damaged-<UTC 시각>.json`으로 옮겨 둔다(같은 이름이 있으면 `-2`, `-3`…).
-    /// 옮기지 못하면 아무것도 쓰지 않고, 옮긴 뒤 새 목록·snapshot을 못 쓰면 원래 자리로 되돌린다 — **원래 목록을 덮어쓰지 않는다**(9-3).
+    /// 알 수 없다). 원래 목록은 지우지 않고 `library.damaged-<UTC 시각>.json` 보관본을 남긴다(같은 이름이 있으면 `-2`, `-3`…).
+    /// ★ 원래 목록을 **옮기지 않는다**(codex 반론 #1) — 보관본은 하드 링크(안 되면 복사)로 만들고 원래 목록은 새 목록이 원자적으로 덮을 때까지
+    /// 제자리에 둔다. 옮긴 뒤 새 목록을 쓰기 전에 앱이 끝나면 다음 실행이 「목록 없음」을 빈 목록으로 보고 팩 파일을 정리했다.
+    /// 보관본을 못 만들면 아무것도 쓰지 않고, 새 목록·snapshot을 못 쓰면 보관본을 지운다 — **원래 목록을 덮어쓰지 않는다**(9-3).
+    /// 목록 파일이 아예 없으면(`.missing`) 보관할 것이 없어 보관본 이름이 nil이다.
     ///
     /// 변환본을 읽어 키보드가 받는 내용이면 표시 칸(이름·종류·틀)과 stats(다시 센 값)를 채우고, 아니면 그 팩은 「읽을 수 없는 팩」(`.unavailable`)으로
     /// 목록에 남긴다(지우지 않는다 — 다시 가져오기·지우기는 사용자가 한다). 같은 팩의 변환본이 여럿이면(정리 전에 앱이 죽은 경우) revision이
@@ -243,7 +262,8 @@ public final class PackStore: @unchecked Sendable {
     /// 「내 채움글」은 맨 위(U1 기본).
     public func recoverLibrary(now: Date = Date()) -> PackLibraryRecovery {
         queue.sync {
-            guard loadLibrary().status != .readable else { return .notNeeded }
+            let status = loadLibrary().status
+            guard status != .readable else { return .notNeeded }
             // 변환본을 하나씩 읽어 키보드가 받는 내용인지 본다(로더 ④⑤와 같은 함수) — 받지 않으면 stored nil. stats는 파일 값을 믿지 않고
             // **다시 센다**(검증 F-2 — 평소 커밋과 같은 `StoredExternalPack(packID:source:pack:)`. 옛 계산·모양을 지킨 손상이면 앱 판정이 키보드와 갈린다)
             let found = recoveryFiles().map { file in
@@ -260,8 +280,13 @@ public final class PackStore: @unchecked Sendable {
                 library.packs[candidate.id] = candidate.stored.map { PackLibrary.Entry(file: candidate.file, isEnabled: false, stored: $0) }
                     ?? PackLibrary.Entry(file: candidate.file, isEnabled: false, stats: .zero)
             }
-            // ① 원래 목록을 옆으로 — 못 옮기면 여기서 끝(아무것도 쓰지 않았다)
-            guard let backupName = moveLibraryAside(now: now) else { return .failed }
+            // ① 원래 목록의 보관본 — 못 만들면 여기서 끝(아무것도 쓰지 않았다). 원래 목록은 제자리에 그대로다
+            var backupName: String?
+            if status != .missing {
+                guard let name = preserveLibrary(now: now) else { return .failed }
+                backupName = name
+            }
+            if crashPointForTesting == .recoveryBeforeWrite { return .failed }
             // 방금 디코드한 결과를 검사 결과로 남긴다 — 깨진 변환본은 바로 「읽을 수 없는 팩」(열지 못한 파일은 읽기 권한 검사가 뺀다)
             var checks = loadedChecks()
             for candidate in found {
@@ -282,7 +307,8 @@ public final class PackStore: @unchecked Sendable {
             let evaluation = withUnavailable(ActivePackBudget.evaluate(baseline: input.baseline, packs: input.packs, limits: limits),
                                              library: library, unavailable: unavailable)
             guard write(proposal, state: state, evaluation: evaluation) else {
-                try? FileManager.default.moveItem(at: libraryRoot.appendingPathComponent(backupName), to: libraryURL)
+                // 새 목록은 원자적으로 쓰므로 실패했다면 원래 목록이 그대로 있다 — 이번에 만든 보관본만 지운다
+                if let backupName { try? FileManager.default.removeItem(at: libraryRoot.appendingPathComponent(backupName)) }
                 return .failed
             }
             return .recovered(packs: found.count, unreadable: found.filter { $0.stored == nil }.count, backupFileName: backupName)
@@ -425,13 +451,17 @@ public final class PackStore: @unchecked Sendable {
             defer { notify() }
             // ★ 목록을 못 읽으면 **아무것도 지우지 않는다**(검증 C1) — 빈 목록으로 보면 변환본이 전부 「안 쓰는 파일」이 된다
             guard let library = readLibrary() else { return }
+            // 지난 실행이 못 지운 것(삭제 실패·정리 전 종료)도 여기서 다시 지운다 — 목록이 가리키지 않는 변환본, `purgeBelow` 아래 세대(codex 반론 #6)
             removeUnreferencedPackFiles(library: library)
-            collectSnapshotGarbage(current: generations.packsGeneration)
+            collectSnapshotGarbage(current: generations.packsGeneration, purgeBelow: library.purgeBelow)
             checkPackContents(library: library)
             let evaluation = currentEvaluation(library: library, unavailable: unavailablePackIDs(in: library))
             // ★ 다시 쓸지는 「지금 판정 ≠ 지금 snapshot」으로 정한다(검증 F-1). 「검사 전 ≠ 검사 후」로 정하면 검사 결과는 파일에 남았는데
-            //   snapshot 쓰기가 실패한(또는 그 사이 앱이 죽은) 다음 실행에서 둘이 같아져 다시 쓰지 않고, 키보드는 다음 커밋까지 외부 팩 전부를 버린다
-            guard publishedOrder() != Self.snapshotOrder(library: library, included: evaluation.included),
+            //   snapshot 쓰기가 실패한(또는 그 사이 앱이 죽은) 다음 실행에서 둘이 같아져 다시 쓰지 않고, 키보드는 다음 커밋까지 외부 팩 전부를 버린다.
+            // ★ 순서만 보지 않는다(codex 반론 #2) — 목록에 적힌 게시 세대가 지금 세대와 다르면 커밋이 ④ 목록과 ⑤ 세대 사이에서 끝났다. 내용만
+            //   바뀐 바꾸기는 순서가 같아 순서 비교로는 못 잡고, 앱은 새 내용·키보드는 옛 내용을 계속 쓴다. 다시 게시해 마무리한다(옛 목록은 nil — 순서만)
+            let unfinished = library.generation.map { $0 != generations.packsGeneration } ?? false
+            guard unfinished || publishedOrder() != Self.snapshotOrder(library: library, included: evaluation.included),
                   let state = loadState() else { return }
             _ = write(Proposal(change: .reorderPacks, state: state), state: state, evaluation: evaluation)
         }
@@ -475,6 +505,12 @@ public final class PackStore: @unchecked Sendable {
             case .success(let value): proposal = value
             }
             proposal.userChanged = proposal.user != state.user
+            // ★ 저장 팩 수(9-4 ② — 꺼진 팩·읽을 수 없는 팩 포함)는 **목록**으로 센다(codex 반론 #5). 게이트의 수 검사는 판정 입력(`budgetInput`
+            //   — 읽을 수 없는 팩을 뺀다)을 세므로 그것만으로는 16개를 넘겨 저장되고, 앱은 17개를 판정하는데 키보드는 앞 16개만 읽는다(AC-8).
+            //   활성 예산과 따로 본다 — 수가 늘거나(가져오기) 그대로인(바꾸기) 경로 모두. 줄이는 쪽(지우기)은 막지 않는다
+            if Self.storesPack(proposal.change), proposal.library.packs.count > PackLimits.externalPacks {
+                return .rejected(.gate(.tooManyPacks), rechecked: rechecked)
+            }
             let currentBase = proposal.currentOverride ?? (state.user, state.disabled)
             // C5 — 변환본을 읽을 수 없는 팩은 **판정 단계에서** 뺀다(예산 자리도 차지하지 않는다). 이번에 새로 쓰는 변환본은 읽을 수 있다
             var unavailable = unavailablePackIDs(in: proposal.library)
@@ -489,12 +525,20 @@ public final class PackStore: @unchecked Sendable {
             case .accept(let judged, let newlyExcluded):
                 let evaluation = withUnavailable(judged, library: proposal.library, unavailable: unavailable)
                 beforeWriteForTesting?()
-                guard write(proposal, state: state, evaluation: evaluation) else {
+                guard ensureLibraryFile(state.library), write(proposal, state: state, evaluation: evaluation) else {
                     return .rejected(.writeFailed, rechecked: rechecked)
                 }
                 return .accepted(Accepted(revision: state.library.revision + 1, packID: proposal.packID,
                                           newlyExcluded: newlyExcluded, evaluation: evaluation, rechecked: rechecked))
             }
+        }
+    }
+
+    /// 팩 파일을 하나 더 저장하거나 갈아 끼우는 변경 — 저장 팩 수를 목록으로 본다(codex 반론 #5)
+    private static func storesPack(_ change: PackCommitGate.Change) -> Bool {
+        switch change {
+        case .importPack, .importDisabledPack, .replaceActivePack, .replaceInactivePack: true
+        default: false
         }
     }
 
@@ -505,6 +549,7 @@ public final class PackStore: @unchecked Sendable {
         library.revision = state.library.revision + 1
         var newFiles: [URL] = []
         func rollback() { newFiles.forEach { try? fileManager.removeItem(at: $0) } }
+        let purges = Self.purgesOldSnapshots(proposal.change)
 
         // ① 새 변환본 — 이름에 revision을 붙여 옛 파일을 덮지 않는다(실패해도 이전 상태가 남는다)
         if let stored = proposal.newPack {
@@ -531,6 +576,11 @@ public final class PackStore: @unchecked Sendable {
             rollback()
             return false
         }
+        if crashPointForTesting == .beforeLibrary { return false }
+        // 목록에 이 커밋의 세대와 정리 몫을 함께 적는다 — ⑤·⑥ 전에 앱이 끝나도 다음 실행이 알아보고 마무리한다(codex 반론 #2·#6).
+        // `purgeBelow`는 지우기·바꾸기 세대에서 오르고 뒤 커밋이 그대로 이어 간다(세대가 되돌아간 경우만 지금 세대로 낮춘다)
+        library.generation = newPacksGeneration
+        library.purgeBelow = purges ? newPacksGeneration : library.purgeBelow.map { min($0, newPacksGeneration) }
         guard (try? ensureDirectory(libraryRoot)) != nil, let data = try? JSONEncoder().encode(library),
               (try? data.write(to: libraryURL, options: .atomic)) != nil else {
             if proposal.userChanged {
@@ -545,16 +595,19 @@ public final class PackStore: @unchecked Sendable {
         }
 
         // ⑤ 세대 — packsGeneration이 커밋 지점
+        if crashPointForTesting == .beforePacksGeneration { return true }
         if proposal.userChanged { generations.setUserSnippetsGeneration(newUserGeneration) }
         generations.setPacksGeneration(newPacksGeneration)
+        if crashPointForTesting == .beforeCleanup { return true }
 
         // ⑥ 정리 — 앱의 변경 때만(키보드는 지우지 않는다) ⑦ 알림.
         // ★ 팩을 **지우거나 바꾸면** 옛 snapshot 세대를 모두 지운다(평소 커밋은 현재 − 2 이하만) — 지운 팩·바꾸기 전 내용이 키보드가 읽는
         //   App Group 공유 사본에 채움글을 두 번 더 바꿀 때까지 남지 않게(기획 1-d 「지우면 기기에서 지워져요」). 그 세대를 읽던 키보드는
-        //   소실을 보고 현재 세대로 다시 읽는다(AC-26). 지운 파일의 검사 기록(pack-checks)도 함께 뺀다
+        //   소실을 보고 현재 세대로 다시 읽는다(AC-26). 지운 파일의 검사 기록(pack-checks)도 함께 뺀다.
+        // ★ 여기서 못 지운 것(삭제 실패·이 사이 종료)은 목록에 적힌 `purgeBelow`로 다음 커밋·다음 실행(`maintain`)이 다시 지운다(codex 반론 #6)
         removeUnreferencedPackFiles(library: library)
         pruneChecks(keeping: library)
-        collectSnapshotGarbage(current: newPacksGeneration, keepingPrevious: !Self.purgesOldSnapshots(proposal.change))
+        collectSnapshotGarbage(current: newPacksGeneration, purgeBelow: library.purgeBelow)
         notify()
         return true
     }
@@ -615,14 +668,15 @@ public final class PackStore: @unchecked Sendable {
         return manifest.order
     }
 
-    /// 현재 − 2 세대 이하만 지운다(8-2) — 읽고 있던 키보드는 현재 세대로 재시도한다. `keepingPrevious == false`면(팩 지우기·바꾸기)
-    /// 현재 세대 하나만 남긴다
-    private func collectSnapshotGarbage(current: Int, keepingPrevious: Bool = true) {
+    /// 지금 세대와 바로 앞 세대만 남긴다 — 현재 − 2 이하(8-2, 읽고 있던 키보드는 현재 세대로 재시도한다)와 **현재보다 큰 세대**(커밋 지점
+    /// 전에 끝난 커밋의 고아 — 키보드가 읽은 적이 없다, codex 반론 #2)를 지운다. `purgeBelow` 아래는 바로 앞 세대도 지운다 — 팩을 지우거나
+    /// 바꾼 커밋 앞의 세대에는 옛 내용이 있다(1-d, 반론 #6). 지금 세대는 어느 경우에도 지우지 않는다
+    private func collectSnapshotGarbage(current: Int, purgeBelow: Int?) {
         let fileManager = FileManager.default
         guard let names = try? fileManager.contentsOfDirectory(atPath: snapshotRoot.path) else { return }
-        let newestRemoved = current - (keepingPrevious ? 2 : 1)
         for name in names where name.hasPrefix("g") {
-            guard let generation = Int(name.dropFirst()), generation <= newestRemoved else { continue }
+            guard let generation = Int(name.dropFirst()), generation != current else { continue }
+            guard generation > current || generation <= current - 2 || generation < (purgeBelow ?? .min) else { continue }
             try? fileManager.removeItem(at: snapshotRoot.appendingPathComponent(name, isDirectory: true))
         }
     }
@@ -643,13 +697,16 @@ public final class PackStore: @unchecked Sendable {
     private var packsDirectory: URL { libraryRoot.appendingPathComponent("packs", isDirectory: true) }
 
     /// 앱 전용 목록 — **파일이 없으면(처음) 빈 목록, 있는데 못 읽음·손상·낯선 schema면 nil**(검증 C1). 둘을 섞으면 손상된 목록을
-    /// 빈 목록으로 보고 정리가 변환본을 전부 지우고 다음 커밋이 빈 목록으로 덮어쓴다
+    /// 빈 목록으로 보고 정리가 변환본을 전부 지우고 다음 커밋이 빈 목록으로 덮어쓴다. 파일이 없어도 팩 파일·복구 보관본이 남아 있으면
+    /// 처음이 아니다 — nil(`.missing`, codex 반론 #1)
     private func readLibrary() -> PackLibrary? { loadLibrary().library }
 
     /// 목록과 그 상태(1-c G4 — 읽히지 않는 사유를 가른다). **schema를 먼저 본다** — 새 버전 목록은 모양이 달라 전체 디코드가 실패할 수
     /// 있는데, 그것을 「손상」으로 보면 「앱을 올리면 다시 읽힌다」는 안내를 못 한다
     private func loadLibrary() -> (library: PackLibrary?, status: PackLibraryStatus) {
-        guard FileManager.default.fileExists(atPath: libraryURL.path) else { return (PackLibrary(), .readable) }
+        guard FileManager.default.fileExists(atPath: libraryURL.path) else {
+            return hasLibraryTraces() ? (nil, .missing) : (PackLibrary(), .readable)
+        }
         guard let data = try? Data(contentsOf: libraryURL) else { return (nil, .unreadable) }
         if let probe = try? JSONDecoder().decode(SchemaProbe.self, from: data), probe.schema != PackLibrary.schemaVersion {
             return (nil, .unknownSchema)
@@ -662,18 +719,39 @@ public final class PackStore: @unchecked Sendable {
         var schema: Int
     }
 
-    /// 원래 목록을 옆으로 옮긴다 — `library.damaged-<UTC yyyyMMdd'T'HHmmss'Z'>.json`, 있으면 `-2`·`-3`…. 옮긴 이름, 못 옮기면 nil
-    private func moveLibraryAside(now: Date) -> String? {
+    /// 원래 목록의 보관본을 만든다 — `library.damaged-<UTC yyyyMMdd'T'HHmmss'Z'>.json`, 있으면 `-2`·`-3`…. **원래 목록은 옮기지 않는다**
+    /// (codex 반론 #1). 하드 링크가 먼저다 — 읽을 수 없는 목록(권한)도 내용을 읽지 않고 남긴다. 링크가 안 되는 볼륨이면 복사. 만든 이름, 못 만들면 nil
+    private func preserveLibrary(now: Date) -> String? {
         let fileManager = FileManager.default
-        let stem = "library.damaged-\(Self.backupStamp(now))"
+        let stem = "\(Self.backupPrefix)\(Self.backupStamp(now))"
         var name = "\(stem).json"
         var suffix = 2
         while fileManager.fileExists(atPath: libraryRoot.appendingPathComponent(name).path) {
             name = "\(stem)-\(suffix).json"
             suffix += 1
         }
-        guard (try? fileManager.moveItem(at: libraryURL, to: libraryRoot.appendingPathComponent(name))) != nil else { return nil }
+        let backup = libraryRoot.appendingPathComponent(name)
+        guard (try? fileManager.linkItem(at: libraryURL, to: backup)) != nil
+                || (try? fileManager.copyItem(at: libraryURL, to: backup)) != nil else { return nil }
         return name
+    }
+
+    private static let backupPrefix = "library.damaged-"
+
+    /// 목록 파일이 없을 때 — 처음 상태인가, 목록만 사라진 상태인가(codex 반론 #1). 가져온 팩 파일이나 복구 보관본이 남아 있으면 처음이
+    /// 아니다(복구 도중 종료·목록 소실). 처음 커밋은 목록부터 만들므로(`ensureLibraryFile`) 커밋 도중 종료로는 이 흔적이 생기지 않는다
+    private func hasLibraryTraces() -> Bool {
+        if !recoveryFiles().isEmpty { return true }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: libraryRoot.path)) ?? []
+        return names.contains { $0.hasPrefix(Self.backupPrefix) }
+    }
+
+    /// 처음 커밋 — 목록 파일이 없으면 지금 상태(빈 목록)를 먼저 쓴다. 그래야 변환본을 쓴 뒤 목록을 쓰기 전에 앱이 끝나도 「목록 없음 + 팩 파일」
+    /// (`.missing`)이 되지 않는다 — 남은 변환본은 커밋되지 않은 파일로 다음 실행이 정리한다. 이미 있으면 아무것도 하지 않는다
+    private func ensureLibraryFile(_ library: PackLibrary) -> Bool {
+        guard !FileManager.default.fileExists(atPath: libraryURL.path) else { return true }
+        guard (try? ensureDirectory(libraryRoot)) != nil, let data = try? JSONEncoder().encode(library) else { return false }
+        return (try? data.write(to: libraryURL, options: .atomic)) != nil
     }
 
     static func backupStamp(_ date: Date) -> String {
@@ -926,6 +1004,13 @@ struct PackLibrary: Codable, Equatable {
     var revision = 0
     var order: [SnippetSourceSlot] = SnippetSourceSlot.defaultOrder
     var packs: [String: Entry] = [:]
+    // MARK: 커밋 마무리 칸(codex 반론 #2·#6) — **선택 칸이라 이행이 없다**(옛 목록은 nil로 디코드, schema 번호 그대로).
+    /// 이 목록을 게시한 snapshot 세대 — 커밋 ④에서 ⑤(`packsGeneration`)에 쓸 값을 미리 적는다. 실행 때 지금 세대와 다르면 커밋이 그 사이에서
+    /// 끝난 것이라 다시 게시한다(`maintain`). nil이면(옛 목록) 순서 비교만 한다
+    var generation: Int?
+    /// 이 세대 **아래**의 snapshot은 지운다 — 팩을 지우거나 바꾼 커밋의 세대(그 앞 세대에 옛 내용이 있다, 1-d). 뒤 커밋이 그대로 이어 가므로
+    /// 정리가 실패했거나 정리 전에 앱이 끝났어도 다음 커밋·다음 실행이 다시 지운다. 세대는 오르기만 하니 한 번 지운 뒤에는 할 일이 없다
+    var purgeBelow: Int?
 }
 
 /// 변환본 내용 검사 결과 하나(1-c G6, `pack-checks.json`의 값) — **파일 이름 + 크기**로 맞춘다(검증 (e)). 이름은 revision마다 새로 짓지만,

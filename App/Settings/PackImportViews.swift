@@ -339,6 +339,8 @@ struct PackPasteView: View {
 
     @State private var text = ""
     @State private var overview: PackPasteOverview?
+    /// 「붙여넣기」 버튼으로 받은 글이 3MB를 넘어 잇지 않았다 — 글은 그대로 두고 「너무 길어요」 한 줄(codex 반론 #3)
+    @State private var pasteRejected = false
     @State private var request: PackImportRequest?
     @State private var completedPackID: String?
 
@@ -352,10 +354,16 @@ struct PackPasteView: View {
                     .frame(minHeight: 250, maxHeight: 360)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
+                if pasteRejected {
+                    Text(PackImportCopy.pasteTooLarge)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
                 if !text.isEmpty {
                     HStack {
+                        // 3MB를 넘는 글(직접 붙여 넣은 경우)은 세지 않고 「너무 길어요」 — 개요 계산도 상한 뒤에 있다
                         if let overview {
-                            Text(PackImportCopy.pasteSummary(lines: overview.lines, delimiter: overview.delimiter))
+                            Text(PackImportCopy.pasteSummary(overview))
                                 .foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 8)
@@ -371,9 +379,15 @@ struct PackPasteView: View {
             }
 
             Section {
-                // 시스템 붙여넣기 — 사용자가 누를 때만 클립보드를 읽는다(확인 창 없음)
+                // 시스템 붙여넣기 — 사용자가 누를 때만 클립보드를 읽는다(확인 창 없음). 여러 글을 **잇기 전에** 3MB 상한을 본다 —
+                // 넘으면 잇지도 칸에 넣지도 않는다(codex 반론 #3)
                 PasteButton(payloadType: String.self) { strings in
-                    text = strings.joined(separator: "\n")
+                    guard let joined = PackPasteOverview.joinedPaste(strings) else {
+                        pasteRejected = true
+                        return
+                    }
+                    pasteRejected = false
+                    text = joined
                 }
                 .frame(maxWidth: .infinity)
                 Button(action: read) {
@@ -401,7 +415,10 @@ struct PackPasteView: View {
                 overview = nil
                 return
             }
-            if let measured = await PackPasteOverview.perform(text) { overview = measured }
+            if let measured = await PackPasteOverview.perform(text) {
+                overview = measured
+                pasteRejected = false   // 글이 바뀌었다 — 앞서 거부한 붙여넣기 안내는 내린다
+            }
         }
         .sheet(item: $request, onDismiss: {
             guard let packID = completedPackID else { return }
@@ -420,6 +437,7 @@ struct PackPasteView: View {
         .onDisappear {
             text = ""
             overview = nil
+            pasteRejected = false
         }
     }
 

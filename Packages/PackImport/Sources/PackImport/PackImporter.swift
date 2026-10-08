@@ -278,12 +278,15 @@ public enum PackImporter {
     /// 채택 0일 때 보고: 머리글을 인정한 후보의 실패(규칙 위반·열 수 불일치·**머리글 뒤 데이터 행의 quote 오류**)가 있으면 후보 순서의
     /// 첫 것 → 모든 후보가 quote 오류면 첫 quote 오류 → 그 밖은 머리글 오류. quote 오류 앞까지 머리글이 인정된 후보는 그 구분자를
     /// 지정했을 때와 같은 quote 오류를 낸다(재검증 N1 — 예전엔 `;`·탭이 「머리글 없음」이라 머리글 오류로 나갔다). 채택 규칙은 그대로다.
-    private static func adoptDelimiters(_ text: String) throws(PackImportFailure) -> [CSVDelimiter] {
+    /// `cancellation`이 있으면 시험 파싱 중에도 취소를 보고, 취소되면 빈 목록(부르는 쪽이 버린다 — 붙여넣기 개요만 넘긴다, codex 반론 #3)
+    private static func adoptDelimiters(_ text: String,
+                                        cancellation: PackCancellation? = nil) throws(PackImportFailure) -> [CSVDelimiter] {
         var adopted: [CSVDelimiter] = []
         var quoteErrors: [CSVQuoteError] = []
         var headerFailure: PackImportFailure?
         for candidate in CSVDelimiter.allCases {
-            let trial = CSVRecordParser.scan(text, delimiter: candidate, maxNonBlankRecords: trialRecords)
+            let trial = CSVRecordParser.scan(text, delimiter: candidate, maxNonBlankRecords: trialRecords, cancellation: cancellation)
+            if cancellation?.isCancelled == true { return [] }
             switch trial.failure {
             case .tooManyLines?:
                 throw .tooManyLines
@@ -310,8 +313,14 @@ public enum PackImporter {
 
     /// 붙여넣기 화면의 「칸 나누기: 탭」(시안 3-E) — 같은 후보 시험(5-2)으로 **하나로 정해질 때만** 그 구분자. 앞 레코드(시험 창)만 본다.
     /// 보여 주기용이다 — 실제 읽기는 「읽기」를 누른 뒤 `read(text:)`가 처음부터 다시 판정한다
-    public static func likelyDelimiter(_ text: String) -> CSVDelimiter? {
-        guard !containsOnlySeparators(text), let adopted = try? adoptDelimiters(text), adopted.count == 1 else { return nil }
+    /// `isCancelled`는 계산 중 취소 확인(몇 천 글자마다) — 취소되면 nil
+    public static func likelyDelimiter(_ text: String, isCancelled: (() -> Bool)? = nil) -> CSVDelimiter? {
+        likelyDelimiter(text, cancellation: isCancelled.map(PackCancellation.init))
+    }
+
+    static func likelyDelimiter(_ text: String, cancellation: PackCancellation?) -> CSVDelimiter? {
+        guard !containsOnlySeparators(text), let adopted = try? adoptDelimiters(text, cancellation: cancellation),
+              adopted.count == 1, cancellation?.isCancelled != true else { return nil }
         return adopted.first
     }
 
@@ -337,10 +346,11 @@ public enum PackImporter {
     /// xlsx 파이프라인 — 컨테이너·XML(1-e ①②) → 시트 하나의 `RawTable` → **CSV와 같은** 헤더·메타 판정 → 행별 검증(`PackRecordReader`, AC-32).
     /// 표시 시트가 둘 이상인데 `sheet`가 nil이면 고르기 목록을 돌려준다(AC-36 — 기본은 첫 표시 시트, 목록의 0번).
     /// 상태가 없다 — 시트를 고르면 원본 바이트에서 다시 연다(5-1과 같은 원칙). 실패는 내용 없는 코드다(AC-34)
-    public static func readWorkbook(_ data: Data, sheet: Int?) throws(PackImportFailure) -> PackWorkbookOutcome {
+    public static func readWorkbook(_ data: Data, sheet: Int?,
+                                    limits: XLSXWorkbookLimits = .product) throws(PackImportFailure) -> PackWorkbookOutcome {
         var reader: XLSXWorkbookReader
         do {
-            reader = try XLSXWorkbookReader.open(data)
+            reader = try XLSXWorkbookReader.open(data, limits: limits)
         } catch {
             throw .workbook(error)
         }
