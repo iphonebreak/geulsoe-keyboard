@@ -58,7 +58,8 @@ public final class InputController {
     private var committedTail = ""
     private let committedTailLimit = 48
     /// `committedTail`의 **앞이 잘렸나**(48자 상한으로 줄 중간에서 시작하나) — 채움글 단어 경계가 꼬리 맨 앞 글자의 앞을 모르는 경우다.
-    /// 앞을 버릴 때만 참이 되고, 새 줄(리턴·여러 줄 본문 삽입)이나 문맥을 모르는 sync(nil)에서 거짓이 된다. 내용은 담지 않는다.
+    /// 앞을 버릴 때와 빈 꼬리에서 ⌫가 추적하지 않은 앞 글자를 지울 때(`deleteCommittedCharacter`) 참이 되고,
+    /// 새 줄(리턴·여러 줄 본문 삽입)이나 문맥을 모르는 sync(nil)에서 거짓이 된다. 문맥이 있는 sync는 문서로 다시 적는다. 내용은 담지 않는다.
     private var committedTailIsTruncated = false
     /// 후보 선택·채움글 삽입 직후 참 — 꼬리 끝 단어는 이미 처리됐으므로 다음 공백/리턴이
     /// 같은 단어를 다시 학습으로 보내면 안 된다 (이중 카운트·스니펫 본문 학습 방지).
@@ -144,6 +145,8 @@ public final class InputController {
     /// ★ **문맥을 모르는 경우(sync(nil) — 빈 입력란·커서 도구 이동)는 잘림으로 보지 않는다.** 빈 입력란에서
     /// `documentContextBeforeInput`이 nil로 와 같은 길을 타므로, 잘림으로 보면 입력란 첫 단축어(「주소」만 친 경우)가 막힌다.
     /// 커서 도구 이동 뒤에는 호스트가 곧 textDidChange로 실제 꼬리를 다시 세운다.
+    /// ★ 반대로 **꼬리를 다 지운 뒤에도 참이 남고**(검증 ⓛ2), 빈 꼬리에서 ⌫가 앞 글자(줄바꿈 등)를 지우면 참이 된다(검증 ⓜ1) —
+    /// 둘 다 앞 글자를 모르는 경우라 칩을 띄우지 않는 쪽이다. 「꼬리가 비면 잘림 아님」으로 줄이지 않는다.
     public var textTailIsTruncated: Bool { committedTailIsTruncated }
 
     /// 입력 중인 단어 — 꼬리 끝의 한글 음절 연속 run (조합 중 음절 포함).
@@ -391,10 +394,9 @@ public final class InputController {
     private func handleBackspace() {
         suppressesNextWordCommit = false
         guard mode == .hangul else {
-            output.deleteBackward(1)
             // 기호/영어 모드도 꼬리를 함께 걷는다 — 단축어의 숫자·콜론이 이 모드에서
             // 지워지므로, 빠뜨리면 문서에 없는 텍스트로 칩이 뜨고 탭 시 문서를 파괴한다
-            if !committedTail.isEmpty { committedTail.removeLast() }
+            deleteCommittedCharacter()
             return
         }
         if hangulSource.prefersKeystrokeReplayBackspace, !keystrokeLog.isEmpty {
@@ -410,8 +412,23 @@ public final class InputController {
             // 연타 상태를 끊는다 — 지워진 자모에 이어 승격되면 안 된다 (단모음)
             hangulSource.reset()
         } else {
-            output.deleteBackward(1)
-            if !committedTail.isEmpty { committedTail.removeLast() }
+            deleteCommittedCharacter()
+        }
+    }
+
+    /// ⌫로 확정된 글자 하나를 지우고 꼬리도 함께 걷는다.
+    ///
+    /// ★ **꼬리가 이미 비어 있으면** 지운 것은 추적하지 않은 앞 글자(줄바꿈·앞 줄·48자 밖)다 — 이제 커서 앞 글자를 모르므로
+    /// 잘림으로 적는다(채움글 단어 경계는 꼬리 맨 앞을 경계로 보지 않는다). 「서울」⏎⌫ 뒤 「주소」가 문서로는 「서울주소」인데
+    /// 줄 처음으로 오판해 칩이 뜨던 경로다(검증 ⓜ1, 사장님 결정 2026-10-08). 다음 sync(textDidChange·등장)가 문서 문맥으로
+    /// 바로잡는다 — 메아리를 보내는 호스트에선 바로 풀린다. 빈 입력란의 ⌫(지울 게 없음)도 여기서는 구별할 수 없어 같은 길이다.
+    /// 꼬리를 다 지운 뒤에도 잘림이 남는 것(검증 ⓛ2)과 같은 쪽 — 모를 때는 칩을 띄우지 않는다.
+    private func deleteCommittedCharacter() {
+        output.deleteBackward(1)
+        if committedTail.isEmpty {
+            committedTailIsTruncated = true
+        } else {
+            committedTail.removeLast()
         }
     }
 
