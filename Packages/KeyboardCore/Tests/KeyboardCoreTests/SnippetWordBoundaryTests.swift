@@ -194,12 +194,54 @@ struct SnippetWordBoundaryDateTests {
         #expect(Boundary.dates.suggestion(forTail: row.tail)?.trigger == row.trigger, "단독 API도 같은 규칙")
     }
 
-    @Test("긴 어휘가 경계에 걸리면 짧은 어휘 — 「그올해 광복절 날짜」는 「광복절 날짜」(앞 공백)")
-    func shorterWord() throws {
-        let chip = try #require(matcher.suggestion(forTail: "그올해 광복절 날짜"))
-        #expect(chip.trigger == "광복절 날짜")
-        #expect(matcher.suggestion(forTail: "그올해광복절 날짜") == nil, "짧은 어휘 앞도 「해」")
-        #expect(matcher.suggestion(forTail: "올해 광복절 날짜")?.trigger == "올해 광복절 날짜", "긴 어휘가 통과하면 긴 어휘")
+    /// ★ 문구 needle과 **다르다**(사장님 결정 2026-10-08, 검증 ⓜ2). 「근데내년 추석 날짜」가 짧은 「추석 날짜」(올해)로 물러나
+    /// 탭하면 「근데내년 2026. 9. 25.」 — 앞말과 뜻이 뒤집혔다. 수식어(내년·올해·이번·이번년도)가 붙은 긴 어휘가 경계에 걸리면 칩 없음
+    @Test("★ 긴 어휘가 경계에 걸리면 날짜 팩은 칩 없음 — 짧은 어휘로 물러나지 않는다", arguments: [
+        ("근데내년 추석 날짜", nil, nil),
+        ("그올해 광복절 날짜", nil, nil),
+        ("그올해광복절 날짜", nil, nil),
+        ("그올해 연말 날짜", nil, nil),
+        ("그이번 추석 날짜", nil, nil),
+        ("그이번년도 설날 날짜", nil, nil),
+        ("그내일모레 날짜", nil, nil),
+        ("그다음주 금요일 날짜", nil, nil),
+        ("그3일 후 날짜", nil, nil),
+        ("내년 추석 날짜", "내년 추석 날짜", "2027. 9. 15."),
+        ("근데 내년 추석 날짜", "내년 추석 날짜", "2027. 9. 15."),
+        ("올해 광복절 날짜", "올해 광복절 날짜", "2026. 8. 15."),
+        ("그 올해 광복절 날짜", "올해 광복절 날짜", "2026. 8. 15."),
+        ("올해 연말 날짜", "올해 연말 날짜", "2026. 12. 31."),
+        ("광복절 날짜", "광복절 날짜", "2026. 8. 15."),
+        ("추석 날짜", "추석 날짜", "2026. 9. 25.")
+    ] as [(String, String?, String?)])
+    func noFallbackToShorterWord(row: (tail: String, trigger: String?, body: String?)) {
+        #expect(matcher.suggestion(forTail: row.tail)?.trigger == row.trigger)
+        #expect(matcher.suggestion(forTail: row.tail)?.body == row.body)
+        #expect(Boundary.dates.suggestion(forTail: row.tail)?.trigger == row.trigger, "단독 API도 같은 규칙")
+    }
+
+    @Test("★ 공휴일 11종 × 수식어 4종 — 붙여 쓰면 칩 없음, 띄어 쓰면 수식어까지 지운다")
+    func holidayModifiersNeverFallBack() {
+        let names = ["신정", "삼일절", "어린이날", "현충일", "광복절", "개천절", "한글날", "성탄절", "설날", "구정", "추석"]
+        for name in names {
+            for modifier in ["올해", "이번", "이번년도", "내년"] {
+                #expect(matcher.suggestion(forTail: "그\(modifier)\(name) 날짜") == nil, "그\(modifier)\(name)")
+                #expect(matcher.candidates(forTail: "그\(modifier)\(name) 날짜", isSecureTextEntry: false).isEmpty,
+                        "그\(modifier)\(name) 목록")
+                #expect(matcher.suggestion(forTail: "그 \(modifier)\(name) 날짜")?.trigger == "\(modifier)\(name) 날짜",
+                        "그 \(modifier)\(name)")
+            }
+        }
+    }
+
+    @Test("내일모레 — 표준어(= 모레, +2일). 「모레」만 지우고 「내일」을 남기지 않는다")
+    func naeilMore() throws {
+        let chip = try #require(matcher.suggestion(forTail: "내일모레 날짜"))
+        #expect(chip.trigger == "내일모레 날짜")
+        #expect(chip.title == "내일모레 날짜")
+        #expect(chip.body == "2026. 10. 10.")
+        #expect(matcher.suggestion(forTail: "그 내일 모레 날짜")?.trigger == "내일 모레 날짜")
+        #expect(matcher.suggestion(forTail: "모레 날짜")?.trigger == "모레 날짜", "모레는 그대로")
     }
 
     @Test("「날짜」로 끝나는 사용자 단축어 — 앞에 붙은 꼴에서는 날짜 팩이 뜬다")
@@ -351,6 +393,98 @@ struct SnippetWordBoundaryInputControllerTests {
         #expect(controller.insertSnippet(chip))
         #expect(output.text == String(repeating: "가", count: 50) + " 첫 줄\n둘째 줄")
         #expect(controller.textTailIsTruncated == false)
+    }
+
+    /// 호스트 — 우리 ⌫에 메아리 textDidChange를 보내나. 보내면 VC가 `documentContextBeforeInput`으로 sync한다(빈 문서는 nil).
+    enum Host: CaseIterable { case silent, echoesBackspace }
+
+    /// 키 줄 — 두벌식 자판 글자 그대로, `⏎` 리턴 · `⌫` ⌫ · `␣` 스페이스 · `#` 123(기호 ↔ 문자) · `◆` 떠 있는 채움글 칩 탭
+    private static func run(_ keys: String, host: Host, matcher: SnippetMatcher) -> (RecordingOutput, InputController) {
+        let output = RecordingOutput()
+        let controller = InputController(output: output)
+        for key in keys {
+            switch key {
+            case "⏎": controller.handle(.return)
+            case "␣": controller.handle(.space)
+            case "#": controller.handle(.symbols)
+            case "⌫":
+                controller.handle(.backspace)
+                if host == .echoesBackspace { controller.syncWithDocument(documentTail: output.text.isEmpty ? nil : output.text) }
+            case "◆":
+                if let chip = matcher.suggestion(forTail: controller.textTail, isSecureTextEntry: false,
+                                                 tailIsTruncated: controller.textTailIsTruncated) {
+                    controller.insertSnippet(chip)
+                }
+            default: controller.handle(.character(String(key)))
+            }
+        }
+        return (output, controller)
+    }
+
+    /// 단축어 `주소`(본문은 여러 줄 — `◆` 행 전용). 꼬리 끝 「주소」에 칩이 뜨나(trigger), 메아리 없는 호스트 · 있는 호스트
+    private static let multiLineAddress = SnippetMatcher(bible: nil, entries: [
+        SnippetEntry(trigger: "주소", title: "주소", body: "첫 줄\n둘")
+    ])
+
+    /// 검증 ⓜ1(사장님 결정 2026-10-08) — 꼬리가 빈 채 ⌫가 **추적하지 않은 앞 글자**(줄바꿈·앞 줄)를 지우면 커서 앞 글자를 모른다.
+    /// 잘림(경계 아님)으로 적어, 메아리 없는 호스트에서도 붙은 꼴(「서울주소」)에 칩이 안 뜨게 한다(대가: 「서울 주소」도 다음 sync 전까지 칩 없음).
+    @Test("★ ⏎⌫ — 꼬리가 빈 채 앞 글자를 지우면 앞을 모른다(검증 ⓜ1), 다음 sync가 문서로 바로잡는다", arguments: [
+        ("서울⏎⌫주소 — 줄바꿈을 지워 붙었다(원래 버그)", "tjdnf⏎⌫wnth", "서울주소", nil, nil),
+        ("서울␣⏎⌫주소 — 앞이 공백이지만 메아리 전엔 모른다(안전한 쪽)", "tjdnf␣⏎⌫wnth", "서울 주소", nil, "주소"),
+        ("⏎⌫주소 — 빈 입력란의 리턴을 지움", "⏎⌫wnth", "주소", nil, "주소"),
+        ("⌫주소 — 빈 입력란에서 ⌫ 먼저(지울 게 없어도 구별 못 한다)", "⌫wnth", "주소", nil, "주소"),
+        ("주소 — 빈 입력란 첫 단축어(⌫ 없음)", "wnth", "주소", "주소", "주소"),
+        ("서울⏎주소 — 줄바꿈 뒤", "tjdnf⏎wnth", "서울\n주소", "주소", "주소"),
+        ("서울⏎가␣⌫⌫주소 — 추적한 글자만 지우면 줄 처음 그대로", "tjdnf⏎rk␣⌫⌫wnth", "서울\n주소", "주소", "주소"),
+        ("서울⏎ㅈ⌫⌫주소 — 조합 자모를 지운 뒤 줄바꿈", "tjdnf⏎w⌫⌫wnth", "서울주소", nil, nil),
+        ("서울⏎[123]⌫[가]주소 — 기호 자판의 ⌫도 같은 규칙", "tjdnf⏎#⌫#wnth", "서울주소", nil, nil),
+        ("주소◆(여러 줄 본문)⌫⌫주소 — 마지막 줄 위로 지워 앞 줄에 붙었다", "wnth◆⌫⌫wnth", "첫 줄주소", nil, nil),
+        ("주소◆(여러 줄 본문)⌫주소 — 마지막 줄만 지움", "wnth◆⌫wnth", "첫 줄\n주소", "주소", "주소")
+    ] as [(String, String, String, String?, String?)])
+    func backspaceIntoUntrackedText(row: (why: String, keys: String, document: String, silent: String?, echo: String?)) {
+        for host in Host.allCases {
+            let (output, controller) = Self.run(row.keys, host: host, matcher: Self.multiLineAddress)
+            #expect(output.text == row.document, "\(row.why) — 전제(문서)")
+            let chip = Self.multiLineAddress.suggestion(
+                forTail: controller.textTail, isSecureTextEntry: false, tailIsTruncated: controller.textTailIsTruncated)
+            #expect(chip?.trigger == (host == .silent ? row.silent : row.echo), "\(row.why) · \(host)")
+            // 정답 = 문서 마지막 줄로 판정한 칩. 메아리 호스트는 정답과 같고, 없는 호스트는 정답이거나 칩 없음(거짓 양성 0)
+            let lastLine = String(row.document.split(separator: "\n", omittingEmptySubsequences: false).last ?? "")
+            let truth = Self.multiLineAddress.suggestion(forTail: lastLine, isSecureTextEntry: false, tailIsTruncated: lastLine.count > 48)
+            if host == .echoesBackspace {
+                #expect(chip?.trigger == truth?.trigger, "\(row.why) — 메아리면 문서와 같다")
+            } else {
+                #expect(chip == nil || chip?.trigger == truth?.trigger, "\(row.why) — 메아리가 없어도 거짓 양성은 없다")
+            }
+        }
+    }
+
+    /// 검증 ⓛ2(사장님 결정 2026-10-08 — 지금 동작 고정). 잘린 꼬리를 ⌫로 전부 지워도 꼬리 앞(잘라 버린 글자)은 여전히 모른다.
+    /// 「꼬리가 비면 잘림 아님」으로 바꾸면(변이 V8) 앞 글자가 남은 줄 중간에서 줄 처음으로 오판한다
+    @Test("★ 잘린 꼬리를 ⌫로 다 지워도 잘림은 남는다(안전한 쪽, 검증 ⓛ2) — 메아리 sync가 오면 문서 기준으로 풀린다")
+    func truncationSurvivesDeletingWholeTail() {
+        for host in Host.allCases {
+            let (output, controller) = Self.run("#" + String(repeating: "1", count: 61), host: host, matcher: Self.multiLineAddress)
+            #expect(controller.textTailIsTruncated == true, "\(host) 61자 — 앞을 버렸다")
+            for _ in 0..<48 {
+                controller.handle(.backspace)
+                if host == .echoesBackspace { controller.syncWithDocument(documentTail: output.text) }
+            }
+            #expect(output.text.count == 13, "\(host) 전제 — 문서에는 앞 13자가 남았다")
+            // 메아리 호스트는 sync가 문서로 꼬리를 다시 세운다(13자 = 줄 처음부터). 없는 호스트는 추적한 48자를 다 지워 꼬리가 빈다
+            #expect(controller.textTail == (host == .silent ? "" : output.text), "\(host) 전제 — 꼬리")
+            #expect(controller.textTailIsTruncated == (host == .silent), "\(host) 꼬리가 비어도 앞은 줄 중간")
+            for _ in 0..<13 {
+                controller.handle(.backspace)
+                if host == .echoesBackspace { controller.syncWithDocument(documentTail: output.text.isEmpty ? nil : output.text) }
+            }
+            #expect(output.text.isEmpty, "\(host) 전제 — 문서가 비었다")
+            #expect(controller.textTailIsTruncated == (host == .silent), "\(host) 문서가 비어도 메아리 전엔 모른다")
+            for key in ["#", "w", "n", "t", "h"] { controller.handle(key == "#" ? .symbols : .character(key)) }
+            let chip = Self.multiLineAddress.suggestion(
+                forTail: controller.textTail, isSecureTextEntry: false, tailIsTruncated: controller.textTailIsTruncated)
+            #expect(chip?.trigger == (host == .silent ? nil : "주소"), "\(host) 줄 처음 「주소」")
+        }
     }
 
     @Test("끝 맞춤 칩 → 삽입: 「서울 주소」는 「서울 」 + 본문, 「서울주소」는 칩 없음")

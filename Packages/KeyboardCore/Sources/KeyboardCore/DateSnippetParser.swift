@@ -19,7 +19,9 @@ import TadakDomain
 /// 아무것도 하지 않는다. 띄어쓰기는 보지 않고(매처와 같은 규칙), 줄바꿈에서 멈춘다.
 ///
 /// **단어 경계(2026-10-08, 1.3.0):** 잡은 구문의 **첫 글자** 앞이 줄 처음·공백·문장부호/기호여야 맞은 것이다(`SnippetWordBoundary` —
-/// 「그오늘 날짜」는 칩 없음). 긴 어휘가 경계에 걸리면 더 짧은 어휘를 본다(「그올해 광복절 날짜」 → 「광복절 날짜」, 문구 needle과 같은 규칙).
+/// 「그오늘 날짜」는 칩 없음). ★ **문구 needle과 달리 짧은 어휘로 물러나지 않는다** — 꼬리에 맞은 가장 긴 어휘가 경계에 걸리면
+/// 칩 없음이다(「그올해 광복절 날짜」 → 없음). 수식어(내년·올해·이번·이번년도)를 떼고 물러나면 「근데내년 추석 날짜」가 **올해** 추석이
+/// 되어 뜻이 뒤집혔다(검증 ⓜ2, 사장님 결정 2026-10-08). 숫자 패턴은 원래 해석이 하나라 물러날 데가 없다.
 ///
 /// ## 달력 — 계산도 출력도 그레고리력 (4-5·4-6·6-2절)
 ///
@@ -249,7 +251,7 @@ public struct DateSnippetParser: Sendable {
     ]
 
     /// (가) 닫힌 어휘 — 끝말 「날짜」를 뺀 키. **긴 키가 먼저**라 「올해광복절」이 「광복절」보다 먼저 맞는다
-    /// (「올해」까지 지운다).
+    /// (「올해」까지 지운다). 먼저 맞은 긴 키가 경계에 걸리면 짧은 키를 보지 않는다(`matchDate`).
     private static let dateWords: [Word] = {
         var words: [Word] = [
             // 상대일 — 글피는 모레의 다음 날(+3, 표준국어대사전). 어제·모레는 사장님 결정(2026-09-28)으로 더했다
@@ -258,6 +260,8 @@ public struct DateSnippetParser: Sendable {
             Word("오늘", .relativeDays(0), "오늘 날짜"),
             Word("내일", .relativeDays(1), "내일 날짜"),
             Word("모레", .relativeDays(2), "모레 날짜"),
+            // 표준어 「내일모레」 = 모레(사장님 결정 2026-10-08, 검증 ⓛ1) — 단어 경계 뒤로 「모레」 앞 「일」에 걸려 칩이 사라졌었다
+            Word("내일모레", .relativeDays(2), "내일모레 날짜"),
             Word("글피", .relativeDays(3), "글피 날짜"),
             // 이번 달 · 올해 · 분기
             Word("이번달첫날", .monthFirst, "이번달 첫날 날짜"),
@@ -307,7 +311,10 @@ public struct DateSnippetParser: Sendable {
 
     private static func matchDate(_ window: [Character], accepts: (Int) -> Bool) -> Match? {
         let stem = window.dropLast(2)          // 「날짜」를 뗀다
-        for word in dateWords where stem.hasSuffix(word.key) && accepts(word.key.count + 2) {
+        // 꼬리에 맞은 **가장 긴** 어휘 하나로 정한다 — 경계에 걸리면 칩 없음(짧은 어휘로 물러나지 않는다, 타입 주석 「단어 경계」).
+        // 짧은 키가 긴 키의 접미사인 쌍은 전부 수식어 쌍이다(올해·이번·이번년도·내년 + 공휴일, 올해연말 → 연말, 내일모레 → 모레)
+        if let word = dateWords.first(where: { stem.hasSuffix($0.key) }) {
+            guard accepts(word.key.count + 2) else { return nil }
             return Match(meaning: word.meaning, kind: .dateOnly, length: word.key.count + 2, title: word.title)
         }
         // 숫자 패턴은 해석이 하나다(숫자열 전체·후퇴 금지) — 경계에 걸리면 없다
