@@ -9,8 +9,8 @@ import TadakDomain
 // mirror: KeyboardUI/KeyCapView.swift           faceFontSize(22/16, 심볼 medium) · keyBackground(눌림 60%) · preview(34pt 풍선)
 //                                               · 힌트(10pt, keyText 55%)
 // mirror: KeyboardUI/KeyboardRootView.swift     toolbarHeight 46 · SuggestionToolbar(spacing 10, 좌우 10, 도구 20pt/85%,
-//                                               ✕ 30×38) · SnippetChip(14pt bold 제목 + 14pt 본문, 12/7 패딩, Capsule)
-//                                               · KeyboardLayoutView(행 간격 7, 키 간격 5, 좌우 3, 아래 4)
+//                                               ✕ 30×38) · KeyboardLayoutView(행 간격 7, 키 간격 5, 좌우 3, 아래 4)
+// mirror: KeyboardUI/SnippetChip.swift          SnippetChip(14pt bold 제목 + 14pt 본문, 12/7 패딩, Capsule)
 // mirror: KeyboardCore/LayoutDefinition.swift   dubeolsik 3행(+ shiftedLabel) + bottomRow(languageLabel: "ABC").removingGlobe()
 // mirror: KeyboardUI/KeyboardRootView.swift     bibleBadge(book 12pt semibold + 13pt 숫자, 좌우 8, 높이 28, functionKey Capsule)
 //                                               · 추천단어(17pt, 좌우 6 · 위아래 10, 사이 구분선 1×18 keyText 20%)
@@ -233,7 +233,7 @@ private struct MockToolbar: View {
     }
 }
 
-/// mirror: KeyboardUI/KeyboardRootView.swift `SnippetChip` — 제목 굵게 + 본문 첫 줄(폭에 맞춰 … 절단)
+/// mirror: KeyboardUI/SnippetChip.swift `SnippetChip`(`SnippetChipFace`) — 제목 굵게 + 본문 첫 줄(폭에 맞춰 … 절단)
 private struct MockSnippetChip: View {
 
     let title: String

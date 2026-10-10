@@ -59,9 +59,13 @@ App/GoogleService-Info.plist
 !/tools/convert_bible.py
 !/tools/convert_words.py
 !/tools/convert_constitution.py
+!/tools/convert_emoji.py
 !/tools/generate_click.py
 # 설날·추석 표(LunarHolidayTable.swift, 추적됨)의 생성기 — 같은 이유. 표 머리가 재생성 명령으로 이 파일을 가리킨다(2026-09-28)
 !/tools/generate_lunar_holidays.swift
+# 외부 채움글 xlsx 샘플(PackImport 번들·픽스처, 추적됨)의 생성기·검사기 — 같은 이유(2026-10-07, 1-e ④)
+!/tools/generate_sample_xlsx.py
+!/tools/check_sample_xlsx.py
 
 # 서명 자산 — 절대 커밋하지 않는다
 *.p12

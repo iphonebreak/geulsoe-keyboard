@@ -97,6 +97,24 @@ public enum SnippetPack {
     public static let date = "date"
 }
 
+/// 내장 채움글 팩의 **보이는 이름** — 설정 앱 팩 목록(`SnippetPackInfo`)과 키보드 후보 패널의 출처 이름표
+/// (`SnippetCandidateText.originName`, U7)가 이 상수 하나를 쓴다.
+///
+/// 앱과 KeyboardCore가 서로를 못 보므로 같은 글자가 두 곳에 따로 적혀 있었다(U7 ②-6 — 한쪽만 고쳐도 아무 시험도 안 깨졌다).
+/// `BibleSearchText`와 같은 이유로 의존성 0인 여기로 내렸다(2026-10-07 사장님 결정 A안). 시험이 글자를 고정한다.
+public enum SnippetPackName {
+    /// 국가 상징문(`SnippetPack.anthem`)
+    public static let anthem = "국가 상징문"
+    /// 인사·상용구(`SnippetPack.greetings`)
+    public static let greetings = "인사·상용구"
+    /// 날짜·시간(`SnippetPack.date`)
+    public static let date = "날짜·시간"
+    /// 성경 — 설정 팩 목록의 이름(판본까지)
+    public static let bible = "성경 (개역한글)"
+    /// 성경 — 후보 패널 출처 이름표. 좁은 자리라 **일부러** 짧다(설정 이름과 다르다)
+    public static let bibleShort = "성경"
+}
+
 /// 채움글 목록 경계 — 내장 팩과 사용자 문구가 이 프로토콜로 합쳐진다.
 ///
 /// 사용자 문구는 설정 앱이 App Group에 쓰고 키보드는 읽기만 한다

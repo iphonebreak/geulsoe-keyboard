@@ -40,8 +40,8 @@ struct KeyCapView: View {
     /// 진입까지 누르고 있어야 하는 시간 / 문자 1개당 드래그 거리
     private static let cursorModeDelay: Duration = .milliseconds(400)
     private static let cursorStep: CGFloat = 8
-    /// 대체 입력이 무장되기까지 누르고 있어야 하는 시간
-    private static let alternateDelay: Duration = .milliseconds(450)
+    /// 대체 입력이 무장되기까지 누르고 있어야 하는 시간 — 채움글 칩 길게 누르기와 같은 공유 상수(U7, AC-43)
+    static let alternateDelay: Duration = KeyboardMetrics.longPressDelay
 
     private var label: String {
         isShifted ? key.shiftedLabel : key.label

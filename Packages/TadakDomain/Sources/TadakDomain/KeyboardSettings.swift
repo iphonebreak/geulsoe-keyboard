@@ -46,6 +46,10 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     // MARK: 툴바
 
     public var suggestionsEnabled: Bool
+    /// 추천단어 줄에 이모지 칩(`[🚗 자동차]`·`[🚗]`)을 함께 띄울지 (기본 켬, v1.3.0 ⑤ — PDR `emoji-word-suggestion.md`
+    /// Q6·D1·D2). **추천단어(`suggestionsEnabled`)가 켜져 있을 때만 뜻이 있다** — 꺼져 있으면 설정 화면이 흐리게
+    /// 비활성으로 보여 주고 값은 지킨다. 전체 접근 불필요(번들 사전 읽기뿐). 기본 켬은 출시 게이트(5-2절) 조건부다.
+    public var emojiWordSuggestionsEnabled: Bool
     /// 복사한 인증번호를 툴바 칩으로 제안. **전체 접근이 있어야만 동작한다** —
     /// 없으면 조용히 비표시 (PDR verification-code-paste).
     public var verificationCodeSuggestionsEnabled: Bool
@@ -220,6 +224,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         longPressSymbolsEnabled: Bool = true,
         symbolKeyboardStyle: SymbolKeyboardStyle = .qwerty,
         suggestionsEnabled: Bool = true,
+        emojiWordSuggestionsEnabled: Bool = true,
         verificationCodeSuggestionsEnabled: Bool = true,
         pasteSuggestionEnabled: Bool = true,
         // **기본값이 끔이다** (사용자 결정 2026-09-11). 클립보드 기록은 사용자가 복사한 내용을
@@ -265,6 +270,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.longPressSymbolsEnabled = longPressSymbolsEnabled
         self.symbolKeyboardStyle = symbolKeyboardStyle
         self.suggestionsEnabled = suggestionsEnabled
+        self.emojiWordSuggestionsEnabled = emojiWordSuggestionsEnabled
         self.verificationCodeSuggestionsEnabled = verificationCodeSuggestionsEnabled
         self.pasteSuggestionEnabled = pasteSuggestionEnabled
         self.clipboardHistoryEnabled = clipboardHistoryEnabled
@@ -288,6 +294,14 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.keySoundVolume = keySoundVolume
         self.appearance = appearance
         self.selectedThemeID = selectedThemeID
+    }
+
+    /// 이모지 칩을 계산해도 되는가 — `추천단어 ∧ 추천단어에 이모지 ∧ !secure`
+    /// (PDR `emoji-word-suggestion.md` 3-2절·5-3절, D2). 채움글 칩·✕ 억제 같은 툴바 우선순위는
+    /// KeyboardCore `WordSuggestionGate`가 따로 본다. 식을 여기 두는 이유는 `allowsBibleSearch`와 같다 —
+    /// 익스텐션 타깃은 `swift test`가 닿지 않는다. 전체 접근과 무관하다(번들 사전 읽기뿐 — 7절).
+    public func allowsEmojiChips(isSecureTextEntry: Bool?) -> Bool {
+        suggestionsEnabled && emojiWordSuggestionsEnabled && isSecureTextEntry != true
     }
 
     /// 설정을 읽지 못했을 때 쓰는 기본값.
@@ -324,6 +338,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         // 모르는 값(다음 버전 저장분)은 기본값으로 — 설정 전체가 디코딩 실패로 날아가면 안 된다
         symbolKeyboardStyle = (try? container.decodeIfPresent(SymbolKeyboardStyle.self, forKey: .symbolKeyboardStyle)) ?? base.symbolKeyboardStyle
         suggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .suggestionsEnabled) ?? base.suggestionsEnabled
+        emojiWordSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .emojiWordSuggestionsEnabled) ?? base.emojiWordSuggestionsEnabled
         verificationCodeSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .verificationCodeSuggestionsEnabled) ?? base.verificationCodeSuggestionsEnabled
         pasteSuggestionEnabled = try container.decodeIfPresent(Bool.self, forKey: .pasteSuggestionEnabled) ?? base.pasteSuggestionEnabled
         clipboardHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .clipboardHistoryEnabled) ?? base.clipboardHistoryEnabled

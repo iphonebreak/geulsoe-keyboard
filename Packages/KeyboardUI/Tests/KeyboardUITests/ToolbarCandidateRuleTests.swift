@@ -1,4 +1,6 @@
+import Foundation
 import Testing
+import KeyboardCore
 @testable import KeyboardUI
 
 /// 툴바 후보 행의 두 규칙 — 추천단어 개수와 ✕ 표시.
@@ -70,5 +72,98 @@ struct ToolbarCandidateRuleTests {
                 }
             }
         }
+    }
+
+    // MARK: - 이모지 칩 (v1.3.0 ⑤, PDR `emoji-word-suggestion.md` Q2·D3·D6, 수용 기준 6·7)
+
+    private static let mixed = WordSuggestionCandidate.emojiWithWord("🚕", word: "자동차")
+    private static let only = WordSuggestionCandidate.emojiOnly("🚕", word: "자동차")
+
+    @Test("이모지 칩이 뜨면 단어 후보가 한 칸 준다 — 배지 없음 2·배지 있음 1, 숨김 동안은 원래대로 3·2 (Q2·D3)")
+    func wordLimitWithEmojiChips() {
+        #expect(KeyboardMetrics.wordSuggestionLimit(hasBadge: false, hasEmojiChips: true) == 2)
+        #expect(KeyboardMetrics.wordSuggestionLimit(hasBadge: true, hasEmojiChips: true) == 1)
+        #expect(KeyboardMetrics.wordSuggestionLimit(hasBadge: false, hasEmojiChips: false) == 3)
+        #expect(KeyboardMetrics.wordSuggestionLimit(hasBadge: true, hasEmojiChips: false) == 2)
+    }
+
+    @Test("배지 없음 — 칸 4개 `[단어][단어][🚕 자동차][🚕]` (수용 기준 7)")
+    func fourSlotsWithoutBadge() {
+        let row = [WordSuggestionCandidate.word("자동차를"), .word("자동차가"), Self.mixed, Self.only]
+        let slots = KeyboardMetrics.wordChipSlots(row, hasBadge: false)
+        #expect(slots == [[.word("자동차를")], [.word("자동차가")], [Self.mixed], [Self.only]])
+        #expect(slots.count <= 4)
+    }
+
+    @Test("배지 있음 — 칸 2개, 둘째 칸을 혼합·전용이 반씩 나눈다 · 단어 후보는 0개로 떨어지지 않는다 (수용 기준 6·7)")
+    func twoSlotsWithBadge() {
+        let row = [WordSuggestionCandidate.word("자동차를"), Self.mixed, Self.only]
+        let slots = KeyboardMetrics.wordChipSlots(row, hasBadge: true)
+        #expect(slots == [[.word("자동차를")], [Self.mixed, Self.only]])
+        #expect(slots.first?.first?.emoji == nil, "첫 칸은 단어 후보")
+    }
+
+    @Test("이모지가 없으면 칸 나누기가 지금과 같다 — 후보 하나에 칸 하나 (수용 기준 2)", arguments: [false, true])
+    func slotsWithoutEmoji(hasBadge: Bool) {
+        let row = [WordSuggestionCandidate.word("안녕하세요"), .word("안녕히")]
+        #expect(KeyboardMetrics.wordChipSlots(row, hasBadge: hasBadge) == [[.word("안녕하세요")], [.word("안녕히")]])
+    }
+
+    @Test("배지 있음 + 단어 후보 0개 — 이모지 칸 하나")
+    func badgeWithoutWords() {
+        #expect(KeyboardMetrics.wordChipSlots([Self.mixed, Self.only], hasBadge: true) == [[Self.mixed, Self.only]])
+    }
+
+    // MARK: - D18 붙여넣기 칩이 있으면 [칩][✕]만 (PDR `emoji-word-suggestion.md` D18, 실기 세션 1 K7)
+
+    private static let carRow = [WordSuggestionCandidate.word("자동차를"), .word("자동차가"), mixed, only]
+
+    @Test("★ D18 — 붙여넣기 칩이 있으면 추천단어·이모지 칩을 그리지 않는다 · ✕는 남는다 ([복사됨][✕])")
+    func pasteChipStandsAlone() {
+        let visible = KeyboardMetrics.candidateRowWords(Self.carRow, hasPaste: true)
+        #expect(visible.isEmpty, "[복사됨][추천]×4[✕]가 아니다")
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: false, hasWords: !visible.isEmpty, hasPaste: true))
+    }
+
+    @Test("★ D18 — 붙여넣기 칩이 있으면 성경 배지도 후보 줄에 그리지 않는다")
+    func pasteChipHidesBadge() {
+        #expect(!KeyboardMetrics.candidateRowShowsBadge(hasPaste: true))
+        #expect(KeyboardMetrics.candidateRowShowsBadge(hasPaste: false))
+    }
+
+    @Test("D18 — ✕로 붙여넣기 칩이 물러나면 후보가 그대로 그려진다(✕ 유지)")
+    func afterPasteDismissWordsReturn() {
+        let visible = KeyboardMetrics.candidateRowWords(Self.carRow, hasPaste: false)
+        #expect(visible == Self.carRow)
+        #expect(KeyboardMetrics.wordChipSlots(visible, hasBadge: false).count == 4)
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: false, hasWords: true, hasPaste: false))
+    }
+
+    // MARK: - D19 붙여넣기 칩이 채움글 칩보다 먼저 (PDR `emoji-word-suggestion.md` D19)
+
+    private static let greeting = SnippetSuggestion(trigger: "새해인사", title: "새해 인사", body: "새해 복 많이 받으세요")
+    private static let today = SnippetSuggestion(
+        trigger: "오늘 날짜", title: "오늘 날짜", body: "2026. 9. 27.", computedAt: Date(timeIntervalSince1970: 0), kind: .dateOnly)
+
+    @Test("★ D19 — 붙여넣기 칩이 있으면 채움글 칩(날짜 포함)을 그리지 않는다 · ✕ 하나 ([붙여넣기][✕])",
+          arguments: [greeting, today])
+    func pasteChipHidesSnippet(_ snippet: SnippetSuggestion) {
+        let visible = KeyboardMetrics.candidateRowSnippet(snippet, hasPaste: true)
+        #expect(visible == nil, "[붙여넣기][채움글][✕]가 아니다")
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: visible != nil, hasWords: false, hasPaste: true))
+    }
+
+    @Test("D19 — ✕로 붙여넣기 칩이 물러나면 채움글 칩이 그려진다(✕ 유지) · 붙여넣기 칩이 없으면 지금과 같다",
+          arguments: [greeting, today])
+    func afterPasteDismissSnippetReturns(_ snippet: SnippetSuggestion) {
+        #expect(KeyboardMetrics.candidateRowSnippet(snippet, hasPaste: false) == snippet)
+        #expect(KeyboardMetrics.candidateRowSnippet(nil, hasPaste: false) == nil)
+        #expect(KeyboardMetrics.showsDismissButton(hasSnippet: true, hasWords: false, hasPaste: false))
+    }
+
+    @Test("D6 여백C — 이모지 칩이 뜬 줄은 칩 안쪽 좌우 여백 0, 아니면 지금 그대로 6")
+    func chipPadding() {
+        #expect(KeyboardMetrics.wordChipHorizontalPadding(hasEmojiChips: true) == 0)
+        #expect(KeyboardMetrics.wordChipHorizontalPadding(hasEmojiChips: false) == 6)
     }
 }

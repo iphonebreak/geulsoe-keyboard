@@ -23,6 +23,8 @@ final class RecordingOutput: TextOutput {
 
     private(set) var operations: [Operation] = []
     private(set) var text = ""
+    /// 호스트 문서에 선택 영역이 있다(K4) — 시험이 켜고 끈다
+    var hasSelectedText = false
 
     func insertText(_ inserted: String) {
         operations.append(.insert(inserted))
