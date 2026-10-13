@@ -586,11 +586,14 @@ public enum SymbolKeyboardStyle: String, Codable, CaseIterable, Sendable {
 /// | `formal` 규범형(기본) | `2026. 9. 27.` | `21:54` |
 /// | `common` 관행형 | `2026.09.27` | `21:54` |
 /// | `korean` 한글형 | `2026년 9월 27일` | `오후 9시 54분` |
+/// | `iso8601` 국제 표준(v1.3.1) | `2026-09-27` | `21:54` |
 ///
-/// 규범·관행형은 24시간제, 한글형만 12시간제 — **기기의 12/24시간 설정은 읽지 않는다.**
+/// 규범·관행형·국제 표준은 24시간제, 한글형만 12시간제 — **기기의 12/24시간 설정은 읽지 않는다.**
 /// 문자열 조립은 KeyboardCore `DateSnippetFormatter` 한 곳뿐이다.
+///
+/// 저장 값(raw value)은 바꾸지 않는다 — 모르는 값은 규범형으로 읽히므로 이름을 바꾸면 고른 형식이 조용히 사라진다.
 public enum DateSnippetStyle: String, Codable, CaseIterable, Sendable {
-    case formal, common, korean
+    case formal, common, korean, iso8601
 
     /// 설정 화면에 보이는 이름
     public var displayName: String {
@@ -598,6 +601,7 @@ public enum DateSnippetStyle: String, Codable, CaseIterable, Sendable {
         case .formal: "규범형"
         case .common: "관행형"
         case .korean: "한글형"
+        case .iso8601: "국제 표준(ISO 8601)"
         }
     }
 }

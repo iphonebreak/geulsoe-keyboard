@@ -38,7 +38,21 @@ struct DateSnippetSettingsTests {
 
     @Test("설정 화면 이름")
     func displayNames() {
-        #expect(DateSnippetStyle.allCases.map(\.displayName) == ["규범형", "관행형", "한글형"])
+        #expect(DateSnippetStyle.allCases.map(\.displayName) == ["규범형", "관행형", "한글형", "국제 표준(ISO 8601)"])
+    }
+
+    /// v1.3.1 국제 표준 형식(사용자 결정 2026-10-13). 저장 값은 `iso8601` — 바꾸면 고른 사용자의 설정이 규범형으로 떨어진다
+    @Test("형식은 넷이고, 국제 표준은 맨 뒤에 붙는다 — 저장 값 iso8601")
+    func fourStyles() {
+        #expect(DateSnippetStyle.allCases == [.formal, .common, .korean, .iso8601])
+        #expect(DateSnippetStyle.iso8601.rawValue == "iso8601")
+    }
+
+    @Test("저장분의 iso8601을 국제 표준으로 읽는다")
+    func decodesISO8601() throws {
+        let json = #"{"dateSnippetStyle": "iso8601"}"#
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: Data(json.utf8))
+        #expect(decoded.dateSnippetStyle == .iso8601)
     }
 }
 

@@ -68,6 +68,65 @@ struct DateSnippetFormatterTests {
     }
 }
 
+// MARK: - 16 · 국제 표준(ISO 8601) (v1.3.1, 사용자 결정 2026-10-13)
+
+@Suite("날짜 채움글 16 — 국제 표준(ISO 8601)")
+struct DateSnippetISO8601Tests {
+
+    /// 날짜와 시간은 **띄어쓰기로 잇는다** — ISO 본래의 `T`가 아니다(사용자 선택). 초·시간대 없음
+    @Test("2026-09-27 21:54 — 날짜·시간·날짜+시간", arguments: [
+        (DateSnippetKind.dateOnly, "2026-09-27"),
+        (.timeOnly, "21:54"),
+        (.dateAndTime, "2026-09-27 21:54")
+    ])
+    func threeKinds(kind: DateSnippetKind, expected: String) {
+        let components = Fixture.components(2026, 9, 27, 21, 54)
+        #expect(DateSnippetFormatter.format(components: components, kind: kind, style: .iso8601) == expected)
+    }
+
+    @Test("한 자리 월·일·시·분은 0을 채운다")
+    func zeroPadding() {
+        let components = Fixture.components(2026, 1, 5, 9, 5)
+        #expect(DateSnippetFormatter.format(components: components, kind: .dateOnly, style: .iso8601) == "2026-01-05")
+        #expect(DateSnippetFormatter.format(components: components, kind: .dateAndTime, style: .iso8601) == "2026-01-05 09:05")
+    }
+
+    @Test("24시간제 — 자정·정오·자정 직전", arguments: [
+        (0, 0, "00:00"), (0, 30, "00:30"), (12, 0, "12:00"), (23, 59, "23:59")
+    ])
+    func twentyFourHour(hour: Int, minute: Int, expected: String) {
+        let components = Fixture.components(2026, 9, 27, hour, minute)
+        #expect(DateSnippetFormatter.format(components: components, kind: .timeOnly, style: .iso8601) == expected)
+    }
+
+    @Test("연말에 다음 해가 찍히지 않는다 — 파서 경유", arguments: [
+        (12, 27, "2026-12-27"), (12, 28, "2026-12-28"), (12, 29, "2026-12-29"),
+        (12, 30, "2026-12-30"), (12, 31, "2026-12-31")
+    ])
+    func yearEnd(month: Int, day: Int, expected: String) {
+        #expect(Fixture.body("오늘 날짜", at: Fixture.date(2026, month, day), style: .iso8601) == expected)
+    }
+
+    @Test("파서 경유 — 친 말에 맞춰 필요한 만큼만", arguments: [
+        ("지금 날짜 시간", "2026-09-27 21:54"),
+        ("현재 날짜 시각", "2026-09-27 21:54"),
+        ("지금 시간", "21:54"),
+        ("오늘 날짜", "2026-09-27"),
+        ("사흘 후 날짜", "2026-09-30"),
+        ("광복절 날짜", "2026-08-15")
+    ])
+    func throughParser(tail: String, expected: String) {
+        #expect(Fixture.body(tail, at: Fixture.date(2026, 9, 27, 21, 54), style: .iso8601) == expected)
+    }
+
+    @Test("VoiceOver는 국제 표준이어도 한글형으로 읽는다")
+    func spokenValueStaysKorean() throws {
+        let parser = Fixture.parser(Fixture.date(2026, 9, 27, 21, 54), style: .iso8601)
+        let suggestion = try #require(parser.suggestion(forTail: "지금 날짜 시간"))
+        #expect(suggestion.accessibilityLabel == "채움글 지금 날짜 시간, 2026년 9월 27일 오후 9시 54분 붙여넣기")
+    }
+}
+
 // MARK: - 12-1 · 월·연 산술 (6-1절)
 
 @Suite("날짜 채움글 12-1 — 월·연 산술은 Foundation 결과 그대로")

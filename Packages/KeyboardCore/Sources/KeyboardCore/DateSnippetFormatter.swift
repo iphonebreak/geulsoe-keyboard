@@ -15,6 +15,10 @@ public enum DateSnippetKind: Sendable, Equatable {
 /// | 규범형 `formal`(기본) | `2026. 9. 27.` | `21:54` | `2026. 9. 27. 21:54` |
 /// | 관행형 `common` | `2026.09.27` | `21:54` | `2026.09.27 21:54` |
 /// | 한글형 `korean` | `2026년 9월 27일` | `오후 9시 54분` | `2026년 9월 27일 오후 9시 54분` |
+/// | 국제 표준 `iso8601`(v1.3.1) | `2026-09-27` | `21:54` | `2026-09-27 21:54` |
+///
+/// 국제 표준은 ISO 8601의 날짜(연-월-일, 월·일 두 자리)·시각(시:분 두 자리) 표기를 쓰되, 날짜+시간은 **띄어쓰기로 잇는다**
+/// — 본래의 `T`가 아니다(사용자 결정 2026-10-13, PDR 16절). 시간대·초는 넣지 않는다.
 ///
 /// ## `DateFormatter`를 쓰지 않는다 (4-2절)
 ///
@@ -26,7 +30,7 @@ public enum DateSnippetKind: Sendable, Equatable {
 ///
 /// ## 시각제는 스타일이 정한다
 ///
-/// 규범·관행형은 24시간제(시·분 두 자리), 한글형만 12시간제(0 채움 없음). **기기의 12/24시간
+/// 규범·관행형·국제 표준은 24시간제(시·분 두 자리), 한글형만 12시간제(0 채움 없음). **기기의 12/24시간
 /// 설정은 읽지 않는다.** 한글형 자정은 「오전 12시」, 정오는 「오후 12시」(시스템 관례),
 /// **정각은 「0분」을 생략한다** — 「오후 9시」(사장님 결정 2026-09-28).
 ///
@@ -57,13 +61,14 @@ public enum DateSnippetFormatter {
         case .formal: return "\(year). \(month). \(day)."
         case .common: return "\(year).\(twoDigits(month)).\(twoDigits(day))"
         case .korean: return "\(year)년 \(month)월 \(day)일"
+        case .iso8601: return "\(year)-\(twoDigits(month))-\(twoDigits(day))"
         }
     }
 
     private static func time(_ c: DateComponents, _ style: DateSnippetStyle) -> String {
         let hour = c.hour ?? 0, minute = c.minute ?? 0
         switch style {
-        case .formal, .common:
+        case .formal, .common, .iso8601:
             return "\(twoDigits(hour)):\(twoDigits(minute))"
         case .korean:
             let meridiem = hour < 12 ? "오전" : "오후"
