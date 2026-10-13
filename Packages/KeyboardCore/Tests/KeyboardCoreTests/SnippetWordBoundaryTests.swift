@@ -395,11 +395,13 @@ struct SnippetWordBoundaryInputControllerTests {
         #expect(controller.textTailIsTruncated == false)
     }
 
-    /// 호스트 — 우리 ⌫에 메아리 textDidChange를 보내나. 보내면 VC가 `documentContextBeforeInput`으로 sync한다(빈 문서는 nil).
-    enum Host: CaseIterable { case silent, echoesBackspace }
+    // 호스트 — 우리 ⌫에 메아리 textDidChange를 보내나. 보내면 VC가 `documentContextBeforeInput`으로 sync한다(빈 문서는 nil).
+    // 이 표는 ⏎가 줄바꿈을 넣는 호스트(`DocumentHost.newlineHosts` — 메아리 없음·메아리·낡은 getter·nil getter)만 돈다 —
+    // 문서가 표에 고정돼 있어서다. 제출형(⏎가 문서를 안 바꾸거나 비움)·자판 3종은 `ReturnBackspaceContextTests`(B2)가 맡는다.
+    // 낡은·nil getter는 지금 제품이 ⌫ 직후 읽기를 하지 않아 메아리 없음 열과 같다.
 
     /// 키 줄 — 두벌식 자판 글자 그대로, `⏎` 리턴 · `⌫` ⌫ · `␣` 스페이스 · `#` 123(기호 ↔ 문자) · `◆` 떠 있는 채움글 칩 탭
-    private static func run(_ keys: String, host: Host, matcher: SnippetMatcher) -> (RecordingOutput, InputController) {
+    private static func run(_ keys: String, host: DocumentHost, matcher: SnippetMatcher) -> (RecordingOutput, InputController) {
         let output = RecordingOutput()
         let controller = InputController(output: output)
         for key in keys {
@@ -409,7 +411,7 @@ struct SnippetWordBoundaryInputControllerTests {
             case "#": controller.handle(.symbols)
             case "⌫":
                 controller.handle(.backspace)
-                if host == .echoesBackspace { controller.syncWithDocument(documentTail: output.text.isEmpty ? nil : output.text) }
+                if host.sendsBackspaceEcho { controller.syncWithDocument(documentTail: output.text.isEmpty ? nil : output.text) }
             case "◆":
                 if let chip = matcher.suggestion(forTail: controller.textTail, isSecureTextEntry: false,
                                                  tailIsTruncated: controller.textTailIsTruncated) {
@@ -442,16 +444,16 @@ struct SnippetWordBoundaryInputControllerTests {
         ("주소◆(여러 줄 본문)⌫주소 — 마지막 줄만 지움", "wnth◆⌫wnth", "첫 줄\n주소", "주소", "주소")
     ] as [(String, String, String, String?, String?)])
     func backspaceIntoUntrackedText(row: (why: String, keys: String, document: String, silent: String?, echo: String?)) {
-        for host in Host.allCases {
+        for host in DocumentHost.newlineHosts {
             let (output, controller) = Self.run(row.keys, host: host, matcher: Self.multiLineAddress)
             #expect(output.text == row.document, "\(row.why) — 전제(문서)")
             let chip = Self.multiLineAddress.suggestion(
                 forTail: controller.textTail, isSecureTextEntry: false, tailIsTruncated: controller.textTailIsTruncated)
-            #expect(chip?.trigger == (host == .silent ? row.silent : row.echo), "\(row.why) · \(host)")
+            #expect(chip?.trigger == (host.sendsBackspaceEcho ? row.echo : row.silent), "\(row.why) · \(host)")
             // 정답 = 문서 마지막 줄로 판정한 칩. 메아리 호스트는 정답과 같고, 없는 호스트는 정답이거나 칩 없음(거짓 양성 0)
             let lastLine = String(row.document.split(separator: "\n", omittingEmptySubsequences: false).last ?? "")
             let truth = Self.multiLineAddress.suggestion(forTail: lastLine, isSecureTextEntry: false, tailIsTruncated: lastLine.count > 48)
-            if host == .echoesBackspace {
+            if host.sendsBackspaceEcho {
                 #expect(chip?.trigger == truth?.trigger, "\(row.why) — 메아리면 문서와 같다")
             } else {
                 #expect(chip == nil || chip?.trigger == truth?.trigger, "\(row.why) — 메아리가 없어도 거짓 양성은 없다")
@@ -463,27 +465,27 @@ struct SnippetWordBoundaryInputControllerTests {
     /// 「꼬리가 비면 잘림 아님」으로 바꾸면(변이 V8) 앞 글자가 남은 줄 중간에서 줄 처음으로 오판한다
     @Test("★ 잘린 꼬리를 ⌫로 다 지워도 잘림은 남는다(안전한 쪽, 검증 ⓛ2) — 메아리 sync가 오면 문서 기준으로 풀린다")
     func truncationSurvivesDeletingWholeTail() {
-        for host in Host.allCases {
+        for host in DocumentHost.newlineHosts {
             let (output, controller) = Self.run("#" + String(repeating: "1", count: 61), host: host, matcher: Self.multiLineAddress)
             #expect(controller.textTailIsTruncated == true, "\(host) 61자 — 앞을 버렸다")
             for _ in 0..<48 {
                 controller.handle(.backspace)
-                if host == .echoesBackspace { controller.syncWithDocument(documentTail: output.text) }
+                if host.sendsBackspaceEcho { controller.syncWithDocument(documentTail: output.text) }
             }
             #expect(output.text.count == 13, "\(host) 전제 — 문서에는 앞 13자가 남았다")
             // 메아리 호스트는 sync가 문서로 꼬리를 다시 세운다(13자 = 줄 처음부터). 없는 호스트는 추적한 48자를 다 지워 꼬리가 빈다
-            #expect(controller.textTail == (host == .silent ? "" : output.text), "\(host) 전제 — 꼬리")
-            #expect(controller.textTailIsTruncated == (host == .silent), "\(host) 꼬리가 비어도 앞은 줄 중간")
+            #expect(controller.textTail == (!host.sendsBackspaceEcho ? "" : output.text), "\(host) 전제 — 꼬리")
+            #expect(controller.textTailIsTruncated == (!host.sendsBackspaceEcho), "\(host) 꼬리가 비어도 앞은 줄 중간")
             for _ in 0..<13 {
                 controller.handle(.backspace)
-                if host == .echoesBackspace { controller.syncWithDocument(documentTail: output.text.isEmpty ? nil : output.text) }
+                if host.sendsBackspaceEcho { controller.syncWithDocument(documentTail: output.text.isEmpty ? nil : output.text) }
             }
             #expect(output.text.isEmpty, "\(host) 전제 — 문서가 비었다")
-            #expect(controller.textTailIsTruncated == (host == .silent), "\(host) 문서가 비어도 메아리 전엔 모른다")
+            #expect(controller.textTailIsTruncated == (!host.sendsBackspaceEcho), "\(host) 문서가 비어도 메아리 전엔 모른다")
             for key in ["#", "w", "n", "t", "h"] { controller.handle(key == "#" ? .symbols : .character(key)) }
             let chip = Self.multiLineAddress.suggestion(
                 forTail: controller.textTail, isSecureTextEntry: false, tailIsTruncated: controller.textTailIsTruncated)
-            #expect(chip?.trigger == (host == .silent ? nil : "주소"), "\(host) 줄 처음 「주소」")
+            #expect(chip?.trigger == (!host.sendsBackspaceEcho ? nil : "주소"), "\(host) 줄 처음 「주소」")
         }
     }
 

@@ -391,6 +391,9 @@ final class KeyboardViewController: UIInputViewController {
         // viewWillAppear가 오지 않는데, 확대 미리보기는 그 즉시 꺼져야 한다 (QA N-4)
         let signature = "\(keyboardType.rawValue)/\(returnKeyType.rawValue)"
             + "/\(autocapitalizationType.rawValue)/\(proxy.isSecureTextEntry == true)"
+        // B2-A — ⏎ 직전 줄 끝을 자동 대문자용으로 기억해도 되는 입력란인가(PDR return-backspace-context). nil은 「모름」 → 거짓.
+        // 서명 가드 **앞**에서 매번 넣는다 — 서명은 nil을 `.default`로 채운 값이라 nil ↔ `.default` 필드 전환을 못 본다(검증 R2)
+        inputController.returnKeyIsDefault = proxy.returnKeyType == .default
         guard force || signature != appliedFieldSignature else { return }
         appliedFieldSignature = signature
         if viewState.showsKeyPreview != showsKeyPreview { viewState.showsKeyPreview = showsKeyPreview }

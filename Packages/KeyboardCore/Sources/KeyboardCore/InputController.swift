@@ -100,6 +100,20 @@ public final class InputController {
     /// 자동으로 켠 것은 시프트 한 번 탭으로 꺼진다(캡스락으로 가지 않는다) — Apple과 동일.
     private var isAutoShifted = false
 
+    /// 입력란 리턴 키가 `.default`인가 — 조립 지점이 `returnKeyType == .default`로 넣는다(B2-A, PDR return-backspace-context).
+    /// 참일 때만 ⏎ 직전 줄 끝을 자동 대문자용으로 기억한다. `.search`·`.go`·`.send`·`.done` 등은 ⏎가 줄바꿈이 아니라
+    /// 제출일 수 있어 기억하지 않는다(= 지금 동작). 기본 거짓 — 조립 지점이 안 넣으면 B2-A는 꺼져 있다
+    public var returnKeyIsDefault = false
+
+    /// B2-A — ⏎ 직전 줄 끝(되살린 앞부분 + 꼬리, 48자). **⏎ 바로 다음 키 하나에만 산다** — 그 키가 빈 꼬리를 지우는 ⌫면
+    /// `capitalizationPrefix`로 넘어가고, 다른 키·문맥 sync면 버린다. 메모리에만 있고 내보내지 않는다(보안 규칙)
+    private var returnSnapshot: String?
+    /// B2-A — ⏎⌫로 되살린 줄 앞부분. **자동 대문자 판정(`updateAutoCapitalization`)과 다음 ⏎의 스냅샷만 읽는다** — `committedTail`·
+    /// `textTail`·잘림·추천단어·채움글 칩·학습은 읽지도, 이것을 꼬리로 되돌려 놓지도 않는다(불변식 C7). 제출형 입력란에서
+    /// ⌫가 줄바꿈이 아닌 글자를 지웠어도 꼬리 길이로 문서를 지우는 경로(`completeWord`·칩)가 틀리지 않게 하려는 것이다.
+    /// 같은 줄이 이어지는 동안 산다 — 문맥 sync·⏎·꼬리를 넘는 ⌫·꼬리 앞 버림·여러 줄 본문 삽입에서 버린다
+    private var capitalizationPrefix: String?
+
     public init(
         output: TextOutput,
         hangulSource: JamoSource = DubeolsikSource(),
@@ -206,17 +220,25 @@ public final class InputController {
         if case .space = event {} else { lastSpaceTimestamp = nil }
         // 연타 키가 아닌 모든 이벤트는 연타를 끊는다(모드 전환·페이지 넘김·⌫ 포함)
         if case .multiTap = event {} else { multiTapState = nil }
+        // B2-A ⏎ 직전 기억은 ⏎ 바로 다음 키 하나에만 산다 — ⌫면 아래에서 쓰고, 다른 키면 여기서 버린다
+        let returnSnapshot = self.returnSnapshot
+        self.returnSnapshot = nil
         switch event {
         case .character(let key): handleCharacter(key)
-        case .backspace: handleBackspace()
+        case .backspace: handleBackspace(returnSnapshot: returnSnapshot)
         case .space: handleSpace()
         case .return:
             commitComposition()
             notifyWordCommitted()
+            // B2-A — 리턴 키가 `.default`면 ⏎가 줄바꿈일 가능성이 높다. 줄 끝을 자동 대문자용으로만 기억한다(C7)
+            let lineBeforeReturn = returnKeyIsDefault
+                ? String(((capitalizationPrefix ?? "") + committedTail).suffix(committedTailLimit)) : nil
             output.insertText("\n")
             // 단축어는 줄을 넘지 않는다 — 꼬리를 새 줄에서 다시 시작한다
             committedTail.removeAll()
             committedTailIsTruncated = false
+            capitalizationPrefix = nil
+            self.returnSnapshot = lineBeforeReturn
         case .shift: handleShift()
         case .toggleLanguage:
             commitComposition()
@@ -283,6 +305,10 @@ public final class InputController {
             documentTail?.hasSuffix(state.characters[state.index]) == true ? state : nil
         }
         defer { multiTapState = keptMultiTap }
+        // B2-A — 문맥 sync가 오면(메아리·커서 이동·필드 전환·secure 진입·등장) 기억을 버린다. 문서가 오면 문서가 답이고,
+        // 문맥이 없으면(nil) 커서가 어디 갔는지 모른다 — 기존 sync(nil) 계약(잘림 아님)은 아래 그대로다
+        returnSnapshot = nil
+        capitalizationPrefix = nil
         let composing = automaton.composingText + hangulSource.pendingText
         if let documentTail, !composing.isEmpty, documentTail.hasSuffix(composing) {
             // 문서 = 확정 + 우리 조합 그대로. 상태는 살리고 확정 꼬리만 문서 기준으로 보정한다
@@ -391,12 +417,13 @@ public final class InputController {
 
     // MARK: - 기능 키
 
-    private func handleBackspace() {
+    /// - Parameter returnSnapshot: 바로 앞 키가 ⏎였으면 그 직전 줄 끝(B2-A) — 빈 꼬리를 지울 때만 쓴다
+    private func handleBackspace(returnSnapshot: String?) {
         suppressesNextWordCommit = false
         guard mode == .hangul else {
             // 기호/영어 모드도 꼬리를 함께 걷는다 — 단축어의 숫자·콜론이 이 모드에서
             // 지워지므로, 빠뜨리면 문서에 없는 텍스트로 칩이 뜨고 탭 시 문서를 파괴한다
-            deleteCommittedCharacter()
+            deleteCommittedCharacter(returnSnapshot: returnSnapshot)
             return
         }
         if hangulSource.prefersKeystrokeReplayBackspace, !keystrokeLog.isEmpty {
@@ -412,7 +439,7 @@ public final class InputController {
             // 연타 상태를 끊는다 — 지워진 자모에 이어 승격되면 안 된다 (단모음)
             hangulSource.reset()
         } else {
-            deleteCommittedCharacter()
+            deleteCommittedCharacter(returnSnapshot: returnSnapshot)
         }
     }
 
@@ -423,10 +450,15 @@ public final class InputController {
     /// 줄 처음으로 오판해 칩이 뜨던 경로다(검증 ⓜ1, 사장님 결정 2026-10-08). 다음 sync(textDidChange·등장)가 문서 문맥으로
     /// 바로잡는다 — 메아리를 보내는 호스트에선 바로 풀린다. 빈 입력란의 ⌫(지울 게 없음)도 여기서는 구별할 수 없어 같은 길이다.
     /// 꼬리를 다 지운 뒤에도 잘림이 남는 것(검증 ⓛ2)과 같은 쪽 — 모를 때는 칩을 띄우지 않는다.
-    private func deleteCommittedCharacter() {
+    ///
+    /// **B2-A(1.3.1)** — ⏎ 바로 다음 ⌫면(`returnSnapshot`) 지운 것을 우리가 넣은 줄바꿈으로 보고 ⏎ 직전 줄 끝을
+    /// **자동 대문자 판정에만** 되살린다(`capitalizationPrefix`). 꼬리·잘림은 위 규칙 그대로다 — 칩은 1.3.0 동작(C7).
+    /// 그 밖의 빈 꼬리 ⌫는 앞을 모른다 — 되살려 둔 앞부분도 버린다(자동 대문자 「모름」 = 지금 동작, 빈 꼬리 → 대문자).
+    private func deleteCommittedCharacter(returnSnapshot: String?) {
         output.deleteBackward(1)
         if committedTail.isEmpty {
             committedTailIsTruncated = true
+            capitalizationPrefix = returnSnapshot
         } else {
             committedTail.removeLast()
         }
@@ -626,6 +658,7 @@ public final class InputController {
         if let newline = inserted.lastIndex(of: "\n") {
             committedTail.removeAll()
             committedTailIsTruncated = false   // 새 줄의 처음부터 — 본문 마지막 줄이 길면 아래 덧붙이기가 다시 잘림을 적는다
+            capitalizationPrefix = nil         // B2-A — 새 줄이다
             appendToTail(String(inserted[inserted.index(after: newline)...]))
         } else {
             appendToTail(inserted)
@@ -719,7 +752,9 @@ public final class InputController {
     private func updateAutoCapitalization() {
         if shift != .once { isAutoShifted = false }
         guard mode == .english, shift != .capsLock else { return }
-        let wantsCapital = Self.wantsCapital(after: committedTail, rule: autoCapitalization)
+        // B2-A — ⏎⌫로 되살린 줄 앞부분이 있으면 꼬리 앞에 이어 붙여 판정한다. 판정에 앞부분을 쓰는 곳은 여기 하나다(C7)
+        let context = capitalizationPrefix.map { $0 + committedTail } ?? committedTail
+        let wantsCapital = Self.wantsCapital(after: context, rule: autoCapitalization)
         if wantsCapital, shift == .off {
             shift = .once
             isAutoShifted = true
@@ -791,6 +826,7 @@ public final class InputController {
         if committedTail.count > committedTailLimit {
             committedTail.removeFirst(committedTail.count - committedTailLimit)
             committedTailIsTruncated = true   // 앞을 버렸다 — 이제 꼬리 맨 앞은 줄 중간이다
+            capitalizationPrefix = nil        // B2-A — 버린 글자 때문에 되살린 앞부분과 이어지지 않는다
         }
     }
 }
