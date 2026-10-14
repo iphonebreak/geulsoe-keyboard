@@ -1,0 +1,42 @@
+# 축약형 손질(기계 생성분 — 어간 조각 14·don't·won't — 은 변환기가 만든다) — 표시형	lookupKey	삽입 빈도(정렬 키, 서로 달라야 한다)
+# 출처 b5-data/curation-contractions-proposal.tsv(근거 열 포함)
+# 동률 해소(2026-10-14 개발자): 제안 빈도가 같은 묶음 — 기획자 S2 목록(candidates-20k-proposed.tsv) 순서대로 뒤 항목을 −1씩: 110920: he'd > we'd · 142910: how's > where's · 428730: here's > who's · 811943: they're > we're · 1000370: let's > what's
+I'm	i'm	4166990
+it's	it's	3429843
+that's	that's	2429472
+you're	you're	2232845
+I'll	i'll	1223639
+he's	he's	1143281
+can't	can't	1091187
+what's	what's	1000369
+let's	let's	1000370
+there's	there's	857460
+I've	i've	836585
+they're	they're	811943
+we're	we're	811942
+she's	she's	714550
+you'll	you'll	640954
+you've	you've	438211
+here's	here's	428730
+who's	who's	428729
+I'd	i'd	354945
+we'll	we'll	291342
+you'd	you'd	244025
+it'll	it'll	233074
+they'll	they'll	203939
+we've	we've	199187
+they've	they've	159349
+he'll	he'll	145671
+where's	where's	142909
+how's	how's	142910
+would've	would've	119512
+she'll	she'll	116537
+he'd	he'd	110920
+we'd	we'd	110919
+could've	could've	99593
+she'd	she'd	88736
+should've	should've	79674
+they'd	they'd	77644
+ma'am	ma'am	76751
+it'd	it'd	44368
+o'clock	o'clock	22311

@@ -66,6 +66,16 @@ App/GoogleService-Info.plist
 # 외부 채움글 xlsx 샘플(PackImport 번들·픽스처, 추적됨)의 생성기·검사기 — 같은 이유(2026-10-07, 1-e ④)
 !/tools/generate_sample_xlsx.py
 !/tools/check_sample_xlsx.py
+# 영어 추천 사전(words-en.tdw, 추적됨)의 변환기·손질/차단 입력·재현성 시험 — 같은 이유(2026-10-14, B5)
+!/tools/convert_words_en.py
+!/tools/test_convert_words_en.py
+!/tools/data-en/
+/tools/data-en/*
+!/tools/data-en/blocklist.txt
+!/tools/data-en/capitals.tsv
+!/tools/data-en/contractions.tsv
+!/tools/data-en/misspellings.txt
+!/tools/data-en/noise.txt
 
 # 서명 자산 — 절대 커밋하지 않는다
 *.p12
