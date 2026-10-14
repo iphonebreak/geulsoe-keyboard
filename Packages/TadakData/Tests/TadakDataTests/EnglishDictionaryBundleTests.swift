@@ -14,9 +14,13 @@ private enum EnglishBundle {
         dictionary.candidates(jamoPrefix: prefix, limit: limit).map(\.word)
     }
 
-    /// 번들 안에 이 키가 **정확히** 있나(표시형 대소문자 무시)
+    /// 번들 키 전수(조회 키 = 소문자) — 있음·없음 판정은 이 집합으로 한다
+    static let keySet = Set(allKeys())
+
+    /// 번들 안에 이 키가 **정확히** 있나(표시형 대소문자 무시) — **키 전수로** 본다. 접두 조회(`limit 64`)로 보면 그 키로 시작하는
+    /// 더 잦은 단어가 64개 이상일 때 있는 키를 「없음」으로 읽는다(검증 `verify-v131-b5-phase1.md` 권고 R1)
     static func contains(_ key: String) -> Bool {
-        dictionary.candidates(jamoPrefix: key, limit: 64).contains { $0.word.lowercased() == key }
+        keySet.contains(key.lowercased())
     }
 
     /// 변환기 입력 목록(저장소 `tools/data-en/`) — 주석 줄 제외
@@ -72,6 +76,16 @@ struct EnglishDictionaryBundleTests {
             let leaked = words.filter(EnglishBundle.contains).count
             #expect(leaked == 0, "\(name)")
         }
+    }
+
+    @Test("있음·없음 판정은 키 전수 — 접두 조회 상한(64) 밖의 키도 찾는다(R1)")
+    func containsCoversPrefixLimit() {
+        let hidden = EnglishBundle.allKeys().first { key in
+            !EnglishBundle.dictionary.candidates(jamoPrefix: key, limit: 64).contains { $0.word.lowercased() == key }
+        }
+        #expect(hidden != nil, "상한 밖 키가 실제로 있다 — 없으면 이 시험은 뜻이 없다")
+        let found = hidden.map(EnglishBundle.contains)   // 실패 메시지에 단어를 내지 않는다(이 파일의 규칙)
+        #expect(found == true)
     }
 
     @Test("어간 조각 14개·ain·don은 없고 축약형이 그 자리에 있다")
