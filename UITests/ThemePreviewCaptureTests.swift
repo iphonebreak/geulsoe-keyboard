@@ -10,9 +10,9 @@ import XCTest
 /// ## 오염 0 — 이 하네스는 컨테이너 앱을 띄운다
 ///
 /// v1.0.1 이 배포 중이라 실사용자 데이터가 섞인다. 세 겹으로 막는다:
-/// 1. 실행 인자 `-analyticsCollectionEnabled NO` · `-crashlyticsCollectionEnabled NO`
-///    (인자 도메인이 저장값보다 우선한다 — `AnalyticsConsent` 가 이 값을 읽는다)
-/// 2. 첫 실행 **전에** 컨테이너에 `measurement_enabled_state = 0` (호출자 쪽 절차)
+/// 1. 실행 인자 `-analyticsCollectionEnabled NO` · `-crashlyticsCollectionEnabled NO` — **이 인자로는 막히지 않는다**
+///    (인자 도메인은 String이라 `AnalyticsConsent.stored()`의 `as? Bool`이 실패해 기본 켬 — `firebase-on-hardening.md` B-검증)
+/// 2. **실제 차단** — 첫 실행 **전에** 컨테이너에 `measurement_enabled_state = 0` (호출자 쪽 절차)
 /// 3. **전용 시뮬레이터**에서만 — 남의 기기·기존 시뮬은 건드리지 않는다
 final class ThemePreviewCaptureTests: XCTestCase {
 

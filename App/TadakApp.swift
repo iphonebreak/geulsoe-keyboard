@@ -13,7 +13,7 @@ import FirebaseCore
 /// 텍스트는 로그·파일·네트워크 어디로도 나가지 않는다. 이 파일은 **초기화만** 한다.
 /// 이벤트 정의·로깅은 기획자 PDR이 끝난 뒤 별도 작업이며, 그때도 입력 텍스트는 대상이 아니다.
 ///
-/// **수집 on/off는 `AnalyticsConsent`가 쥔다** (설정 > 정보 > 이용 분석·오류 진단).
+/// **수집 on/off는 `AnalyticsConsent`가 쥔다** — v1.3.1부터 끄는 UI는 없고(사장님 결정 N20), 이전 버전에서 끈 저장값만 재적용한다.
 /// 기본값은 켬이므로 `Info.plist`에 `FIREBASE_ANALYTICS_COLLECTION_ENABLED`·
 /// `FirebaseCrashlyticsCollectionEnabled` 게이트를 넣지 않는다 — 넣으면 기본이 끔이 된다.
 ///
@@ -26,7 +26,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         FirebaseApp.configure()
-        // 사용자가 끈 상태를 매 실행 재적용한다 — 심사 가이드라인 5.1.1(ii) 동의 철회 수단.
+        // 사용자가 끈 상태를 매 실행 재적용한다 — v1.3.1부터 UI는 없지만(N20) **이전 버전에서 끈 선택을 지키는 코드**라 지우지 않는다.
         // **반드시 configure() 뒤다** (두 API 모두 Firebase 초기화를 전제한다).
         // Firebase SDK 자체도 값을 영구 저장하지만, 우리 UserDefaults를 단일 진실 원천으로
         // 두어 UI 스위치와 실제 수집 상태가 갈라질 여지를 없앤다. 근거: AnalyticsConsent
