@@ -73,3 +73,31 @@ struct DateSnippetOverlapWarningTests {
         #expect(!SnippetEntry.mayOverlapDateSnippets(triggers))
     }
 }
+
+/// B5 E13 — 「영어 추천단어」 스위치(N12, 기본 켬). 옛 저장분은 켬, 왕복, 상위 추천단어 끔 = 영어도 끔
+@Suite("B5 E13 — 영어 추천단어 설정")
+struct EnglishSuggestionSettingsTests {
+
+    @Test("기본 켬 · 옛 저장분(키 없음)도 켬 · 왕복")
+    func defaultsAndRoundTrip() throws {
+        #expect(KeyboardSettings.default.englishSuggestionsEnabled)
+        let legacy = try JSONDecoder().decode(KeyboardSettings.self, from: Data("{}".utf8))
+        #expect(legacy.englishSuggestionsEnabled)
+        var settings = KeyboardSettings.default
+        settings.englishSuggestionsEnabled = false
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.englishSuggestionsEnabled == false)
+    }
+
+    @Test("상위 추천단어 끔 = 영어도 끔 · secure 끔")
+    func gate() {
+        var settings = KeyboardSettings.default
+        #expect(settings.allowsEnglishSuggestions(isSecureTextEntry: false))
+        #expect(!settings.allowsEnglishSuggestions(isSecureTextEntry: true))
+        settings.suggestionsEnabled = false
+        #expect(!settings.allowsEnglishSuggestions(isSecureTextEntry: false))
+        settings.suggestionsEnabled = true
+        settings.englishSuggestionsEnabled = false
+        #expect(!settings.allowsEnglishSuggestions(isSecureTextEntry: false))
+    }
+}

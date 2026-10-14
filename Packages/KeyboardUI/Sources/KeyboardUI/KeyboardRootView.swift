@@ -432,7 +432,16 @@ private struct SuggestionToolbar: View {
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
             .buttonStyle(.plain)
-            .accessibilityLabel(candidate.accessibilityLabel)
+            .accessibilityLabel(Self.chipAccessibilityLabel(candidate))
+    }
+
+    /// 영어 후보는 VoiceOver가 **영어로** 읽게 언어를 붙인다(B5 C10) — 한국어 음성이 「hello」를 한국어로 읽지 않게.
+    /// 노드 구조는 같다(라벨 값만 다르다). 실제 발음 확인은 1.3.1 밖(VoiceOver 점검 N5와 별개)
+    static func chipAccessibilityLabel(_ candidate: WordSuggestionCandidate) -> Text {
+        guard candidate.isEnglish else { return Text(candidate.accessibilityLabel) }
+        var label = AttributedString(candidate.accessibilityLabel)
+        label.languageIdentifier = "en"
+        return Text(label)
     }
 
     /// 성경 검색 배지 — 건수가 있을 때만 그린다. **자리는 두 가지다** (v1.1.0).

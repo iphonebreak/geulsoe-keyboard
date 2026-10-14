@@ -173,6 +173,18 @@ public final class InputController {
         Self.trailingHangulRun(of: textTail)
     }
 
+    /// **영어 후보 문맥(B5 C4)** — 영어 모드이거나, 영어에서 들어간 기호·키패드 자판. 한글에서 「123」으로 들어간 경우는 아니다
+    public var isEnglishSuggestionContext: Bool {
+        mode == .english || ((mode.isSymbols || mode.isKeypadPad) && letterMode == .english)
+    }
+
+    /// 입력 중인 영어 단어 run(B5 E1·E2) — 영어 문맥이고 꼬리 끝이 한글 run이 아닐 때만(C8 — 한글 run 우선).
+    /// 원본 그대로(대소문자·굽은 아포스트로피) — 지울 길이·탭 정합 검사의 기준이다
+    public var currentLatinWord: String? {
+        guard isEnglishSuggestionContext, currentWord.isEmpty else { return nil }
+        return LatinWordRun.run(inTail: textTail, isTruncated: committedTailIsTruncated)
+    }
+
     /// 공백·리턴·후보 선택으로 단어가 확정될 때 호출된다 (한글 2자 이상만).
     /// 조립 지점이 학습 엔진에 연결한다 — secure 필드 제외는 조립 지점 책임.
     public var onWordCommitted: ((String) -> Void)?
@@ -721,6 +733,27 @@ public final class InputController {
         appendToTail(word)
         onWordCommitted?(word)
         // 여기서 이미 알렸다 — 이어지는 공백/리턴이 같은 단어를 또 보내면 이중 카운트다
+        suppressesNextWordCommit = true
+        updateAutoCapitalization()
+        return true
+    }
+
+    /// **영어 후보 탭(B5 C2·C5·C6)** — 지금 꼬리의 라틴 run이 **표시 당시의 run(`typedRun`)과 같을 때만** 그 run을 `word`로 바꾼다.
+    /// 늦은·연속 탭·한글 전환·선택 영역이면 문서를 건드리지 않는다. 후행 공백은 넣지 않는다(N11).
+    /// **학습 콜백(`onWordCommitted`)을 부르지 않는다**(C2 — 영어 학습 없음). 지울 길이는 추적 꼬리(`committedTail`) 기준이다 —
+    /// B2-A 스냅샷(자동 대문자 전용)은 읽지 않는다(C7).
+    @discardableResult
+    public func completeLatinWord(_ word: String, expectingRun typedRun: String) -> Bool {
+        guard !word.isEmpty, !typedRun.isEmpty, !isComposing, currentLatinWord == typedRun,
+              committedTail.hasSuffix(typedRun),
+              ReplacementGate.allowsReplacement(hasSelectedText: output.hasSelectedText)
+        else { return false }
+        lastSpaceTimestamp = nil
+        commitComposition()   // 연타 상태를 끊는다 — 조합은 없다(위 가드)
+        output.deleteBackward(typedRun.count)
+        output.insertText(word)
+        committedTail.removeLast(typedRun.count)
+        appendToTail(word)
         suppressesNextWordCommit = true
         updateAutoCapitalization()
         return true

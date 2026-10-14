@@ -31,6 +31,29 @@ struct LicensesView: View {
                 .padding(.vertical, 2)
             }
 
+            // B5 영어 추천단어 사전 — CC BY-SA 4.0 고지(저작자·원저작물·라이선스·개변 사실). 상세는 번들 `LICENSE-words-en.md`
+            Section("영어 추천단어 사전") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("FrequencyWords (en_50k)")
+                        .font(.headline)
+                    Text("""
+                    Hermit Dave의 OpenSubtitles 2018 기반 영어 빈도 목록(고정 커밋 072bbed)에서 파생했습니다. \
+                    이 앱은 원본을 바꿔 썼습니다 — 3~20자 단어만 남기고, 조각·오류형·비단어·부적절한 단어를 빼고, \
+                    축약형(don't 등)과 대문자 원형(Monday·iPhone 등)을 손질하고, 상위 2만 개로 줄였습니다. \
+                    파생 사전에는 CC-BY-SA-4.0이 적용됩니다.
+                    """)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    Link("github.com/hermitdave/FrequencyWords",
+                         destination: URL(string: "https://github.com/hermitdave/FrequencyWords/blob/072bbed282316a23651aa7068c7173aa7898cf80/content/2018/en/en_50k.txt")!)
+                        .font(.footnote)
+                    Link("CC-BY-SA-4.0 전문",
+                         destination: URL(string: "https://creativecommons.org/licenses/by-sa/4.0/")!)
+                        .font(.footnote)
+                }
+                .padding(.vertical, 2)
+            }
+
             Section("이모지 추천 데이터") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Unicode CLDR (한국어 이모지 이름·키워드)")
