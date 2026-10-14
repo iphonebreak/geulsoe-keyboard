@@ -396,14 +396,15 @@ struct SnippetWordBoundaryInputControllerTests {
     }
 
     // 호스트 — 우리 ⌫에 메아리 textDidChange를 보내나. 보내면 VC가 `documentContextBeforeInput`으로 sync한다(빈 문서는 nil).
-    // 이 표는 ⏎가 줄바꿈을 넣는 호스트(`DocumentHost.newlineHosts` — 메아리 없음·메아리·낡은 getter·nil getter)만 돈다 —
-    // 문서가 표에 고정돼 있어서다. 제출형(⏎가 문서를 안 바꾸거나 비움)·자판 3종은 `ReturnBackspaceContextTests`(B2)가 맡는다.
-    // 낡은·nil getter는 지금 제품이 ⌫ 직후 읽기를 하지 않아 메아리 없음 열과 같다.
+    // 이 표는 ⏎가 줄바꿈을 넣는 호스트(`DocumentHost.newlineHosts`)만 돈다 — 문서가 표에 고정돼 있어서다. 제출형·자판 3종은
+    // `ReturnBackspaceContextTests`(B2)가 맡는다. 리턴 키는 `.default`(B2-C가 켜지는 조건). **메아리 없음(신선한 getter)** 열은
+    // B2-C가 ⏎⌫를 문서로 확인해 꼬리를 되살리는 열(`confirmed`), 낡은·nil getter·⌫ 반영 늦음은 확인 못 하는 열(`silent` — 1.3.0 대가)이다.
 
     /// 키 줄 — 두벌식 자판 글자 그대로, `⏎` 리턴 · `⌫` ⌫ · `␣` 스페이스 · `#` 123(기호 ↔ 문자) · `◆` 떠 있는 채움글 칩 탭
-    private static func run(_ keys: String, host: DocumentHost, matcher: SnippetMatcher) -> (RecordingOutput, InputController) {
-        let output = RecordingOutput()
+    private static func run(_ keys: String, host: DocumentHost, matcher: SnippetMatcher) -> (HostDocument, InputController) {
+        let output = HostDocument(host: host)
         let controller = InputController(output: output)
+        controller.returnKeyIsDefault = true
         for key in keys {
             switch key {
             case "⏎": controller.handle(.return)
@@ -431,25 +432,29 @@ struct SnippetWordBoundaryInputControllerTests {
     /// 검증 ⓜ1(사장님 결정 2026-10-08) — 꼬리가 빈 채 ⌫가 **추적하지 않은 앞 글자**(줄바꿈·앞 줄)를 지우면 커서 앞 글자를 모른다.
     /// 잘림(경계 아님)으로 적어, 메아리 없는 호스트에서도 붙은 꼴(「서울주소」)에 칩이 안 뜨게 한다(대가: 「서울 주소」도 다음 sync 전까지 칩 없음).
     @Test("★ ⏎⌫ — 꼬리가 빈 채 앞 글자를 지우면 앞을 모른다(검증 ⓜ1), 다음 sync가 문서로 바로잡는다", arguments: [
-        ("서울⏎⌫주소 — 줄바꿈을 지워 붙었다(원래 버그)", "tjdnf⏎⌫wnth", "서울주소", nil, nil),
-        ("서울␣⏎⌫주소 — 앞이 공백이지만 메아리 전엔 모른다(안전한 쪽)", "tjdnf␣⏎⌫wnth", "서울 주소", nil, "주소"),
-        ("⏎⌫주소 — 빈 입력란의 리턴을 지움", "⏎⌫wnth", "주소", nil, "주소"),
-        ("⌫주소 — 빈 입력란에서 ⌫ 먼저(지울 게 없어도 구별 못 한다)", "⌫wnth", "주소", nil, "주소"),
-        ("주소 — 빈 입력란 첫 단축어(⌫ 없음)", "wnth", "주소", "주소", "주소"),
-        ("서울⏎주소 — 줄바꿈 뒤", "tjdnf⏎wnth", "서울\n주소", "주소", "주소"),
-        ("서울⏎가␣⌫⌫주소 — 추적한 글자만 지우면 줄 처음 그대로", "tjdnf⏎rk␣⌫⌫wnth", "서울\n주소", "주소", "주소"),
-        ("서울⏎ㅈ⌫⌫주소 — 조합 자모를 지운 뒤 줄바꿈", "tjdnf⏎w⌫⌫wnth", "서울주소", nil, nil),
-        ("서울⏎[123]⌫[가]주소 — 기호 자판의 ⌫도 같은 규칙", "tjdnf⏎#⌫#wnth", "서울주소", nil, nil),
-        ("주소◆(여러 줄 본문)⌫⌫주소 — 마지막 줄 위로 지워 앞 줄에 붙었다", "wnth◆⌫⌫wnth", "첫 줄주소", nil, nil),
-        ("주소◆(여러 줄 본문)⌫주소 — 마지막 줄만 지움", "wnth◆⌫wnth", "첫 줄\n주소", "주소", "주소")
-    ] as [(String, String, String, String?, String?)])
-    func backspaceIntoUntrackedText(row: (why: String, keys: String, document: String, silent: String?, echo: String?)) {
+        // 끝 열 = B2-C 확인(메아리 없음·신선한 getter). ★ 2·3행이 B2-C로 **의도적으로 뒤집은 칸**(PDR) — 그 밖은 1.3.0 열과 같다
+        ("서울⏎⌫주소 — 줄바꿈을 지워 붙었다(원래 버그)", "tjdnf⏎⌫wnth", "서울주소", nil, nil, nil),
+        ("서울␣⏎⌫주소 — 앞이 공백이지만 메아리 전엔 모른다(안전한 쪽)", "tjdnf␣⏎⌫wnth", "서울 주소", nil, "주소", "주소"),
+        ("⏎⌫주소 — 빈 입력란의 리턴을 지움", "⏎⌫wnth", "주소", nil, "주소", "주소"),
+        ("⌫주소 — 빈 입력란에서 ⌫ 먼저(지울 게 없어도 구별 못 한다)", "⌫wnth", "주소", nil, "주소", nil),
+        ("주소 — 빈 입력란 첫 단축어(⌫ 없음)", "wnth", "주소", "주소", "주소", "주소"),
+        ("서울⏎주소 — 줄바꿈 뒤", "tjdnf⏎wnth", "서울\n주소", "주소", "주소", "주소"),
+        ("서울⏎가␣⌫⌫주소 — 추적한 글자만 지우면 줄 처음 그대로", "tjdnf⏎rk␣⌫⌫wnth", "서울\n주소", "주소", "주소", "주소"),
+        ("서울⏎ㅈ⌫⌫주소 — 조합 자모를 지운 뒤 줄바꿈", "tjdnf⏎w⌫⌫wnth", "서울주소", nil, nil, nil),
+        ("서울⏎[123]⌫[가]주소 — 기호 자판의 ⌫도 같은 규칙", "tjdnf⏎#⌫#wnth", "서울주소", nil, nil, nil),
+        ("주소◆(여러 줄 본문)⌫⌫주소 — 마지막 줄 위로 지워 앞 줄에 붙었다", "wnth◆⌫⌫wnth", "첫 줄주소", nil, nil, nil),
+        ("주소◆(여러 줄 본문)⌫주소 — 마지막 줄만 지움", "wnth◆⌫wnth", "첫 줄\n주소", "주소", "주소", "주소")
+    ] as [(String, String, String, String?, String?, String?)])
+    func backspaceIntoUntrackedText(
+        row: (why: String, keys: String, document: String, silent: String?, echo: String?, confirmed: String?)
+    ) {
         for host in DocumentHost.newlineHosts {
             let (output, controller) = Self.run(row.keys, host: host, matcher: Self.multiLineAddress)
             #expect(output.text == row.document, "\(row.why) — 전제(문서)")
             let chip = Self.multiLineAddress.suggestion(
                 forTail: controller.textTail, isSecureTextEntry: false, tailIsTruncated: controller.textTailIsTruncated)
-            #expect(chip?.trigger == (host.sendsBackspaceEcho ? row.echo : row.silent), "\(row.why) · \(host)")
+            let expected = host.sendsBackspaceEcho ? row.echo : (host == .silent ? row.confirmed : row.silent)
+            #expect(chip?.trigger == expected, "\(row.why) · \(host)")
             // 정답 = 문서 마지막 줄로 판정한 칩. 메아리 호스트는 정답과 같고, 없는 호스트는 정답이거나 칩 없음(거짓 양성 0)
             let lastLine = String(row.document.split(separator: "\n", omittingEmptySubsequences: false).last ?? "")
             let truth = Self.multiLineAddress.suggestion(forTail: lastLine, isSecureTextEntry: false, tailIsTruncated: lastLine.count > 48)

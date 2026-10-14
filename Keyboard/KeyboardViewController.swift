@@ -2402,6 +2402,13 @@ private final class ProxyTextOutput: TextOutput {
     var hasSelectedText: Bool {
         controller?.textDocumentProxy.selectedText?.isEmpty == false
     }
+
+    /// B2-C — ⏎·⌫ 앞뒤 관찰 읽기. `InputController`가 메모리에서 비교만 한다(로그·파일·네트워크 없음 — 보안 규칙).
+    /// secure 입력란은 읽지 않는다(`documentTailForSync`와 같은 규칙)
+    var documentContextBeforeInput: String? {
+        guard let proxy = controller?.textDocumentProxy, proxy.isSecureTextEntry != true else { return nil }
+        return proxy.documentContextBeforeInput
+    }
 }
 
 /// 지구본 키 — 시스템 요건. `handleInputModeList`에 연결된 UIKit 버튼이어야

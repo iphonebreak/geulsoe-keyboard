@@ -12,7 +12,9 @@ import TadakDomain
 //
 // **B2-A(이번 구현)** — 리턴 키가 `.default`면 ⏎ 직전 줄 끝을 기억했다가 ⏎ **바로 다음** ⌫가 빈 꼬리를 지울 때
 // **자동 대문자 판정에만** 되살린다. **칩·꼬리(`textTail`)·추천단어는 이 기억을 읽지 않는다(불변식 C7)** — 칩 쪽 1.3.0 동작은 그대로다.
-// **B2-C(첫 칩 복원)는 구현하지 않았다** — B2-0 탐침 판정 대기. 아래 칩 표는 지금(1.3.0) 동작을 리턴 키 종류와 무관하게 고정한다.
+// **B2-C(첫 칩 복원, 2026-10-14 조건부 채택)** — `.default` 리턴 키에서 ⏎ 직후 문맥 G1 = G0+줄바꿈 ∧ **⌫ 직전 재읽기** G1′ = G0+줄바꿈 ∧
+// ⌫ 직후 G2 = G0일 때만 꼬리를 **문서 문맥으로** 다시 세운다(문서 근거 sync와 같은 취급 — C7 대상 아님). nil·빈 칸 아닌 낡은 값·가짜 줄바꿈이면
+// 복원하지 않는다(1.3.0 대가 유지). 판정 `docs/release/verify-v131-device-session-1.md` 2-3절.
 
 // MARK: - 호스트 모형
 
@@ -30,22 +32,28 @@ enum DocumentHost: CaseIterable, CustomStringConvertible, Sendable {
     case staleGetter
     /// ⏎는 줄바꿈, 메아리 없음, ⌫ 직후 읽기는 nil
     case nilGetter
+    /// ⏎는 줄바꿈, 메아리 없음, ⏎ 직후 읽기는 신선하지만 **⌫ 직후 읽기만 지우기 전 값**(⌫ 반영이 늦다) — G2 = G0 조건이 막는다
+    case staleAfterBackspace
     /// 제출형 한 줄 입력란 — ⏎가 문서를 바꾸지 않고 키보드가 남는다, 메아리 없음
     case submitKeepsText
     /// ⏎가 입력란을 비우고 `textDidChange`(빈 문서 → nil)를 보낸다
     case submitClearsNotifying
     /// ⏎가 입력란을 비우고 아무 통지도 없다
     case submitClearsSilent
+    /// 연락처형 가짜 줄바꿈 + ⓑ — ⏎가 문서를 안 바꾸는데 ⏎ **직후 첫 읽기만** 「G0+줄바꿈」으로 보이고(실기 연락처 이름 칸 —
+    /// `늦게도같음 거짓`), ⌫ 직후 읽기는 **지우기 전 값**(낡음)이다. 메아리 없음. 원래 쌍 규칙(G1·G2)만이면 「서울주소」 오탐(검증 2-2)
+    case fakeNewlineStale
 
     enum ReturnBehavior: Sendable { case newline, keepsText, clears }
 
-    /// 기대값 묶음. 지금 제품은 ⌫ 직후 읽기를 하지 않으므로 낡은·nil getter는 메아리 없는 호스트와 같은 열이다
-    enum Column: Sendable { case quiet, echo, keeps, clearsNotify, clearsSilent }
+    /// 기대값 묶음. 자동 대문자는 B2-A(이력)만 보므로 낡은·nil getter가 메아리 없음과 같은 열이다(`column`).
+    /// 칩은 B2-C가 getter를 보므로 `chipColumn`에서 신선한 메아리 없음(`quiet`)과 확인 못 하는 낡은·nil getter(`unconfirmed`)가 갈린다
+    enum Column: Sendable { case quiet, unconfirmed, echo, keeps, clearsNotify, clearsSilent }
 
     var returnBehavior: ReturnBehavior {
         switch self {
-        case .silent, .echoesBackspace, .staleGetter, .nilGetter: .newline
-        case .submitKeepsText: .keepsText
+        case .silent, .echoesBackspace, .staleGetter, .nilGetter, .staleAfterBackspace: .newline
+        case .submitKeepsText, .fakeNewlineStale: .keepsText
         case .submitClearsNotifying, .submitClearsSilent: .clears
         }
     }
@@ -55,11 +63,20 @@ enum DocumentHost: CaseIterable, CustomStringConvertible, Sendable {
 
     var column: Column {
         switch self {
-        case .silent, .staleGetter, .nilGetter: .quiet
+        case .silent, .staleGetter, .nilGetter, .staleAfterBackspace: .quiet
         case .echoesBackspace: .echo
-        case .submitKeepsText: .keeps
+        case .submitKeepsText, .fakeNewlineStale: .keeps
         case .submitClearsNotifying: .clearsNotify
         case .submitClearsSilent: .clearsSilent
+        }
+    }
+
+    /// 칩 기대값 열 — B2-C는 신선한 getter(메아리 없음)에서만 복원한다. 리턴 키가 `.default`가 아니면 메아리 없음도 확인 못 함 열이다
+    func chipColumn(returnKeyIsDefault: Bool) -> Column {
+        switch self {
+        case .silent: returnKeyIsDefault ? .quiet : .unconfirmed
+        case .staleGetter, .nilGetter, .staleAfterBackspace: .unconfirmed
+        default: column
         }
     }
 
@@ -72,9 +89,11 @@ enum DocumentHost: CaseIterable, CustomStringConvertible, Sendable {
         case .echoesBackspace: "메아리"
         case .staleGetter: "낡은 getter"
         case .nilGetter: "nil getter"
+        case .staleAfterBackspace: "⌫ 반영 늦음"
         case .submitKeepsText: "제출(문서 유지)"
         case .submitClearsNotifying: "제출(비움·통지)"
         case .submitClearsSilent: "제출(비움·무통지)"
+        case .fakeNewlineStale: "가짜 줄바꿈·낡은 G2"
         }
     }
 }
@@ -85,36 +104,51 @@ enum DocumentHost: CaseIterable, CustomStringConvertible, Sendable {
 final class HostDocument: TextOutput {
     let host: DocumentHost
     private(set) var text = ""
-    private var textBeforeLastDelete: String?
+    /// 낡은 getter — 마지막 쓰기 **전** 문서(다음 쓰기 전까지 계속 이 값을 낸다)
+    private var textBeforeLastMutation = ""
+    /// 가짜 줄바꿈 호스트 — ⏎ 직후 **첫 읽기**만 「문서+줄바꿈」
+    private var fakeNewlinePending = false
+    /// 가짜 줄바꿈 호스트 — ⌫ 직후 읽기는 지우기 전 값(다음 삽입 전까지)
+    private var staleAfterDelete: String?
 
     init(host: DocumentHost) {
         self.host = host
     }
 
     func insertText(_ inserted: String) {
+        textBeforeLastMutation = text
+        staleAfterDelete = nil
         guard inserted == "\n" else {
             text += inserted
             return
         }
         switch host.returnBehavior {
         case .newline: text += "\n"
-        case .keepsText: break
+        case .keepsText: fakeNewlinePending = host == .fakeNewlineStale
         case .clears: text = ""
         }
     }
 
     func deleteBackward(_ count: Int) {
-        textBeforeLastDelete = text
+        textBeforeLastMutation = text
+        if host == .fakeNewlineStale || host == .staleAfterBackspace { staleAfterDelete = text }
         text = String(text.dropLast(count))
     }
 
-    /// ⌫ 직후 **동기 읽기**가 내는 값(B2-0 탐침이 실기에서 재는 것). **지금 제품은 읽지 않는다** — B2-C가 관찰을 넣으면
-    /// `TextOutput`의 읽기로 이 값을 내게 된다. 빈 문서는 nil(`documentContextBeforeInput`과 같다)
-    var readRightAfterDelete: String? {
+    /// 커서 앞 문맥 동기 읽기(B2-C가 ⏎ 직전·직후, ⌫ 직전·직후에 읽는다). 신선한 호스트는 빈 문서에서 빈 문자열을 낸다
+    /// (실기 메모 S6 — 빈 칸 ⏎⌫ 뒤 칩 복원이 관측됐다). nil getter는 늘 nil
+    var documentContextBeforeInput: String? {
         switch host {
-        case .staleGetter: textBeforeLastDelete.flatMap { $0.isEmpty ? nil : $0 }
-        case .nilGetter: nil
-        default: text.isEmpty ? nil : text
+        case .nilGetter: return nil
+        case .staleGetter: return textBeforeLastMutation
+        case .fakeNewlineStale:
+            if fakeNewlinePending {
+                fakeNewlinePending = false
+                return text + "\n"
+            }
+            return staleAfterDelete ?? text
+        case .staleAfterBackspace: return staleAfterDelete ?? text
+        default: return text
         }
     }
 }
@@ -255,12 +289,25 @@ struct B2HostModelTests {
         for host in DocumentHost.newlineHosts {
             let (document, _) = B2Script.run("서울⏎⌫", host: host, layout: .dubeolsik, returnKeyIsDefault: true)
             let expected: String? = switch host {
-            case .staleGetter: "서울\n"
+            case .staleGetter, .staleAfterBackspace: "서울\n"
             case .nilGetter: nil
             default: "서울"
             }
-            #expect(document.readRightAfterDelete == expected, "\(host)")
+            #expect(document.documentContextBeforeInput == expected, "\(host)")
         }
+    }
+
+    @Test("가짜 줄바꿈 호스트 — ⏎ 직후 첫 읽기만 줄바꿈, 다시 읽으면 그대로, ⌫ 직후는 지우기 전 값")
+    func fakeNewlineModel() {
+        let document = HostDocument(host: .fakeNewlineStale)
+        document.insertText("서울")
+        document.insertText("\n")
+        #expect(document.text == "서울", "⏎는 문서를 안 바꾼다")
+        #expect(document.documentContextBeforeInput == "서울\n", "G1 — 가짜")
+        #expect(document.documentContextBeforeInput == "서울", "G1′ — ⌫ 직전 재읽기에서는 사라진다")
+        document.deleteBackward(1)
+        #expect(document.text == "서")
+        #expect(document.documentContextBeforeInput == "서울", "G2 — 낡음(지우기 전 값)")
     }
 
     @Test("대본 — 자판 3종이 같은 문서를 만든다(천지인 공백은 이동 뒤 한 번 더)", arguments: Layout.allCases)
@@ -379,18 +426,28 @@ struct B2CapitalizationTests {
         ("되살린 뒤 커서 이동 — 앞부분도 버린다(공백 하나면 문서 시작으로 본다, 지금 동작)", "Hello⏎⌫◀␣x", "Hello X")
     ] as [(String, String, String)], Layout.allCases)
     func expiry(row: (why: String, script: String, expected: String), layout: Layout) {
-        for host in [DocumentHost.silent, .staleGetter, .nilGetter] {
+        // B2-A 이력만 보는 호스트 — 신선한 메아리 없음은 B2-C가 문서로 꼬리를 세워 아래 `confirmedHostTracksDeeperBackspace`가 맡는다
+        for host in [DocumentHost.staleGetter, .nilGetter] {
             let (document, _) = B2Script.run(row.script, host: host, layout: layout, returnKeyIsDefault: true,
                                              autoCapitalization: .sentences, startsInEnglish: true)
             #expect(document.text == row.expected, "\(row.why) · \(host) · \(layout)")
         }
     }
 
+    /// B2-C가 확인한 호스트에서는 꼬리가 문서 문맥이라 ⌫로 더 지워도 추적한다 — `Hello⏎⌫⌫x`가 정답 `Hellx`(B2-A만이면 「모름」 = `HellX`)
+    @Test("B2-C 확인 호스트 — ⏎⌫ 뒤 ⌫를 더 쳐도 꼬리가 문서를 따른다", arguments: Layout.allCases)
+    func confirmedHostTracksDeeperBackspace(layout: Layout) {
+        let (document, controller) = B2Script.run("Hello⏎⌫⌫x", host: .silent, layout: layout, returnKeyIsDefault: true,
+                                                  autoCapitalization: .sentences, startsInEnglish: true)
+        #expect(document.text == "Hellx")
+        #expect(controller.textTailIsTruncated == false)
+    }
+
     /// 꼬리가 48자를 넘어 앞을 버리면 되살린 앞부분과 이어지지 않는다 — 앞부분도 버린다(꼬리 잘림과 같은 「앞 모름」)
     @Test("꼬리가 48자를 넘으면 되살린 앞부분을 버린다")
     func prefixDroppedWhenTailOverflows() {
         let script = "Hi⏎⌫." + String(repeating: "␣", count: 48) + "x"
-        let (document, controller) = B2Script.run(script, host: .silent, layout: .dubeolsik, returnKeyIsDefault: true,
+        let (document, controller) = B2Script.run(script, host: .nilGetter, layout: .dubeolsik, returnKeyIsDefault: true,
                                                   autoCapitalization: .sentences, startsInEnglish: true, doubleSpacePeriod: false)
         #expect(controller.textTailIsTruncated, "전제 — 꼬리가 「.」을 버렸다")
         #expect(document.text == "Hi." + String(repeating: " ", count: 48) + "X",
@@ -400,7 +457,7 @@ struct B2CapitalizationTests {
     /// 되살린 앞부분은 같은 줄에만 산다 — 여러 줄 본문 채움글을 넣으면 새 줄의 처음이다
     @Test("여러 줄 본문 채움글을 넣으면 되살린 앞부분을 버린다", arguments: Layout.allCases)
     func prefixDroppedByMultiLineSnippet(layout: Layout) {
-        let (document, controller) = B2Script.run("Hello⏎⌫␣⇄주소◆⇄x", host: .silent, layout: layout, returnKeyIsDefault: true,
+        let (document, controller) = B2Script.run("Hello⏎⌫␣⇄주소◆⇄x", host: .nilGetter, layout: layout, returnKeyIsDefault: true,
                                                   autoCapitalization: .sentences, startsInEnglish: true)
         #expect(controller.textTailIsTruncated == false, "전제 — 칩이 떴고 본문이 새 줄로 끝났다")
         #expect(document.text == "Hello 첫 줄\nX", "새 줄의 처음 — 앞부분 「Hello 」를 붙이면 소문자가 된다")
@@ -464,11 +521,12 @@ struct B2CapitalizationTests {
 @Suite("B2-A 불변식 C7 — ⏎ 직전 기억은 꼬리·칩·추천단어·학습으로 새지 않는다")
 struct B2SnapshotIsolationTests {
 
-    @Test("⏎⌫ 뒤 꼬리는 비고 잘림(앞 모름)이다 — 1.3.0 그대로", arguments: Layout.allCases)
+    /// B2-A 스냅샷만 있는 경우(확인 못 하는 호스트) — B2-C가 문서로 세운 꼬리는 C7 대상이 아니다(아래 `confirmedTailIsDocument`)
+    @Test("⏎⌫ 뒤 꼬리는 비고 잘림(앞 모름)이다 — 확인 못 하는 호스트는 1.3.0 그대로", arguments: Layout.allCases)
     func tailStaysEmptyAndTruncated(layout: Layout) {
         for script in ["Hello⏎⌫", "서울⏎⌫"] {
             let english = script.hasPrefix("H")
-            let (_, controller) = B2Script.run(script, host: .silent, layout: layout, returnKeyIsDefault: true,
+            let (_, controller) = B2Script.run(script, host: .nilGetter, layout: layout, returnKeyIsDefault: true,
                                                autoCapitalization: .sentences, startsInEnglish: english)
             #expect(controller.textTail.isEmpty, "\(script) · \(layout)")
             #expect(controller.textTailIsTruncated, "\(script) · \(layout)")
@@ -484,8 +542,8 @@ struct B2SnapshotIsolationTests {
             let (document, controller) = B2Script.run("서울⏎⌫", host: host, layout: layout, returnKeyIsDefault: true)
             let before = document.text
             let replaced = controller.completeWord("서울역")
-            if host.sendsBackspaceEcho {
-                // 메아리가 문서로 꼬리를 다시 세웠다 — 문서가 정말 「서울」로 끝나니 바꾸는 게 맞다
+            if host.sendsBackspaceEcho || host == .silent {
+                // 메아리 또는 B2-C 확인이 문서로 꼬리를 다시 세웠다 — 문서가 정말 「서울」로 끝나니 바꾸는 게 맞다
                 #expect(replaced && document.text == "서울역", "\(host) · \(layout)")
             } else {
                 #expect(!replaced, "\(host) · \(layout)")
@@ -505,6 +563,40 @@ struct B2SnapshotIsolationTests {
             let (document, _) = B2Script.run("서울⏎⌫가" + separator, host: host, layout: layout, returnKeyIsDefault: true,
                                              onWordCommitted: { learned.words.append($0) })
             #expect(learned.words == ["서울"], "\(host) · \(layout) · 문서 \(document.text.debugDescription)")
+        }
+    }
+}
+
+/// 빈 문서를 nil로 내는 줄바꿈 호스트(애플 문서에 빈 문서의 값이 정해져 있지 않다 — 조사원2). 나머지는 신선하다
+@MainActor
+final class NilWhenEmptyDocument: TextOutput {
+    private(set) var text = ""
+    func insertText(_ inserted: String) { text += inserted }
+    func deleteBackward(_ count: Int) { text = String(text.dropLast(count)) }
+    var documentContextBeforeInput: String? { text.isEmpty ? nil : text }
+}
+
+@MainActor
+@Suite("B2-C — nil은 빈 문서의 증거가 아니다")
+struct B2NilContextTests {
+
+    /// 변이 ②(nil을 빈 문서로)가 여기서 죽는다 — 새 관찰 경로에서는 nil을 「빈 문서 확실」로 올리지 않는다(PDR `nil` 원칙).
+    /// 기존 `syncWithDocument(nil)` 계약(잘림 아님)은 다른 길이다 — 이 시험은 sync를 부르지 않는다
+    @Test("빈 문서가 nil로 오면 ⏎⌫ 뒤 첫 칩을 되살리지 않는다(1.3.0 대가), 글이 있으면 되살린다")
+    func nilIsNotEmpty() {
+        for (keys, expected) in [("⏎⌫wnth", nil), ("tjdnf␣⏎⌫wnth", "주소")] as [(String, String?)] {
+            let document = NilWhenEmptyDocument()
+            let controller = InputController(output: document)
+            controller.returnKeyIsDefault = true
+            for key in keys {
+                switch key {
+                case "⏎": controller.handle(.return)
+                case "⌫": controller.handle(.backspace)
+                case "␣": controller.handle(.space)
+                default: controller.handle(.character(String(key)))
+                }
+            }
+            #expect(B2Script.chip(controller) == expected, "\(keys) — 문서 \(document.text.debugDescription)")
         }
     }
 }
@@ -529,14 +621,20 @@ struct ChipRow: Sendable, CustomTestStringConvertible {
         let chip: String?
     }
 
+    /// - Parameters:
+    ///   - quiet: 메아리 없음 + 신선한 getter(B2-C가 확인하는 호스트)
+    ///   - unconfirmed: 낡은·nil getter·리턴 키 `.default` 아님(확인 못 함 — 1.3.0 대가). 없으면 `quiet`과 같다
     init(_ why: String, _ script: String,
-         quiet: (String, String?), echo: (String, String?), keeps: (String, String?),
+         quiet: (String, String?), unconfirmed: (String, String?)? = nil, echo: (String, String?), keeps: (String, String?),
          clearsNotify: (String, String?), clearsSilent: (String, String?),
          knownFalsePositive: Set<DocumentHost.Column> = []) {
         self.why = why
         self.script = script
+        let unconfirmed = unconfirmed ?? quiet
         expected = [
-            .quiet: Cell(document: quiet.0, chip: quiet.1), .echo: Cell(document: echo.0, chip: echo.1),
+            .quiet: Cell(document: quiet.0, chip: quiet.1),
+            .unconfirmed: Cell(document: unconfirmed.0, chip: unconfirmed.1),
+            .echo: Cell(document: echo.0, chip: echo.1),
             .keeps: Cell(document: keeps.0, chip: keeps.1),
             .clearsNotify: Cell(document: clearsNotify.0, chip: clearsNotify.1),
             .clearsSilent: Cell(document: clearsSilent.0, chip: clearsSilent.1)
@@ -550,20 +648,21 @@ struct ChipRow: Sendable, CustomTestStringConvertible {
 /// 표는 스위트 밖에 둔다 — `@Test(arguments:)`는 격리 밖에서 평가된다
 enum B2ChipRows {
 
-    /// 조사원2 표 5~15. 「메아리 없음」 열의 `서울␣⏎⌫주소`·`⏎⌫주소`는 B2-C가 채택되면 **의도적으로 뒤집을 칸**이다(PDR 5절) —
-    /// 이번에는 뒤집지 않는다. `⌫주소`(⑤)는 B2-C에서도 뒤집지 않는다.
+    /// 조사원2 표 5~15. 「메아리 없음」 열의 `서울␣⏎⌫주소`·`⏎⌫주소`는 B2-C로 **의도적으로 뒤집은 칸**이다(PDR) — 신선한 getter 호스트만.
+    /// `⌫주소`(⑤)는 뒤집지 않는다. 커서 이동·외부 편집·다른 키가 ⏎와 ⌫ 사이에 끼면 복원하지 않는다(14행들).
     static let rows: [ChipRow] = [
         ChipRow("5 서울⏎⌫주소 — 줄바꿈을 지워 붙었다(1.3.0이 막은 오탐)", "서울⏎⌫주소",
                 quiet: ("서울주소", nil), echo: ("서울주소", nil), keeps: ("서주소", nil),
                 clearsNotify: ("주소", nil), clearsSilent: ("주소", nil)),
-        ChipRow("6 서울␣⏎⌫주소 — 앞이 공백(메아리 없음 열은 B2-C 칸)", "서울␣⏎⌫주소",
-                quiet: ("서울 주소", nil), echo: ("서울 주소", "주소"), keeps: ("서울주소", nil),
+        // ★ B2-C로 **뒤집은 칸**(PDR) — 신선한 메아리 없음 호스트는 칩, 확인 못 하는 호스트는 1.3.0 대가 그대로
+        ChipRow("6 서울␣⏎⌫주소 — 앞이 공백(B2-C 칸)", "서울␣⏎⌫주소",
+                quiet: ("서울 주소", "주소"), unconfirmed: ("서울 주소", nil), echo: ("서울 주소", "주소"), keeps: ("서울주소", nil),
                 clearsNotify: ("주소", nil), clearsSilent: ("주소", nil)),
         ChipRow("7 ⌫주소 — 빈 입력란 ⌫ 먼저(⑤ 뒤집지 않는다)", "⌫주소",
                 quiet: ("주소", nil), echo: ("주소", "주소"), keeps: ("주소", nil),
                 clearsNotify: ("주소", nil), clearsSilent: ("주소", nil)),
-        ChipRow("8 ⏎⌫주소 — 빈 입력란 리턴을 지움(메아리 없음 열은 B2-C 칸)", "⏎⌫주소",
-                quiet: ("주소", nil), echo: ("주소", "주소"), keeps: ("주소", nil),
+        ChipRow("8 ⏎⌫주소 — 빈 입력란 리턴을 지움(B2-C 칸)", "⏎⌫주소",
+                quiet: ("주소", "주소"), unconfirmed: ("주소", nil), echo: ("주소", "주소"), keeps: ("주소", nil),
                 clearsNotify: ("주소", nil), clearsSilent: ("주소", nil)),
         ChipRow("9 주소 — 빈 입력란 첫 단축어", "주소",
                 quiet: ("주소", "주소"), echo: ("주소", "주소"), keeps: ("주소", "주소"),
@@ -608,7 +707,7 @@ enum B2ChipRows {
 }
 
 @MainActor
-@Suite("B2 — 칩은 1.3.0 그대로 (B2-C 미구현), 리턴 키 종류와 무관")
+@Suite("B2-C — ⏎⌫ 뒤 첫 칩 복원은 확인된 호스트에서만")
 struct B2ChipTests {
 
     @Test("표 — 호스트 7종 × 자판 3종 × 리턴 키(.default / 그 밖)", arguments: B2ChipRows.rows, Layout.allCases)
@@ -619,17 +718,56 @@ struct B2ChipTests {
                                                           returnKeyIsDefault: returnKeyIsDefault)
                 let label = "\(row.why) · \(host) · \(layout) · 리턴 키 \(returnKeyIsDefault ? ".default" : "그 밖")"
                 let chip = B2Script.chip(controller)
-                #expect(document.text == row.expected[host.column]?.document, "\(label) — 전제(문서)")
-                #expect(chip == row.expected[host.column]?.chip, "\(label)")
+                let column = host.chipColumn(returnKeyIsDefault: returnKeyIsDefault)
+                #expect(document.text == row.expected[column]?.document, "\(label) — 전제(문서)")
+                #expect(chip == row.expected[column]?.chip, "\(label)")
                 // 거짓 양성 0 — 칩은 정답이거나 없다. 백로그 6 열만 예외(알려진 오탐, B2 범위 밖)
                 let truth = B2Script.truthChip(document.text)
-                if row.knownFalsePositive.contains(host.column) {
+                if row.knownFalsePositive.contains(column) {
                     #expect(chip != nil && chip != truth, "\(label) — 백로그 6 칸이 바뀌었다면 표를 고친다")
                 } else {
                     #expect(chip == nil || chip == truth, "\(label) — 거짓 양성")
                 }
             }
         }
+    }
+
+    /// 복원 꼬리의 **모양** — 문서 마지막 줄만(줄을 넘지 않는다) · 끝 48자 · 잘림 표시는 문서 기준(검증 `verify-v131-b2c.md` C1).
+    /// 변이 V3(복원 뒤 잘림 해제)·V6(마지막 줄 대신 G2 통째)가 여기서 죽는다
+    @Test("B2-C 복원 꼬리 — 48자 넘는 줄은 잘림 그대로, 지워 내려가도 앞 글자를 모른다", arguments: Layout.allCases)
+    func restoredTailKeepsTruncation(layout: Layout) {
+        let line = "#" + String(repeating: "1", count: 61) + "#"
+        let (_, restored) = B2Script.run(line + "⏎⌫", host: .silent, layout: layout, returnKeyIsDefault: true)
+        #expect(restored.textTail == String(repeating: "1", count: 48), "전제 — 확인 호스트가 끝 48자로 되살렸다")
+        #expect(restored.textTailIsTruncated, "61자 줄 — 꼬리 맨 앞은 줄 처음이 아니다")
+        // 같은 꼴로 꼬리를 다 지우면 문서에는 숫자 13자가 남는다 — 「1…1주소」(붙은 꼴)에 칩이 뜨면 안 된다
+        for host in DocumentHost.newlineHosts {
+            let (document, controller) = B2Script.run(line + "⏎⌫" + String(repeating: "⌫", count: 48) + "주소",
+                                                      host: host, layout: layout, returnKeyIsDefault: true)
+            #expect(document.text == String(repeating: "1", count: 13) + "주소", "\(host) · \(layout) — 전제(문서)")
+            #expect(B2Script.chip(controller) == nil, "\(host) · \(layout)")
+        }
+    }
+
+    @Test("B2-C 복원 꼬리 — 앞 줄은 넣지 않는다(단축어는 줄을 넘지 않는다)", arguments: Layout.allCases)
+    func restoredTailIsLastLineOnly(layout: Layout) {
+        let (_, restored) = B2Script.run("가⏎서울␣⏎⌫", host: .silent, layout: layout, returnKeyIsDefault: true)
+        #expect(restored.textTail == "서울 ", "앞 줄 「가」와 줄바꿈이 꼬리에 들어가면 안 된다")
+        #expect(restored.textTailIsTruncated == false)
+        // 앞 줄 끝 「주」 + 새 줄 「소」 — 정규화(개행 제거)를 거치면 줄을 넘어 「주소」로 맞을 수 있다. 문서 마지막 줄은 「소」뿐이다
+        for host in DocumentHost.allCases {
+            let (document, controller) = B2Script.run("주⏎소⏎⌫", host: host, layout: layout, returnKeyIsDefault: true)
+            #expect(B2Script.chip(controller) == nil, "\(host) · \(layout) — 문서 \(document.text.debugDescription)")
+        }
+    }
+
+    /// 증거는 ⏎ **바로 다음 키 하나에만** 산다(PDR·코드 주석의 약속, 검증 V1). 다른 키가 끼면 문서가 맞아도 복원하지 않는다 —
+    /// 보수적 선택이다(늦은 복원도 G1′·G2를 다시 확인하지만, 수명을 넓히는 것은 별도 결정)
+    @Test("B2-C 증거 수명 — ⏎와 ⌫ 사이에 다른 키가 끼면 복원하지 않는다", arguments: Layout.allCases)
+    func evidenceLivesOneKey(layout: Layout) {
+        let (document, controller) = B2Script.run("서울␣⏎#,#⌫⌫주소", host: .silent, layout: layout, returnKeyIsDefault: true)
+        #expect(document.text == "서울 주소", "전제 — 「,」를 지우고 줄바꿈을 지웠다")
+        #expect(B2Script.chip(controller) == nil, "123 키가 끼었다 — 1.3.0 대가 그대로")
     }
 
     /// 계획서 §3-1 「모든 호스트 단언」 — 불변식 ③의 핵심 두 경로

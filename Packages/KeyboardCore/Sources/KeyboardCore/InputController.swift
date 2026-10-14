@@ -113,6 +113,10 @@ public final class InputController {
     /// ⌫가 줄바꿈이 아닌 글자를 지웠어도 꼬리 길이로 문서를 지우는 경로(`completeWord`·칩)가 틀리지 않게 하려는 것이다.
     /// 같은 줄이 이어지는 동안 산다 — 문맥 sync·⏎·꼬리를 넘는 ⌫·꼬리 앞 버림·여러 줄 본문 삽입에서 버린다
     private var capitalizationPrefix: String?
+    /// B2-C — ⏎가 줄바꿈을 넣었음이 문서로 보였을 때(G1 = G0+줄바꿈)의 ⏎ 직전 문맥 G0. **⏎ 바로 다음 키 하나에만** 산다(`returnSnapshot`과 같은
+    /// 수명). 그 키가 빈 꼬리를 지우는 ⌫이고 ⌫ 직전 재읽기·직후 읽기가 맞으면 꼬리를 **문서 문맥으로** 다시 세운다 — 문서 근거 sync와 같은
+    /// 취급이라 C7(스냅샷은 자동 대문자 전용) 대상이 아니다. 메모리에만 있고 내보내지 않는다(보안 규칙)
+    private var newlineEvidence: String?
 
     public init(
         output: TextOutput,
@@ -223,9 +227,11 @@ public final class InputController {
         // B2-A ⏎ 직전 기억은 ⏎ 바로 다음 키 하나에만 산다 — ⌫면 아래에서 쓰고, 다른 키면 여기서 버린다
         let returnSnapshot = self.returnSnapshot
         self.returnSnapshot = nil
+        let newlineEvidence = self.newlineEvidence
+        self.newlineEvidence = nil
         switch event {
         case .character(let key): handleCharacter(key)
-        case .backspace: handleBackspace(returnSnapshot: returnSnapshot)
+        case .backspace: handleBackspace(returnSnapshot: returnSnapshot, newlineEvidence: newlineEvidence)
         case .space: handleSpace()
         case .return:
             commitComposition()
@@ -233,12 +239,16 @@ public final class InputController {
             // B2-A — 리턴 키가 `.default`면 ⏎가 줄바꿈일 가능성이 높다. 줄 끝을 자동 대문자용으로만 기억한다(C7)
             let lineBeforeReturn = returnKeyIsDefault
                 ? String(((capitalizationPrefix ?? "") + committedTail).suffix(committedTailLimit)) : nil
+            // B2-C — ⏎ 직전 문맥 G0와 직후 G1. G1 = G0+줄바꿈이 **즉시** 보일 때만 증거로 둔다(제출형·비움·낡은 값·nil이면 없음)
+            let contextBeforeReturn = returnKeyIsDefault ? output.documentContextBeforeInput : nil
             output.insertText("\n")
+            let insertedNewline = contextBeforeReturn.map { output.documentContextBeforeInput == $0 + "\n" } ?? false
             // 단축어는 줄을 넘지 않는다 — 꼬리를 새 줄에서 다시 시작한다
             committedTail.removeAll()
             committedTailIsTruncated = false
             capitalizationPrefix = nil
             self.returnSnapshot = lineBeforeReturn
+            self.newlineEvidence = insertedNewline ? contextBeforeReturn : nil
         case .shift: handleShift()
         case .toggleLanguage:
             commitComposition()
@@ -309,6 +319,7 @@ public final class InputController {
         // 문맥이 없으면(nil) 커서가 어디 갔는지 모른다 — 기존 sync(nil) 계약(잘림 아님)은 아래 그대로다
         returnSnapshot = nil
         capitalizationPrefix = nil
+        newlineEvidence = nil
         let composing = automaton.composingText + hangulSource.pendingText
         if let documentTail, !composing.isEmpty, documentTail.hasSuffix(composing) {
             // 문서 = 확정 + 우리 조합 그대로. 상태는 살리고 확정 꼬리만 문서 기준으로 보정한다
@@ -417,13 +428,15 @@ public final class InputController {
 
     // MARK: - 기능 키
 
-    /// - Parameter returnSnapshot: 바로 앞 키가 ⏎였으면 그 직전 줄 끝(B2-A) — 빈 꼬리를 지울 때만 쓴다
-    private func handleBackspace(returnSnapshot: String?) {
+    /// - Parameters:
+    ///   - returnSnapshot: 바로 앞 키가 ⏎였으면 그 직전 줄 끝(B2-A) — 빈 꼬리를 지울 때만 쓴다
+    ///   - newlineEvidence: 바로 앞 ⏎가 줄바꿈을 넣었음이 보였으면 그 직전 문맥(B2-C)
+    private func handleBackspace(returnSnapshot: String?, newlineEvidence: String?) {
         suppressesNextWordCommit = false
         guard mode == .hangul else {
             // 기호/영어 모드도 꼬리를 함께 걷는다 — 단축어의 숫자·콜론이 이 모드에서
             // 지워지므로, 빠뜨리면 문서에 없는 텍스트로 칩이 뜨고 탭 시 문서를 파괴한다
-            deleteCommittedCharacter(returnSnapshot: returnSnapshot)
+            deleteCommittedCharacter(returnSnapshot: returnSnapshot, newlineEvidence: newlineEvidence)
             return
         }
         if hangulSource.prefersKeystrokeReplayBackspace, !keystrokeLog.isEmpty {
@@ -439,7 +452,7 @@ public final class InputController {
             // 연타 상태를 끊는다 — 지워진 자모에 이어 승격되면 안 된다 (단모음)
             hangulSource.reset()
         } else {
-            deleteCommittedCharacter(returnSnapshot: returnSnapshot)
+            deleteCommittedCharacter(returnSnapshot: returnSnapshot, newlineEvidence: newlineEvidence)
         }
     }
 
@@ -454,9 +467,23 @@ public final class InputController {
     /// **B2-A(1.3.1)** — ⏎ 바로 다음 ⌫면(`returnSnapshot`) 지운 것을 우리가 넣은 줄바꿈으로 보고 ⏎ 직전 줄 끝을
     /// **자동 대문자 판정에만** 되살린다(`capitalizationPrefix`). 꼬리·잘림은 위 규칙 그대로다 — 칩은 1.3.0 동작(C7).
     /// 그 밖의 빈 꼬리 ⌫는 앞을 모른다 — 되살려 둔 앞부분도 버린다(자동 대문자 「모름」 = 지금 동작, 빈 꼬리 → 대문자).
-    private func deleteCommittedCharacter(returnSnapshot: String?) {
+    ///
+    /// **B2-C(1.3.1, 조건부 채택 — 검증 `verify-v131-device-session-1.md` 2-3)** — ⏎ 직후 G1 = G0+줄바꿈이었고(`newlineEvidence`),
+    /// **⌫ 직전 재읽기** G1′도 G0+줄바꿈이며(연락처형 가짜 줄바꿈은 여기서 사라진다), ⌫ 직후 G2 = G0이면(⌫ 반영이 늦은 낡은 값은 여기서 걸린다)
+    /// 지운 것이 우리 줄바꿈임이 문서로 확인된 것이다 — 꼬리를 **문서 문맥 G2로** 다시 세운다(문서 근거 sync와 같은 취급, C7 대상 아님).
+    /// 하나라도 nil이면 복원하지 않는다 — nil은 빈 문서의 증거가 아니다. 복원하지 않으면 위 1.3.0 규칙(잘림) 그대로다.
+    private func deleteCommittedCharacter(returnSnapshot: String?, newlineEvidence: String?) {
+        let beforeDelete = (newlineEvidence != nil && committedTail.isEmpty) ? output.documentContextBeforeInput : nil
         output.deleteBackward(1)
         if committedTail.isEmpty {
+            if let contextBeforeReturn = newlineEvidence, beforeDelete == contextBeforeReturn + "\n",
+               let afterDelete = output.documentContextBeforeInput, afterDelete == contextBeforeReturn {
+                (committedTail, committedTailIsTruncated) = Self.tailLine(of: afterDelete, limit: committedTailLimit)
+                // 문서에서 다시 세운 꼬리 끝 단어는 sync와 같이 다음 구분자까지 학습하지 않는다
+                blocksLearningUntilSeparator = !Self.trailingHangulRun(of: committedTail).isEmpty
+                capitalizationPrefix = nil   // 꼬리가 줄 앞부분을 다 담았다 — B2-A 앞부분은 쓸 일이 없다
+                return
+            }
             committedTailIsTruncated = true
             capitalizationPrefix = returnSnapshot
         } else {
@@ -853,4 +880,5 @@ private final class RevisionCountingOutput: TextOutput {
     }
 
     var hasSelectedText: Bool { base.hasSelectedText }
+    var documentContextBeforeInput: String? { base.documentContextBeforeInput }
 }
