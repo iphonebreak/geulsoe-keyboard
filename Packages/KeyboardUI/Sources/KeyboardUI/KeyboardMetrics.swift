@@ -265,6 +265,61 @@ public enum KeyboardMetrics {
         return candidates.filter { $0.emoji == nil }.map { [$0] } + [emojiChips]
     }
 
+    // MARK: 영어 후보 줄 (B5 C12 — 실기 결함 수정 2026-10-15)
+
+    /// 후보 줄의 칩·구분선·✕ 사이 간격 — 툴바 `HStack(spacing:)`과 영어 줄 `EnglishCandidateRowLayout`이 같이 쓴다
+    public static let candidateRowSpacing: CGFloat = 10
+
+    /// 칩 글자의 최소 배율 — `wordChip`의 `minimumScaleFactor`(한글·영어 공용, 11.9pt — HIG 최소 11pt 위)
+    public static let wordChipMinimumScale: CGFloat = 0.7
+
+    /// 영어 칩 글자를 0.7배로 줄였을 때 **실제 폭 ÷ 원래 폭**의 상한. 작은 글씨는 자간이 넓어져 정확히 0.7배가 되지 않는다 —
+    /// `words-en.tdw` 2만 단어 CoreText 실측(2026-10-15): 11.9pt에서 0.72~0.78배, 원래 폭 60pt 넘는 단어는 최대 0.7512.
+    /// 이 차이가 실기 결함의 직접 원인이었다(`communication` 117pt × 0.735 = 86.0pt > 칸 85pt → 1pt 넘쳐 말줄임). 여유를 두고 0.76 —
+    /// 이 값으로 사전 전체 후보 줄을 다시 셌을 때 「들어간다고 보고 실제로 넘치는」 줄은 375·393pt 모두 0이다
+    public static let englishChipShrunkWidthRatio: CGFloat = 0.76
+
+    /// 영어 후보 칩 폭 배분 — `naturalWidths` = 칩마다 1배 폭(좌우 여백 포함), `available` = 칩들이 나눠 가질 폭(구분선·간격 뺀 값).
+    ///
+    /// 1. 모두 **같은 폭 칸**에 들어가면 같은 폭 — 한글 줄·지금까지의 영어 줄과 같은 모양(QuickType 균등 분배)
+    /// 2. 1배 폭 합이 들어가면 각자 1배 폭 + 남는 폭을 똑같이 — 아무 칩도 줄지 않는다
+    /// 3. 아니면 **글자 폭에 비례** — 모든 칩이 같은 배율로 줄어 글자 크기가 같다(같은 폭이면 긴 칩만 하한까지 줄고 넘쳤다)
+    public static func englishChipWidths(naturalWidths: [CGFloat], available: CGFloat, padding: CGFloat) -> [CGFloat] {
+        guard !naturalWidths.isEmpty else { return [] }
+        let count = CGFloat(naturalWidths.count)
+        let equal = available / count
+        if naturalWidths.allSatisfy({ $0 <= equal }) {
+            return naturalWidths.map { _ in equal }
+        }
+        let total = naturalWidths.reduce(0, +)
+        if total <= available {
+            let extra = (available - total) / count
+            return naturalWidths.map { $0 + extra }
+        }
+        let insets = 2 * padding
+        let texts = naturalWidths.map { max(0, $0 - insets) }
+        let textTotal = texts.reduce(0, +)
+        let textAvailable = max(0, available - insets * count)
+        guard textTotal > 0 else { return naturalWidths.map { _ in equal } }
+        return texts.map { textAvailable * $0 / textTotal + insets }
+    }
+
+    /// 영어 후보 줄이 **0.7배 하한 안에서 잘리지 않고** 들어가는 최소 폭(칩 여백·구분선·간격 포함).
+    /// 영어 줄은 `ViewThatFits`로 「후보 전부」와 「마지막 하나 뺀 것」 중 들어가는 쪽을 고르는데, 그 기준이 이 값이다(`EnglishCandidateRowLayout`의 이상 폭).
+    public static func englishRowMinimumWidth(naturalWidths: [CGFloat], padding: CGFloat, dividerWidth: CGFloat = 1) -> CGFloat {
+        guard !naturalWidths.isEmpty else { return 0 }
+        let count = CGFloat(naturalWidths.count)
+        let insets = 2 * padding
+        let text = naturalWidths.reduce(0) { $0 + max(0, $1 - insets) }
+        return text * englishChipShrunkWidthRatio + insets * count + englishRowFixedWidth(chips: naturalWidths.count, dividerWidth: dividerWidth)
+    }
+
+    /// 칩 `chips`개 줄에서 칩이 아닌 몫 — 구분선 `chips - 1`개와 그 사이 간격 `2 × (chips - 1)`개
+    public static func englishRowFixedWidth(chips: Int, dividerWidth: CGFloat = 1) -> CGFloat {
+        guard chips > 1 else { return 0 }
+        return CGFloat(chips - 1) * dividerWidth + CGFloat(2 * (chips - 1)) * candidateRowSpacing
+    }
+
     /// 자판 배열의 기준 열 수에서 곧바로 최대 폭을 낸다.
     public static func contentMaxWidth(for layout: LayoutDefinition) -> CGFloat {
         contentMaxWidth(units: layout.referenceUnits)
