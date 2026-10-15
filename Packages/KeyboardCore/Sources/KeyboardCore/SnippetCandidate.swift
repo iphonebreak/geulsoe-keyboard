@@ -140,6 +140,39 @@ public enum SnippetCandidateGate {
         return isStillValid(trigger: panelTrigger, tail: tail)
     }
 
+    // MARK: 칩 누름 — 무장 순간 열기 (R49, 2026-10-15 사장님)
+    //
+    // v3.2는 「450ms 무장 → **손을 뗄 때** 연다」였다. R49는 **무장 순간 연다**(손가락이 아직 칩 위) — 연 뒤 손을 떼면 아무 일 없다.
+    // 단계는 KeyboardUI `ChipPressState`가 쥐고, 단계마다 할 일은 아래 셋이 정한다(칩 뷰는 결과대로 콜백만 부른다).
+
+    /// 450ms가 지났다 — **누르고 있는(pressed) 동안에만** 조립 지점에 묻고(`canArm`), 허락되면 **무장과 동시에 패널을 연다**.
+    /// 무장 불가(후보 1개·퇴장 중·꼬리 어긋남 — R33)면 false: 점선·피드백·패널 없이 pressed에 머물러 떼면 짧은 탭이다.
+    /// 이미 무장했거나(두 번 열지 않는다) 취소·손 뗀 뒤의 늦은 타이머는 묻지도 열지도 않는다
+    public static func armsAndOpens(phase: SnippetChipPressPhase, canArm: () -> Bool) -> Bool {
+        phase == .pressed && canArm()
+    }
+
+    /// 손을 뗐다 — **누름(pressed)인 채 칩 안**이면 짧은 탭(첫 후보 삽입). **무장(= 패널을 이미 연) 뒤에는 아무 일 없다**(R49) —
+    /// 삽입하지 않아 짧은 탭으로 새지 않고, 패널도 닫지 않는다(행을 탭해 고른다). 취소된 누름은 되돌아와 떼도 되살리지 않는다(R34)
+    public static func release(phase: SnippetChipPressPhase, inside: Bool) -> SnippetChipRelease {
+        phase == .pressed && inside ? .tap : .none
+    }
+
+    /// 손가락이 칩 밖(경계 + 10pt, R34)으로 나갔다 — 누름·무장을 취소한다. **지금 막 취소했을 때만 true**(뷰가 무장 타이머를 멈춘다).
+    /// 무장 순간 이미 연 패널은 **닫지 않는다** — 이 판정에는 닫기가 없다. 칩에서 손가락을 끌어 패널 쪽으로 가는 것은
+    /// 자연스러운 다음 동작이고, 닫으면 방금 연 목록이 손가락을 따라 사라진다(2026-10-15 개발자 판단, 기록 `impl-v131-u7-open-on-arm.md`)
+    public static func cancels(phase: SnippetChipPressPhase, inside: Bool) -> Bool {
+        !inside && (phase == .pressed || phase == .armed)
+    }
+
+    /// 터치를 잃었다(R49 검증 2-2 → 사장님 결정 2026-10-15) — 제스처가 끝났거나 **시스템이 취소**했다(제어 센터·알림 당기기·전화 배너 —
+    /// `touchesCancelled`는 `onEnded` 없이 끝난다). 손 뗌이 처리하지 않은 누름(idle이 아닌 단계)은 **아무 동작 없이 버린다**(삽입·열기·닫기 없음).
+    /// 450ms 전이면 늦은 타이머가 손가락 없이 패널을 여는 것(유령 패널)을, 무장 뒤면 점선·눌림이 남아 다음 탭이 삼켜지는 것을 막는다.
+    /// 정상 손 뗌(`release`가 이미 idle로 돌림) 뒤에 불려도 false — 이중 정리 무해
+    public static func discardsOnTouchLost(phase: SnippetChipPressPhase) -> Bool {
+        phase != .idle
+    }
+
     /// ✕ — 패널이 열려 있으면 패널만 닫는다(AC-43). 닫혀 있으면 지금 규칙: 붙여넣기 칩이 있으면 채움글 칩은 그려지지 않았으므로
     /// 숨기지 않는다(D18·D19), 채움글 칩이 보였으면 그 꼬리를 숨긴다
     public static func dismissEffect(
@@ -148,6 +181,29 @@ public enum SnippetCandidateGate {
         if isCandidatesPanelOpen { return .closeCandidatesPanel }
         return .dismissSuggestions(hideSnippetTail: !hasPasteChip && hasSnippetChip ? tail : nil)
     }
+}
+
+/// 채움글 칩 누름 단계 — KeyboardUI `ChipPressState`가 쥔다. 단계마다 할 일은 `SnippetCandidateGate`의 R49 판정이 정한다.
+///
+/// ```
+/// idle ─손 닿음→ pressed ─450ms·허락→ armed(그 순간 패널 열림)
+///                  │ 칩 밖으로 끌림              │ 칩 밖으로 끌림(패널은 그대로)
+///                  └──────────→ cancelled ←─────┘
+/// 손 뗌: pressed(칩 안) → 짧은 탭 · armed·cancelled → 아무 일 없음 · 그 뒤 idle
+/// 터치 잃음(시스템 취소): 어느 단계든 → idle, 아무 동작 없음(`discardsOnTouchLost`)
+/// ```
+public enum SnippetChipPressPhase: Equatable, Sendable {
+    case idle
+    case pressed
+    case armed
+    case cancelled
+}
+
+/// 칩에서 손을 뗄 때 할 일 — 패널 열기는 여기 없다(R49: 무장 순간 이미 열었다)
+public enum SnippetChipRelease: Equatable, Sendable {
+    case none
+    /// 짧은 탭 — 칩의 첫 후보를 넣는다
+    case tap
 }
 
 /// U7 문구·VoiceOver 라벨 표 — **한 곳**(10-6 ⑦, `KeyCapAccessibility` 선례). 시험이 고정한다.

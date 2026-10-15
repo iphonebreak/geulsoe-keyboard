@@ -1190,7 +1190,8 @@ final class KeyboardViewController: UIInputViewController {
             pressed: pressed, current: viewState.snippetSuggestion, tail: inputController.textTail)
     }
 
-    /// 무장한 칩에서 손을 뗐을 때·VoiceOver 「다른 후보 보기」 — 후보 목록을 **한 번** 계산해 자판 자리에 연다.
+    /// 칩이 **무장하는 순간**(R49 — 손가락은 아직 칩 위, 연 뒤 손을 떼면 아무 일 없음)·VoiceOver 「다른 후보 보기」 —
+    /// 후보 목록을 **한 번** 계산해 자판 자리에 연다. 툴바(칩)는 그대로 두고 자판 자리만 바꾸므로 진행 중인 칩 누름이 이어진다.
     /// VoiceOver 동작은 무장을 거치지 않으므로 무장과 같은 판정을 **다시** 본다. 후보가 2개 미만이면 열지 않는다(AC-42).
     private func openSnippetCandidatesPanel(pressed: SnippetSuggestion) {
         guard let viewState, let inputController, let snippetMatcher else { return }

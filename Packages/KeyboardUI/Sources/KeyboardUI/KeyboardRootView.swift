@@ -321,7 +321,7 @@ struct SuggestionToolbar: View {
                 PasteChip(suggestion: paste, theme: theme, action: onPasteboardCodeTap)
             }
             if let snippet, let onSnippetTap {
-                // U7 — 길게 눌러 무장(조립 지점이 허락할 때만)·손 떼면 후보 패널. 배선이 없으면 U7 전 칩과 같다.
+                // U7 — 길게 눌러 무장(조립 지점이 허락할 때만)하는 순간 후보 패널(R49 — 연 뒤 손을 떼면 아무 일 없음). 배선이 없으면 U7 전 칩과 같다.
                 // 콜백은 **이 칩의 값**을 함께 넘긴다 — 퇴장 중인 옛 칩을 눌렀을 때 조립 지점이 지금 칩과 구별한다(R3)
                 SnippetChip(
                     suggestion: snippet,
