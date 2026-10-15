@@ -103,7 +103,9 @@ struct EnglishDictionaryBundleTests {
 
     @Test("축약형·대문자 원형 — 사전 형태 그대로", arguments: [
         ("don", ["don't"]), ("did", ["didn't"]), ("i'", ["I'm", "I'll", "I've"]), ("it'", ["it's"]),
-        ("cou", ["could", "course", "couldn't"]), ("mond", ["Monday"]), ("iph", ["iPhone"])
+        ("cou", ["could", "course", "couldn't"]), ("mond", ["Monday", "Mondays"]), ("iph", ["iPhone"]),
+        // 대문자 복수형(2026-10-15, 사장님 결정 C안) — 원본에 있는 복수형만 대문자로(`tools/data-en/capitals.tsv` 끝 묶음)
+        ("kore", ["Korea", "Korean", "Koreans"]), ("sund", ["Sunday", "Sundays"]), ("tv", ["TVs"])
     ] as [(String, [String])])
     func curatedForms(row: (prefix: String, expected: [String])) {
         let top = EnglishBundle.top(row.prefix)

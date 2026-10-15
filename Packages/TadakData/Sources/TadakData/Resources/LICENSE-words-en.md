@@ -27,7 +27,7 @@ This notice applies to **`words-en.tdw` in this directory only** — not to the 
 1. 소문자로 바꾸고 굽은 아포스트로피(’)를 곧은 것(')으로 바꾼다. 영문자와 단어 안 아포스트로피로만 된 3~20자 낱말만 남기고 중복을 없앤다.
 2. 축약형이 쪼개져 생긴 어간 조각(`didn` 등 14개)을 축약형(`didn't` 등)으로 바꾸고, 일부 조각(`ain`·`don`)을 빼며 `won't` 를 더한다.
 3. 아포스트로피가 빠진 철자 오류형·자막 잡음 토큰·부적절한 낱말을 정확히 일치하는 것만 뺀다.
-4. 축약형(`I'm` 등)과 대문자 원형(요일·월·언어·국적 등 — `Monday`·`English`·`iPhone`)을 손질 목록으로 더하거나 표기를 바꾼다.
+4. 축약형(`I'm` 등)과 대문자 원형(요일·월·언어·국적 등과 복수형 — `Monday`·`Mondays`·`English`·`iPhone`)을 손질 목록으로 더하거나 표기를 바꾼다.
 5. 빈도로 다시 줄 세워 상위 20,000개만 남기고, 조회 키를 붙여 mmap 이진 탐색용 이진 포맷으로 다시 쓴다.
 
 선별·재배열·신규 항목 부가가 모두 일어났으므로 단순 포맷 변환이 아니라 2차적 저작물이다.
@@ -64,7 +64,7 @@ CC BY-SA 4.0 §3(b)(1) 은 2차적 저작물을 같은(또는 호환) 라이선�
    and inner apostrophes; removes duplicates;
 2. turns split contraction stems (14, e.g. `didn`) into contractions (`didn't`), drops some stems (`ain`, `don`) and adds `won't`;
 3. removes, by exact match only, apostrophe-less misspellings, subtitle noise tokens and inappropriate words;
-4. adds contractions (e.g. `I'm`) and capitalised forms (weekdays, months, languages and nationalities, `iPhone`) from curated lists;
+4. adds contractions (e.g. `I'm`) and capitalised forms (weekdays, months, languages and nationalities and their plurals, `iPhone`) from curated lists;
 5. re-ranks by frequency, keeps the top 20,000, attaches lookup keys and rewrites the list as a binary format for mmap binary search.
 
 Selection, rearrangement and the addition of new entries make this Adapted Material rather than a mere format conversion.
