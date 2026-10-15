@@ -359,7 +359,7 @@ struct ToolbarTab: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("영어 추천단어")
                     Text(settings.suggestionsEnabled
-                         ? "영어로 치는 동안 단어 앞부분으로 완성 단어를 보여 줘요. 영어 입력은 학습하지 않아요."
+                         ? "영어로 치는 동안 단어 앞부분으로 완성 단어를 보여 줘요."
                          : "추천단어가 켜져 있을 때만 동작해요.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
