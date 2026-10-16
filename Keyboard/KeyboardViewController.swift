@@ -83,6 +83,12 @@ final class KeyboardViewController: UIInputViewController {
     /// 추천단어 엔진. 익스텐션 프로세스 수명 동안 유지한다 — 매 등장마다 다시 만들면
     /// Full Access 없는 기기의 세션 학습이 필드 전환마다 날아간다.
     private var suggestionEngine: SuggestionEngine?
+    /// 영어 추천단어 엔진(B5 C1) — 저장소 없는 팩토리로만 만든다(학습 없음). 필요할 때 만든다(mmap이라 가볍다)
+    private var englishSuggestionEngine: SuggestionEngine?
+    /// 영어 후보 게이트가 보는 입력란 특성(B5 C13) — `applyFieldTraits`가 서명 가드 **앞**에서 매번 채운다(autocorrectionType은 서명에 없다)
+    private var englishFieldTraits = EnglishFieldTraits.default
+    /// ✕로 내린 영어 후보의 정규화 키(E10) — 모드 전환 때 비운다(C4)
+    private var dismissedLatinKey: String?
     /// 엔진을 만들 때의 학습 초기화 토큰. 설정 앱이 토큰을 올리면 엔진을 재생성해
     /// 세션 메모리째 버린다 (저장소만 비우면 다음 학습이 옛 단어를 되살린다).
     private var appliedLearningResetToken: Int?
@@ -391,6 +397,15 @@ final class KeyboardViewController: UIInputViewController {
         // viewWillAppear가 오지 않는데, 확대 미리보기는 그 즉시 꺼져야 한다 (QA N-4)
         let signature = "\(keyboardType.rawValue)/\(returnKeyType.rawValue)"
             + "/\(autocapitalizationType.rawValue)/\(proxy.isSecureTextEntry == true)"
+        // B2-A — ⏎ 직전 줄 끝을 자동 대문자용으로 기억해도 되는 입력란인가(PDR return-backspace-context). nil은 「모름」 → 거짓.
+        // 서명 가드 **앞**에서 매번 넣는다 — 서명은 nil을 `.default`로 채운 값이라 nil ↔ `.default` 필드 전환을 못 본다(검증 R2)
+        inputController.returnKeyIsDefault = proxy.returnKeyType == .default
+        // B5 C13 — 영어 후보 입력란 끔(제품 선택: 이메일·URL·ASCII 전용·secure·자동 교정 끔). 판정식은 `EnglishSuggestionGate`
+        englishFieldTraits = EnglishFieldTraits(
+            isEmailOrURL: keyboardType == .emailAddress || keyboardType == .URL,
+            isASCIICapable: keyboardType == .asciiCapable || keyboardType == .asciiCapableNumberPad,
+            isSecure: proxy.isSecureTextEntry == true,
+            autocorrectionDisabled: proxy.autocorrectionType == .no)
         guard force || signature != appliedFieldSignature else { return }
         appliedFieldSignature = signature
         if viewState.showsKeyPreview != showsKeyPreview { viewState.showsKeyPreview = showsKeyPreview }
@@ -589,6 +604,10 @@ final class KeyboardViewController: UIInputViewController {
     private func handle(_ event: KeyEvent) {
         guard let inputController else { return }
         let revision = inputController.documentRevision
+        switch event {
+        case .toggleLanguage, .symbols, .symbolsAlternate: dismissedLatinKey = nil   // B5 C4 — 모드 전환은 영어 ✕ 상태를 남기지 않는다
+        default: break
+        }
         inputController.handle(event)
         // 드물게 바뀌는 상태만 뷰에 반영한다 (모드·시프트)
         refreshLayout()
@@ -685,6 +704,8 @@ final class KeyboardViewController: UIInputViewController {
 
     /// 켬/끔 또는 학습 초기화 토큰이 바뀔 때만 만들고 버린다 — 유지 이유는 프로퍼티 주석 참조.
     private func rebuildSuggestionEngineIfNeeded() {
+        // 영어 엔진(B5)은 학습 상태가 없어 다시 만들 일이 없다 — 꺼졌을 때 매핑만 놓는다(켜지면 첫 후보 때 다시 연다)
+        if !settings.suggestionsEnabled || !settings.englishSuggestionsEnabled { englishSuggestionEngine = nil }
         guard settings.suggestionsEnabled else {
             suggestionEngine = nil
             return
@@ -895,7 +916,22 @@ final class KeyboardViewController: UIInputViewController {
                 limit: KeyboardMetrics.wordSuggestionLimit(hasBadge: badgeCount != nil, hasEmojiChips: emoji != nil)
             )
         }
-        let candidates = WordSuggestionCandidate.row(words: words, emoji: emoji, sourceWord: currentWord)
+        var candidates = WordSuggestionCandidate.row(words: words, emoji: emoji, sourceWord: currentWord)
+        // ★ B5 — 영어 후보. 한글 run이 없을 때만(C8), 이모지 칩은 없다(이모지는 한글 run에만). 툴바 우선순위·✕·커서 억제는 같은 게이트
+        let latinRun = inputController.currentLatinWord
+        if userEdited, let key = dismissedLatinKey, !EnglishDismissal.isStillDismissed(dismissedKey: key, currentRun: latinRun) {
+            dismissedLatinKey = nil
+        }
+        if currentWord.isEmpty, let latinRun, englishSuggestionsAllowedNow(secure: secure) && WordSuggestionGate.allowsWords(
+            isSecureTextEntry: secure, hasSnippet: snippet != nil, hasPasteChip: chip != nil, hasSelectedText: hasSelection,
+            isDismissed: dismissedLatinKey != nil, isSuppressedAfterCursorMove: suppressesWordSuggestionsAfterCursorMove) {
+            if englishSuggestionEngine == nil {
+                englishSuggestionEngine = SuggestionEngine.english(dictionary: BundledWordDictionary(resource: "words-en"))
+            }
+            let english = englishSuggestionEngine?.suggestions(
+                forWord: latinRun, limit: KeyboardMetrics.wordSuggestionLimit(hasBadge: badgeCount != nil, hasEmojiChips: false)) ?? []
+            candidates = english.map { WordSuggestionCandidate.english($0, typedRun: latinRun) }
+        }
 
         // 날짜 칩은 키마다 새로 계산돼 계산 시각(`computedAt`)만 바뀐다 — 내용이 같으면 다시 싣지 않는다
         // (뷰 갱신 낭비 방지). 값이 같다 = 같은 분/일이라 옛 계산 시각으로도 신선도 판정은 같다.
@@ -1039,6 +1075,14 @@ final class KeyboardViewController: UIInputViewController {
     /// ✕로 내린 추천단어 — 그 단어(접두)를 이어 치는 동안 억제되고, 단어가 끝나면 자동 해제
     /// (사용자 요청 2026-09-03). 키보드 재표시 시 초기화.
     private var dismissedSuggestionWord: String?
+
+    /// 영어 후보 게이트(B5 E5) — 설정·secure·모드(C4)·입력란(C13). 후보를 낼 때와 **탭할 때 다시**(C5) 같은 식을 본다
+    private func englishSuggestionsAllowedNow(secure: Bool) -> Bool {
+        guard let inputController else { return false }
+        return EnglishSuggestionGate.allows(
+            isEnglishContext: inputController.isEnglishSuggestionContext, field: englishFieldTraits,
+            settingEnabled: settings.allowsEnglishSuggestions(isSecureTextEntry: secure))
+    }
     /// ✕로 내린 채움글 칩의 꼬리 — **사용자 편집으로 꼬리가 바뀔 때만** 해제된다. 지우고 다시 치면
     /// 꼬리가 한 번 바뀌었다 돌아오므로 칩이 다시 뜬다(사용자 요청 2026-09-04: "6 지우고 다시 6 쳐도
     /// 칩이 나와야 한다"). 편집 없이 오는 변화 — 키보드 재표시·커서 이동·호스트 textDidChange 메아리 —
@@ -1073,6 +1117,9 @@ final class KeyboardViewController: UIInputViewController {
         }
         if viewState.pasteSuggestion == nil, !viewState.wordSuggestions.isEmpty, !inputController.currentWord.isEmpty {
             dismissedSuggestionWord = inputController.currentWord
+        } else if viewState.pasteSuggestion == nil, viewState.wordSuggestions.contains(where: \.isEnglish),
+                  let latinRun = inputController.currentLatinWord {
+            dismissedLatinKey = LatinWordRun.lookupKey(latinRun)   // E10 — 정규화 키로 억제
         }
         if viewState.pasteSuggestion != nil {
             // 이 클립보드를 소비 처리한다 — **다음 등장에도 다시 뜨지 않는다**(타입 변수).
@@ -1143,7 +1190,8 @@ final class KeyboardViewController: UIInputViewController {
             pressed: pressed, current: viewState.snippetSuggestion, tail: inputController.textTail)
     }
 
-    /// 무장한 칩에서 손을 뗐을 때·VoiceOver 「다른 후보 보기」 — 후보 목록을 **한 번** 계산해 자판 자리에 연다.
+    /// 칩이 **무장하는 순간**(R49 — 손가락은 아직 칩 위, 연 뒤 손을 떼면 아무 일 없음)·VoiceOver 「다른 후보 보기」 —
+    /// 후보 목록을 **한 번** 계산해 자판 자리에 연다. 툴바(칩)는 그대로 두고 자판 자리만 바꾸므로 진행 중인 칩 누름이 이어진다.
     /// VoiceOver 동작은 무장을 거치지 않으므로 무장과 같은 판정을 **다시** 본다. 후보가 2개 미만이면 열지 않는다(AC-42).
     private func openSnippetCandidatesPanel(pressed: SnippetSuggestion) {
         guard let viewState, let inputController, let snippetMatcher else { return }
@@ -1350,7 +1398,23 @@ final class KeyboardViewController: UIInputViewController {
     /// 미뤄 도착하고, 그 사이 첫 탭이 칩을 숨겼으면 두 번째 탭은 버린다). 둘째 층은 `replaceCurrentWord`의 꼬리
     /// 정합 검사다. 탭한 뒤에는 문서 글자가 바뀐 입력이 올 때까지 이모지 칩을 전부 숨긴다(Q10·D17 — 단어 칸은 원래 개수, D3).
     private func handleWordTap(_ candidate: WordSuggestionCandidate) {
-        if let emoji = candidate.emoji {
+        if let typedRun = candidate.typedRun {
+            // B5 C5·C6 — 지금 떠 있는 칩 ∧ 게이트 재판정 ∧ 꼬리 run == 표시 당시 run일 때만. 아니면 문서를 건드리지 않고 후보만 다시.
+            // 학습하지 않는다(C2 — `completeLatinWord`는 학습 콜백을 부르지 않는다)
+            guard let inputController, viewState?.wordSuggestions.contains(candidate) == true,
+                  englishSuggestionsAllowedNow(secure: textDocumentProxy.isSecureTextEntry == true)
+            else {
+                updateSuggestionBar()
+                return
+            }
+            let revision = inputController.documentRevision
+            guard inputController.completeLatinWord(candidate.insertionText, expectingRun: typedRun) else {
+                updateSuggestionBar()
+                return
+            }
+            playToolbarHaptic()
+            releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
+        } else if let emoji = candidate.emoji {
             guard let inputController, viewState?.wordSuggestions.contains(candidate) == true else { return }
             playToolbarHaptic()
             // 꼬리가 어긋났으면(호스트가 문서를 바꿈) 문서를 건드리지 않고 후보만 다시 낸다 — 채움글 칩과 같다
@@ -2398,6 +2462,13 @@ private final class ProxyTextOutput: TextOutput {
     /// 전체 접근과 무관하다(Apple 「Creating a custom keyboard」의 프록시 예제, 전체 접근 문서가 묶는 목록에 없음 — Context7 2026-10-08)
     var hasSelectedText: Bool {
         controller?.textDocumentProxy.selectedText?.isEmpty == false
+    }
+
+    /// B2-C — ⏎·⌫ 앞뒤 관찰 읽기. `InputController`가 메모리에서 비교만 한다(로그·파일·네트워크 없음 — 보안 규칙).
+    /// secure 입력란은 읽지 않는다(`documentTailForSync`와 같은 규칙)
+    var documentContextBeforeInput: String? {
+        guard let proxy = controller?.textDocumentProxy, proxy.isSecureTextEntry != true else { return nil }
+        return proxy.documentContextBeforeInput
     }
 }
 

@@ -14,10 +14,10 @@ import XCTest
 /// `LandscapeKeyboardMetricsTests` 와 달리 **여기는 컨테이너 앱을 띄울 수밖에 없다**(찍을 화면이
 /// 앱 안에 있다). `FirebaseApp.configure()` 가 돌므로 아래 셋을 모두 건다:
 ///
-/// 1. `-analyticsCollectionEnabled NO` · `-crashlyticsCollectionEnabled NO` — 실행 인자 도메인이
-///    `UserDefaults.standard` 저장값보다 **우선**한다. `AnalyticsConsent.applyStoredChoices()` 가
-///    이 값을 읽어 수집을 끈다.
-/// 2. 실행 **전에** 앱 컨테이너에 `measurement_enabled_state = 0` 을 미리 써 둔다(호출자 쪽 절차).
+/// 1. `-analyticsCollectionEnabled NO` · `-crashlyticsCollectionEnabled NO` — **이 인자로는 막히지 않는다.**
+///    실행 인자 도메인은 값을 **String**으로 주는데 `AnalyticsConsent.stored()`는 `object(forKey:) as? Bool`이라
+///    캐스팅에 실패해 기본 켬으로 떨어진다(`docs/release/firebase-on-hardening.md` B-검증). 인자는 해가 없어 남겨 둔다.
+/// 2. **실제 차단은 이것이다** — 실행 **전에** 앱 컨테이너에 `measurement_enabled_state = 0` 을 미리 써 둔다(호출자 쪽 절차).
 /// 3. 전용 시뮬레이터에서만 돌린다 — 남의 기기를 건드리지 않는다.
 ///
 /// ## 쓰는 법

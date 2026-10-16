@@ -15,6 +15,16 @@ public struct WordSuggestionCandidate: Equatable, Sendable {
     /// 단어 칩은 단어 그대로, 이모지 칩은 **원본 단어**로 읽는다(이모지 이름이 아니다 — D9로 값이 랜덤이라
     /// 이름표를 읽으면 칩마다 다른 말이 된다).
     public let accessibilityLabel: String
+    /// **영어 후보(B5 C5)** — 표시 당시의 원본 라틴 run. 탭할 때 지금 run이 이것과 같아야만 바꾼다(`completeLatinWord`).
+    /// nil이면 한글 단어 칩·이모지 칩이다. 영어 칩은 VoiceOver를 영어로 읽힌다(C10 — KeyboardUI)
+    public var typedRun: String? = nil
+
+    public var isEnglish: Bool { typedRun != nil }
+
+    /// 영어 후보 칩 — 단어를 그대로 넣고(후행 공백 없음, N11) 표시 당시 run을 싣는다
+    public static func english(_ word: String, typedRun: String) -> WordSuggestionCandidate {
+        WordSuggestionCandidate(sourceWord: word, insertionText: word, emoji: nil, accessibilityLabel: word, typedRun: typedRun)
+    }
 
     public static func word(_ word: String) -> WordSuggestionCandidate {
         WordSuggestionCandidate(sourceWord: word, insertionText: word, emoji: nil, accessibilityLabel: word)

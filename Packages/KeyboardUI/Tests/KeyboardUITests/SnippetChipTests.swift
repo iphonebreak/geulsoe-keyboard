@@ -21,14 +21,18 @@ struct ChipPressStateTests {
         case timer(canArm: Bool)
         case release(inside: Bool)
         case reset
+        /// 터치를 잃음 — 제스처가 끝났거나 시스템이 취소(`@GestureState` 복귀). 뷰는 손 뗌 처리 **뒤에** 부른다
+        case touchLost
     }
 
     struct Run {
         var release: ChipPressState.Release?
-        /// 무장 피드백(소리·FA일 때 진동) 횟수
+        /// 무장 횟수 — 칩 뷰는 이때 피드백(소리·FA일 때 진동) 1회와 **후보 패널 열기**를 함께 한다(R49)
         var feedback = 0
         /// 조립 지점에 무장을 물은 횟수
         var armQueries = 0
+        /// 터치를 잃어 버린 누름 수(뷰가 무장 타이머를 멈춘 횟수)
+        var discarded = 0
         var final = ChipPressState()
     }
 
@@ -48,22 +52,24 @@ struct ChipPressStateTests {
                 result.release = state.release(inside: inside)
             case .reset:
                 state.reset()
+            case .touchLost:
+                if state.touchLost() { result.discarded += 1 }
             }
         }
         result.final = state
         return result
     }
 
-    @Test("표 — 짧은 탭·무장 뒤 손 뗌·무장 불가·이동 취소·늦은 타이머", arguments: [
-        // (단계, 손 뗄 때 결과, 피드백 수, 무장 물음 수)
+    @Test("표 — 짧은 탭·무장 순간 열기 뒤 손 뗌·무장 불가·이동 취소·늦은 타이머", arguments: [
+        // (단계, 손 뗄 때 결과, 무장(= 피드백 + 패널 열기) 수, 무장 물음 수)
         ([Step.down, .release(inside: true)], ChipPressState.Release.tap, 0, 0),
         ([.down, .move(inside: true), .release(inside: true)], .tap, 0, 0),
-        // 450ms 무장 → 손 뗄 때 연다(무장 순간이 아니다) · 짧은 탭은 안 한다
-        ([.down, .timer(canArm: true), .release(inside: true)], .openCandidates, 1, 1),
+        // ★ R49 — 450ms 무장 순간 패널을 이미 열었다 → 손을 떼면 아무 일 없음(삽입·닫기 없음) · 짧은 탭은 안 한다
+        ([.down, .timer(canArm: true), .release(inside: true)], .none, 1, 1),
         // 무장 불가(후보 1개 · 퇴장 중 칩 · 꼬리 어긋남) — 점선·피드백 없이 지금 칩과 같게: 떼면 짧은 탭
         ([.down, .timer(canArm: false), .release(inside: true)], .tap, 0, 1),
         // 무장한 채 칩 안에서 움직여도 무장 유지
-        ([.down, .timer(canArm: true), .move(inside: true), .release(inside: true)], .openCandidates, 1, 1),
+        ([.down, .timer(canArm: true), .move(inside: true), .release(inside: true)], .none, 1, 1),
         // 칩 밖으로 끌려 나가면 둘 다 취소 — 다시 들어와도 되살리지 않는다
         ([.down, .move(inside: false), .release(inside: true)], .none, 0, 0),
         ([.down, .move(inside: false), .move(inside: true), .release(inside: true)], .none, 0, 0),
@@ -73,8 +79,8 @@ struct ChipPressStateTests {
         // 칩 밖에서 손을 떼면(이동 이벤트 없이) 아무것도 안 한다
         ([.down, .release(inside: false)], .none, 0, 0),
         ([.down, .timer(canArm: true), .release(inside: false)], .none, 1, 1),
-        // 타이머 두 번 — 피드백 1회
-        ([.down, .timer(canArm: true), .timer(canArm: true), .release(inside: true)], .openCandidates, 1, 1),
+        // 타이머 두 번 — 무장(피드백·열기) 1회
+        ([.down, .timer(canArm: true), .timer(canArm: true), .release(inside: true)], .none, 1, 1),
         // 뷰가 사라지며 정리(onDisappear) — 그 뒤 손 뗌은 무동작
         ([.down, .timer(canArm: true), .reset, .release(inside: true)], .none, 1, 1)
     ])
@@ -84,6 +90,33 @@ struct ChipPressStateTests {
         #expect(result.feedback == feedback)
         #expect(result.armQueries == armQueries)
         #expect(result.final.phase == .idle, "손을 떼면 언제나 처음으로")
+    }
+
+    /// R49 검증 2-2 — 시스템 취소(`touchesCancelled`)는 `onEnded` 없이 끝난다. 뷰는 `@GestureState`가 거짓이 되면 `touchLost()`를 부른다
+    @Test("시스템 취소 — 450ms 전이면 늦은 타이머가 패널을 열지 않는다(유령 패널 없음)")
+    func cancelledBeforeArm() {
+        let result = run([.down, .touchLost, .timer(canArm: true)])
+        #expect(result.discarded == 1)
+        #expect(result.feedback == 0 && result.armQueries == 0, "묻지도 열지도 않는다")
+        #expect(result.final.phase == .idle)
+        #expect(!result.final.showsPressed && !result.final.showsArmed)
+    }
+
+    @Test("시스템 취소 — 무장 뒤면 점선·눌림이 꺼지고 다음 탭이 삼켜지지 않는다")
+    func cancelledAfterArm() {
+        let result = run([.down, .timer(canArm: true), .touchLost, .down, .release(inside: true)])
+        #expect(result.feedback == 1, "무장(피드백·열기)은 취소 전 한 번")
+        #expect(result.discarded == 1)
+        #expect(result.release == .tap, "다음 탭은 짧은 탭으로 정상 처리")
+        #expect(result.final.phase == .idle)
+    }
+
+    @Test("정상 손 뗌 뒤 터치 잃음이 또 와도 무해(이중 정리) — 결과·횟수 그대로")
+    func touchLostAfterReleaseIsHarmless() {
+        let tap = run([.down, .release(inside: true), .touchLost])
+        #expect(tap.release == .tap && tap.discarded == 0 && tap.final.phase == .idle)
+        let armed = run([.down, .timer(canArm: true), .release(inside: true), .touchLost, .touchLost])
+        #expect(armed.release == ChipPressState.Release.none && armed.discarded == 0 && armed.feedback == 1)
     }
 
     @Test("손 뗀 뒤 늦게 온 타이머는 무장하지 않는다(취소가 늦어도 안전)")
@@ -245,6 +278,25 @@ struct SnippetChipRenderTests {
             let (r, g, b) = rgb(x: x, y: y)
             return max(r, g, b) <= 8
         }
+
+        // ★ 픽셀 비교는 **정확 일치가 아니라 문턱으로** 한다(AC-43 불안정 원인, 2026-10-16 · `docs/release/impl-v131-ac43-flaky.md`).
+        //   macOS `ImageRenderer`는 같은 뷰도 프로세스의 **처음 몇 번**은 글자 가장자리를 채널당 ±1 다르게 그린다(글리프 캐시가 데워지는
+        //   것으로 추정 — 진단: 같은 칩 41번 중 첫 2번만 다른 그림, 차이는 글자 영역 19px·최대 1). 그 전환이 두 그림 사이에 끼면
+        //   정확 일치 비교는 글자 픽셀을 「달라진 곳」으로 잘못 잡는다. 병렬 경합이 아니다 — 단독 실행에서도 30회 중 1회 났다.
+
+        /// 이 픽셀이 두 그림 사이에서 **뚜렷하게** 다른가 — 채널 차가 `threshold`(기본 32)를 넘을 때만. 렌더 흔들림(±1)은 무시한다
+        func differs(from other: Rendered, x: Int, y: Int, threshold: Int = 32) -> Bool {
+            let (r1, g1, b1) = rgb(x: x, y: y)
+            let (r2, g2, b2) = other.rgb(x: x, y: y)
+            return max(abs(Int(r1) - Int(r2)), abs(Int(g1) - Int(g2)), abs(Int(b1) - Int(b2))) > threshold
+        }
+
+        /// 같은 그림인가 — **크기가 같고** 모든 채널 차가 `tolerance`(기본 4) 이하. 렌더 흔들림(±1)만 봐준다 — 글자 하나·「+n」·색이
+        /// 바뀌면 차가 수십~수백이라 여전히 다르다고 본다
+        func nearlyEquals(_ other: Rendered, tolerance: Int = 4) -> Bool {
+            guard width == other.width, height == other.height else { return false }
+            return zip(pixels, other.pixels).allSatisfy { abs(Int($0) - Int($1)) <= tolerance }
+        }
         /// 파랑 성분 최댓값 — 팔레트에 파랑이 없으니 0 근처여야 한다
         var maxBlue: UInt8 {
             stride(from: 2, to: pixels.count, by: 4).map { pixels[$0] }.max() ?? 0
@@ -294,7 +346,7 @@ struct SnippetChipRenderTests {
         let new = try render(SnippetChipTitle.text(title: "새해 인사", alternativeCount: 0, theme: theme).fixedSize())
         let old = try render(Text("[\("새해 인사")]").font(.system(size: 14, weight: .bold))
             .foregroundStyle(theme.keyText).fixedSize())
-        #expect(new == old)
+        #expect(new.nearlyEquals(old), "제목이 U7 전과 같은 그림이다(렌더 흔들림 ±1만 봐준다)")
     }
 
     @Test("AC-42 자리 0 — 후보 1개 칩 폭·그림이 U7 전 칩과 같고, 「+n」이 붙으면 폭만 는다(기록)")
@@ -302,7 +354,7 @@ struct SnippetChipRenderTests {
         let theme = theme()
         let old = try render(legacyChip(suggestion(count: 0), theme: theme).fixedSize())
         let zero = try render(SnippetChipFace(suggestion: suggestion(count: 0), theme: theme).fixedSize())
-        #expect(zero == old, "후보 1개 칩은 U7 전과 같은 그림이다")
+        #expect(zero.nearlyEquals(old), "후보 1개 칩은 U7 전과 같은 그림이다(렌더 흔들림 ±1만 봐준다)")
         let two = try render(SnippetChipFace(suggestion: suggestion(count: 2), theme: theme).fixedSize())
         let seven = try render(SnippetChipFace(suggestion: suggestion(count: 7), theme: theme).fixedSize())
         #expect(two.height == old.height && seven.height == old.height, "높이는 그대로")
@@ -323,10 +375,11 @@ struct SnippetChipRenderTests {
         let pressed = try render(SnippetChipFace(suggestion: suggestion(count: 2), theme: theme,
                                                  isPressed: true).fixedSize().padding(margin))
         #expect(idle.width == armed.width && idle.height == armed.height, "오버레이는 레이아웃을 바꾸지 않는다")
-        // 무장 그림 − 눌림 그림 = 점선뿐. 점선 픽셀은 모두 칩 밖(평소 그림의 배경 자리)에 있다
+        // 무장 그림 − 눌림 그림 = 점선뿐. 점선 픽셀은 모두 칩 밖(평소 그림의 배경 자리)에 있다.
+        // 「다른 픽셀」은 **뚜렷하게** 다른 것만(채널 차 > 32) — 점선(노랑 70% ≈ 178)은 남고 글자 렌더 흔들림(±1)은 빠진다
         var ringPixels = 0
         for y in 0..<armed.height {
-            for x in 0..<armed.width where armed.rgb(x: x, y: y) != pressed.rgb(x: x, y: y) {
+            for x in 0..<armed.width where armed.differs(from: pressed, x: x, y: y) {
                 ringPixels += 1
                 #expect(idle.isBackground(x: x, y: y), "점선이 칩 안(\(x), \(y))에 그려졌다")
             }

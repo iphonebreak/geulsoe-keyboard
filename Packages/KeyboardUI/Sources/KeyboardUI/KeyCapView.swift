@@ -21,17 +21,21 @@ struct KeyCapView: View {
     /// (실기 피드백 2026-09-04: 12pt 흔들림 취소 규칙이 진입을 번번이 막았다).
     var onCursorDrag: ((Int) -> Void)? = nil
 
-    @State private var isPressed = false
+    /// 누름 상태 — 눌림·⌫ 반복·대체 입력 무장·트랙패드(`KeyCapPressState`). 시스템 터치 취소 때도 정리된다(아래 `isTouching`)
+    @State private var press = KeyCapPressState()
+    /// 손가락이 키에 닿아 있나 — `@GestureState`라 제스처가 끝나거나 **시스템이 취소하면 SwiftUI가 스스로 거짓으로 돌린다**.
+    /// 취소에는 `onEnded`가 오지 않아 `press`·Task가 남는다 — 이 값이 거짓이 되면 정리한다(1.3.1, `impl-v131-key-touch-cancel.md`)
+    @GestureState private var isTouching = false
+    /// 누름 회차 — 한 박자 미룬 정리가 그사이 시작된 **다음** 누름을 건드리지 않게
+    @State private var touchGeneration = 0
     /// 키의 실측 크기 — 확대 미리보기 크기를 여기서 낸다 (REQ-5).
     @State private var keySize: CGSize = .zero
     @State private var repeatTask: Task<Void, Never>?
 
-    // 길게 누르기 대체 입력 (문장부호 키 — . 길게 → ,). 무장되면 릴리스에 `key.alternate`가 나간다
-    @State private var alternateArmed = false
+    // 길게 누르기 대체 입력 (문장부호 키 — . 길게 → ,). 무장(`press.alternateArmed`)되면 릴리스에 `key.alternate`가 나간다
     @State private var alternateTask: Task<Void, Never>?
 
-    // 트랙패드 모드 상태
-    @State private var cursorMode = false
+    // 트랙패드 모드(`press.cursorMode`) 상태
     @State private var cursorModeTask: Task<Void, Never>?
     @State private var latestTranslation: CGFloat = 0
     /// 이미 커서 이동으로 소비한 수평 이동량
@@ -49,7 +53,7 @@ struct KeyCapView: View {
 
     /// 표면·미리보기에 보이는 라벨 — 대체 입력이 무장되면 그 라벨로 바뀌어 "지금 떼면 이게 들어간다"를 알린다
     private var displayLabel: String {
-        alternateArmed ? (alternateText ?? label) : label
+        press.alternateArmed ? (alternateText ?? label) : label
     }
 
     /// 길게 누르기 표시 문구 — 문자 키는 `alternateLabel`(그 문자), 문자 이벤트가 아닌 대체 입력
@@ -83,7 +87,7 @@ struct KeyCapView: View {
                         .lineLimit(1)
                         .padding(.top, 3)
                         .padding(.trailing, 5)
-                        .opacity(alternateArmed ? 0 : 1)
+                        .opacity(press.alternateArmed ? 0 : 1)
                         .allowsHitTesting(false)
                 }
             }
@@ -93,11 +97,23 @@ struct KeyCapView: View {
             ))
             .overlay(alignment: .top) {
                 // 스페이스는 미리보기를 띄우지 않는다 (사용자 요청 2026-09-03)
-                if isPressed, showsPreview, !key.isFunctionKey, key.event != .space {
+                if press.isPressed, showsPreview, !key.isFunctionKey, key.event != .space {
                     preview
                 }
             }
             .gesture(pressGesture)
+            // 터치가 끝났다(정상 손 뗌이든 시스템 취소든) — 상태 값만 본다(뷰 구조 불변). 남은 Task는 **바로** 끊고
+            // (⌫ 반복이 한 번도 더 지우지 않게 — 정상 손 뗌에서도 `onEnded`가 끊으므로 무해), 누름 상태는 한 박자 미뤄 버린다
+            .onChange(of: isTouching) { _, touching in
+                guard !touching else { return }
+                cancelPressTasks()
+                scheduleTouchLostCleanup()
+            }
+            // 자판 전환·키보드 내림으로 키가 사라지면 Task를 끊는다 — 예전엔 ⌫ 반복 Task가 프로세스가 끝날 때까지 남을 수 있었다
+            .onDisappear {
+                cancelPressTasks()
+                press.reset()
+            }
             .accessibilityLabel(accessibilityName)
             // 힌트는 연타 키에만 있다(나머지는 빈 문자열 = 읽지 않는다). 수식어만 — 표면 구조는 그대로다
             .accessibilityHint(KeyCapAccessibility.hint(for: key) ?? "")
@@ -130,10 +146,10 @@ struct KeyCapView: View {
             .minimumScaleFactor(0.7)
     }
 
-    private var faceUsesSymbol: Bool { cursorMode || key.symbol != nil }
+    private var faceUsesSymbol: Bool { press.cursorMode || key.symbol != nil }
 
     private var faceText: Text {
-        if cursorMode { return Text(Image(systemName: "arrow.left.and.right")) }
+        if press.cursorMode { return Text(Image(systemName: "arrow.left.and.right")) }
         if key.event == .shift {
             // 시프트 상태 표시 — Apple과 같이 once는 채운 화살표, 캡스락은 캡스락 심볼
             return Text(Image(systemName: isCapsLocked ? "capslock.fill" : (isShifted ? "shift.fill" : "shift")))
@@ -143,7 +159,7 @@ struct KeyCapView: View {
     }
 
     private var faceFontSize: CGFloat {
-        if cursorMode { return 18 }
+        if press.cursorMode { return 18 }
         // 기능 키 심볼(⌫·⏎·✓)은 22pt — 17pt는 작다는 피드백 (2026-09-07). 문자 키 심볼(천지인 스페이스)은 18
         if key.symbol != nil { return key.isFunctionKey ? 22 : 18 }
         if let size = key.labelSize { return CGFloat(size) }  // 자판 데이터가 정한 크기 (천지인 28)
@@ -156,7 +172,7 @@ struct KeyCapView: View {
 
     private var keyBackground: Color {
         let base = key.isFunctionKey ? theme.functionKey : theme.characterKey
-        return isPressed ? base.opacity(0.6) : base
+        return press.isPressed ? base.opacity(0.6) : base
     }
 
     /// **아이폰 문자 키 폭의 천장.** 아이폰은 가장 넓은 기기(440pt)에서도 문자 키가 38.9pt다
@@ -208,15 +224,18 @@ struct KeyCapView: View {
     /// 눌림 즉시 반응해야 하므로 DragGesture(minimumDistance: 0)를 쓴다.
     /// 백스페이스는 누르는 순간 1회 + 길게 누르면 반복. 스페이스는 400ms 누르고 있으면 트랙패드 모드 —
     /// 그 전에 움직여도 취소하지 않는다(진입 시점까지의 이동은 버린다). 400ms 전에 떼면 그냥 스페이스.
+    /// 판정(눌림·반복·무장·트랙패드·손 뗌·터치 잃음)은 `KeyCapPressState`가 한다 — 여기는 결과대로 부르기만 한다.
     private var pressGesture: some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($isTouching) { _, touching, _ in touching = true }
             .onChanged { value in
                 latestTranslation = value.translation.width
-                guard isPressed else {
-                    isPressed = true
+                if press.touchDown() {
+                    touchGeneration &+= 1
                     onPress?()
                     if key.event == .backspace {
                         onEvent(.backspace)
+                        press.startRepeating()
                         startBackspaceRepeat()
                     } else if key.event == .space, onCursorDrag != nil {
                         startCursorModeTimer()
@@ -225,7 +244,7 @@ struct KeyCapView: View {
                     }
                     return
                 }
-                if cursorMode {
+                if press.cursorMode {
                     // 8pt마다 문자 1개 — 소비한 만큼만 누적해 잔여 이동을 다음으로 넘긴다
                     let delta = value.translation.width - consumedTranslation
                     let steps = Int((delta / Self.cursorStep).rounded(.towardZero))
@@ -236,32 +255,43 @@ struct KeyCapView: View {
                 }
             }
             .onEnded { _ in
-                isPressed = false
-                repeatTask?.cancel()
-                repeatTask = nil
-                cursorModeTask?.cancel()
-                cursorModeTask = nil
-                if cursorMode {
-                    cursorMode = false  // 트랙패드 모드였으면 스페이스를 넣지 않는다
-                    return
-                }
-                alternateTask?.cancel()
-                alternateTask = nil
-                let armed = alternateArmed
-                alternateArmed = false
-                if key.event != .backspace {
-                    // 길게 눌러 무장됐으면 대체 입력(","·".com"), 아니면 본래 이벤트
-                    onEvent(armed ? (key.alternate ?? key.event) : key.event)
+                cancelPressTasks()
+                // 트랙패드였으면 스페이스를 넣지 않고, ⌫는 누를 때 이미 지웠다. 길게 눌러 무장됐으면 대체 입력(","·".com")
+                switch press.release(isBackspace: key.event == .backspace) {
+                case .primary: onEvent(key.event)
+                case .alternate: onEvent(key.alternate ?? key.event)
+                case .none: break
                 }
             }
     }
 
+    /// 누름에 딸린 Task(⌫ 반복·대체 입력 타이머·트랙패드 타이머)를 모두 끊는다 — 여러 번 불러도 무해
+    private func cancelPressTasks() {
+        repeatTask?.cancel()
+        repeatTask = nil
+        cursorModeTask?.cancel()
+        cursorModeTask = nil
+        alternateTask?.cancel()
+        alternateTask = nil
+    }
+
+    /// 터치가 끝난 뒤 누름 상태 정리 — **한 박자 미뤄** 손 뗌(`onEnded`)이 먼저 처리되게 한다. 정상 손 뗌이면 그때 이미
+    /// 처음 상태라 `touchLost()`가 아무것도 안 한다(이중 정리 무해 — 탭을 먼저 지워 버리는 순서가 생기지 않는다).
+    /// 시스템 취소면 남은 누름을 **아무 입력 없이** 버린다(무장된 대체 입력도 넣지 않는다). 그사이 새 누름이 시작됐으면 건드리지 않는다
+    private func scheduleTouchLostCleanup() {
+        let generation = touchGeneration
+        Task { @MainActor in
+            guard generation == touchGeneration, press.touchLost() else { return }
+            cancelPressTasks()
+        }
+    }
+
     /// 길게 누르기 — 450ms 뒤 대체 입력으로 무장한다. 표면 라벨이 바뀌고 키 피드백이 1회 난다.
+    /// 누르고 있을 때만 무장한다 — 취소·손 뗌 뒤 늦게 깬 타이머는 아무것도 안 한다(`armAlternate`)
     private func startAlternateTimer() {
         alternateTask = Task {
             try? await Task.sleep(for: Self.alternateDelay)
-            guard !Task.isCancelled else { return }
-            alternateArmed = true
+            guard !Task.isCancelled, press.armAlternate() else { return }
             onPress?()
         }
     }
@@ -269,7 +299,8 @@ struct KeyCapView: View {
     private func startBackspaceRepeat() {
         repeatTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
-            while !Task.isCancelled {
+            // 루프 조건에 누름 상태도 본다 — Task 취소가 늦어도 손가락이 떠났으면(취소 포함) 더 지우지 않는다
+            while !Task.isCancelled, press.repeatTickAllowed {
                 onPress?()
                 onEvent(.backspace)
                 try? await Task.sleep(for: .milliseconds(80))
@@ -280,9 +311,8 @@ struct KeyCapView: View {
     private func startCursorModeTimer() {
         cursorModeTask = Task {
             try? await Task.sleep(for: Self.cursorModeDelay)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, press.enterCursorMode() else { return }   // 누르고 있을 때만 진입
             consumedTranslation = latestTranslation  // 진입 시점까지의 흔들림은 버린다
-            cursorMode = true
             onPress?()  // 진입 피드백 (진동·클릭)
         }
     }

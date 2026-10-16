@@ -1,0 +1,23 @@
+# 철자 오류형(아포스트로피 생략) — 정확 일치로 뺀다. 교정(dont→don't)은 하지 않는다(계획 §3-8 ⑤)
+dont
+im
+cant
+wont
+hes
+whats
+theres
+thats
+didnt
+doesnt
+isnt
+wasnt
+arent
+couldnt
+wouldnt
+shouldnt
+werent
+hasnt
+hadnt
+ive
+youre
+shes

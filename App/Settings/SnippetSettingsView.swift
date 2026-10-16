@@ -692,9 +692,10 @@ struct SnippetPackDetailView: View {
 
 // MARK: - 날짜·시간 팩 (v1.2.0, PDR `date-snippet-pack.md` 4·8절)
 
-/// 출력 형식 고르기 — 세 형식을 **실제 모양**으로 보여 준다.
+/// 출력 형식 고르기 — 네 형식을 **실제 모양**으로 보여 준다.
 ///
-/// ★ 예시 문자열은 키보드의 출력 지점(`KeyboardCore.DateSnippetFormatter`)과 **같은 모양이어야 한다.**
+/// ★ 예시 문자열은 키보드의 출력 지점(`KeyboardCore.DateSnippetFormatter`)이 「지금 날짜 시간」에 넣는
+/// **글자와 똑같아야 한다** — 구분용 가운뎃점(·)도 넣지 않는다(실제 출력엔 없다, 사용자 결정 2026-10-13).
 /// 앱 타깃은 KeyboardCore를 링크하지 않아(의존성 추가는 이번 범위 밖) 여기 문자열로 적었다 —
 /// 형식을 바꾸면 이 예시도 함께 고친다. 기준 시각은 2026-09-27 21:54(PDR 4-1절 표와 같다).
 private struct DateSnippetStylePicker: View {
@@ -719,15 +720,16 @@ private struct DateSnippetStylePicker: View {
         } header: {
             Text("출력 형식")
         } footer: {
-            Text("규범형·관행형은 24시간, 한글형은 오전·오후로 써요. 초는 넣지 않아요.")
+            Text("규범형·관행형·국제 표준은 24시간, 한글형은 오전·오후로 써요. 초는 넣지 않아요.")
         }
     }
 
     private static func example(_ style: DateSnippetStyle) -> String {
         switch style {
-        case .formal: "2026. 9. 27. · 21:54"
-        case .common: "2026.09.27 · 21:54"
-        case .korean: "2026년 9월 27일 · 오후 9시 54분"
+        case .formal: "2026. 9. 27. 21:54"
+        case .common: "2026.09.27 21:54"
+        case .korean: "2026년 9월 27일 오후 9시 54분"
+        case .iso8601: "2026-09-27 21:54"
         }
     }
 }
