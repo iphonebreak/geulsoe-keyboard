@@ -353,6 +353,19 @@ struct ToolbarTab: View {
                 }
             }
             .disabled(!settings.suggestionsEnabled)
+            // 영어 추천단어(B5, PDR `english-word-suggestions.md` N12 — 기본 켬). 이모지 칩과 같이 추천단어 아래에 두고, 추천단어를 끄면
+            // 값은 지키고 흐리게 비활성. 영어는 학습하지 않으므로(N10) 「학습 단어 초기화」와 무관하다. 전체 접근 불필요
+            Toggle(isOn: $settings.englishSuggestionsEnabled) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("영어 추천단어")
+                    Text(settings.suggestionsEnabled
+                         ? "영어로 치는 동안 단어 앞부분으로 완성 단어를 보여 줘요."
+                         : "추천단어가 켜져 있을 때만 동작해요.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .disabled(!settings.suggestionsEnabled)
             // 추천단어를 꺼도 초기화는 가능해야 한다 — 기능을 끄는 사용자일수록
             // 남은 학습 데이터를 지우고 싶어 한다
             Button("학습 단어 초기화", role: .destructive) {

@@ -9,6 +9,10 @@ import FirebaseCrashlytics
 /// 처리방침 3장이 스스로 "현재 버전에는 앱 내 끄기 스위치가 없습니다"라고 적어 두는 상태였다.
 /// v1.0.1에서 그 문장을 지우고 실제 스위치를 넣는다 (사용자 결정 2026-09-14).
 ///
+/// **v1.3.1부터 UI가 없다** — 사장님 결정 N20(2026-10-14): 정보 탭의 끄기 화면을 지우고 수집은 유지한다.
+/// **이 타입과 저장 키는 남긴다** — 이전 버전에서 끈 사용자의 선택을 매 실행 재적용하기 위해서다(`TadakApp`의 호출).
+/// 기본값 켬·키·`stored`·`applyStoredChoices`는 바꾸지 않는다(바꾸면 수집 의미가 바뀐다). 근거 `docs/release/v131-analytics-optout-removal.md` §2
+///
 /// **기본값은 켬이다** (사용자 결정). `Info.plist`에 `FIREBASE_ANALYTICS_COLLECTION_ENABLED`·
 /// `FirebaseCrashlyticsCollectionEnabled` 게이트를 넣지 않는 이유가 이것이다 — 두 키는 **초기 상태를
 /// 끔으로 만드는** 키라서, 넣는 순간 기본값 결정이 뒤집힌다. 넣지 않는 것이 결정 사항이다.
@@ -48,7 +52,7 @@ enum AnalyticsConsent {
     ///
     /// Firebase SDK 자체도 두 값을 영구 저장하므로 매 실행 재적용은 원칙적으로 중복이다.
     /// 그래도 부르는 이유: 우리 `UserDefaults` 값이 **단일 진실 원천**이 되어 UI 스위치 위치와
-    /// 실제 수집 상태가 갈라질 여지를 없앤다.
+    /// 실제 수집 상태가 갈라질 여지를 없앤다. (v1.3.1부터 UI는 없고, 이전에 끈 값을 지키는 역할만 남았다 — N20)
     static func applyStoredChoices() {
         Analytics.setAnalyticsCollectionEnabled(analyticsEnabled)
 

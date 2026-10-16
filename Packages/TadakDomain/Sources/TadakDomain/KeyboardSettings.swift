@@ -50,6 +50,9 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// Q6·D1·D2). **추천단어(`suggestionsEnabled`)가 켜져 있을 때만 뜻이 있다** — 꺼져 있으면 설정 화면이 흐리게
     /// 비활성으로 보여 주고 값은 지킨다. 전체 접근 불필요(번들 사전 읽기뿐). 기본 켬은 출시 게이트(5-2절) 조건부다.
     public var emojiWordSuggestionsEnabled: Bool
+    /// 영어 추천단어(B5, 기본 켬 — 사용자 결정 N12, PDR `english-word-suggestions.md`). **추천단어(`suggestionsEnabled`)가 켜져
+    /// 있을 때만 뜻이 있다.** 영어 입력은 학습하지 않는다(N10). 전체 접근 불필요(번들 사전 읽기뿐)
+    public var englishSuggestionsEnabled: Bool
     /// 복사한 인증번호를 툴바 칩으로 제안. **전체 접근이 있어야만 동작한다** —
     /// 없으면 조용히 비표시 (PDR verification-code-paste).
     public var verificationCodeSuggestionsEnabled: Bool
@@ -225,6 +228,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         symbolKeyboardStyle: SymbolKeyboardStyle = .qwerty,
         suggestionsEnabled: Bool = true,
         emojiWordSuggestionsEnabled: Bool = true,
+        englishSuggestionsEnabled: Bool = true,
         verificationCodeSuggestionsEnabled: Bool = true,
         pasteSuggestionEnabled: Bool = true,
         // **기본값이 끔이다** (사용자 결정 2026-09-11). 클립보드 기록은 사용자가 복사한 내용을
@@ -271,6 +275,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.symbolKeyboardStyle = symbolKeyboardStyle
         self.suggestionsEnabled = suggestionsEnabled
         self.emojiWordSuggestionsEnabled = emojiWordSuggestionsEnabled
+        self.englishSuggestionsEnabled = englishSuggestionsEnabled
         self.verificationCodeSuggestionsEnabled = verificationCodeSuggestionsEnabled
         self.pasteSuggestionEnabled = pasteSuggestionEnabled
         self.clipboardHistoryEnabled = clipboardHistoryEnabled
@@ -300,6 +305,11 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// (PDR `emoji-word-suggestion.md` 3-2절·5-3절, D2). 채움글 칩·✕ 억제 같은 툴바 우선순위는
     /// KeyboardCore `WordSuggestionGate`가 따로 본다. 식을 여기 두는 이유는 `allowsBibleSearch`와 같다 —
     /// 익스텐션 타깃은 `swift test`가 닿지 않는다. 전체 접근과 무관하다(번들 사전 읽기뿐 — 7절).
+    /// 영어 후보를 계산해도 되는가 — `추천단어 ∧ 영어 추천단어 ∧ !secure`. 입력란·모드 조건은 KeyboardCore `EnglishSuggestionGate`
+    public func allowsEnglishSuggestions(isSecureTextEntry: Bool?) -> Bool {
+        suggestionsEnabled && englishSuggestionsEnabled && isSecureTextEntry != true
+    }
+
     public func allowsEmojiChips(isSecureTextEntry: Bool?) -> Bool {
         suggestionsEnabled && emojiWordSuggestionsEnabled && isSecureTextEntry != true
     }
@@ -339,6 +349,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         symbolKeyboardStyle = (try? container.decodeIfPresent(SymbolKeyboardStyle.self, forKey: .symbolKeyboardStyle)) ?? base.symbolKeyboardStyle
         suggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .suggestionsEnabled) ?? base.suggestionsEnabled
         emojiWordSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .emojiWordSuggestionsEnabled) ?? base.emojiWordSuggestionsEnabled
+        englishSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .englishSuggestionsEnabled) ?? base.englishSuggestionsEnabled
         verificationCodeSuggestionsEnabled = try container.decodeIfPresent(Bool.self, forKey: .verificationCodeSuggestionsEnabled) ?? base.verificationCodeSuggestionsEnabled
         pasteSuggestionEnabled = try container.decodeIfPresent(Bool.self, forKey: .pasteSuggestionEnabled) ?? base.pasteSuggestionEnabled
         clipboardHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .clipboardHistoryEnabled) ?? base.clipboardHistoryEnabled
@@ -586,11 +597,14 @@ public enum SymbolKeyboardStyle: String, Codable, CaseIterable, Sendable {
 /// | `formal` 규범형(기본) | `2026. 9. 27.` | `21:54` |
 /// | `common` 관행형 | `2026.09.27` | `21:54` |
 /// | `korean` 한글형 | `2026년 9월 27일` | `오후 9시 54분` |
+/// | `iso8601` 국제 표준(v1.3.1) | `2026-09-27` | `21:54` |
 ///
-/// 규범·관행형은 24시간제, 한글형만 12시간제 — **기기의 12/24시간 설정은 읽지 않는다.**
+/// 규범·관행형·국제 표준은 24시간제, 한글형만 12시간제 — **기기의 12/24시간 설정은 읽지 않는다.**
 /// 문자열 조립은 KeyboardCore `DateSnippetFormatter` 한 곳뿐이다.
+///
+/// 저장 값(raw value)은 바꾸지 않는다 — 모르는 값은 규범형으로 읽히므로 이름을 바꾸면 고른 형식이 조용히 사라진다.
 public enum DateSnippetStyle: String, Codable, CaseIterable, Sendable {
-    case formal, common, korean
+    case formal, common, korean, iso8601
 
     /// 설정 화면에 보이는 이름
     public var displayName: String {
@@ -598,6 +612,7 @@ public enum DateSnippetStyle: String, Codable, CaseIterable, Sendable {
         case .formal: "규범형"
         case .common: "관행형"
         case .korean: "한글형"
+        case .iso8601: "국제 표준(ISO 8601)"
         }
     }
 }

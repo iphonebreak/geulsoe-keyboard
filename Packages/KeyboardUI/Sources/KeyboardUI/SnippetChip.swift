@@ -1,8 +1,8 @@
 import SwiftUI
 import KeyboardCore
 
-// 채움글 칩 — 짧은 탭은 첫 후보, 길게(450ms) 눌러 무장한 뒤 손을 떼면 겹치는 후보 패널(U7).
-// 계약: PDR `docs/design-reviews/external-snippet-packs.md` 10-6 ④⑤⑦ · AC-42·43·46 · R32 (가)
+// 채움글 칩 — 짧은 탭은 첫 후보, 길게(450ms) 눌러 **무장하는 순간** 겹치는 후보 패널(U7 · R49 — 연 뒤 손을 떼면 아무 일 없음).
+// 계약: PDR `docs/design-reviews/external-snippet-packs.md` 10-6 ④⑤⑦ · AC-42·43·46 · R32 (가) · R49
 // 지시서: `docs/design-reviews/external-snippet-packs-u7-plan.md` 2절 ② · 6절 R2·R3·R6
 //
 // ★ **누르는 도중 서브트리 구조를 바꾸지 않는다**(CLAUDE.md 작업 원칙 — 트랙패드 버그 2026-09-05).
@@ -11,12 +11,14 @@ import KeyboardCore
 //   표면(`SnippetChipFace`)에는 `if`·`ForEach`·`AnyView`가 없다 — `SnippetChipRenderTests`가 뷰 타입으로 고정한다.
 
 /// 칩 누름 상태기계 — 제스처 뷰는 `swift test`가 누를 수 없어 판정만 값 타입으로 뗐다(`ChipPressStateTests`).
+/// **단계마다 할 일은 KeyboardCore `SnippetCandidateGate`의 R49 판정**(`armsAndOpens`·`release`·`cancels`)이 정한다 — 여기는 단계만 쥔다.
 ///
 /// ```
-/// idle ─손 닿음→ pressed ─450ms·조립 지점 허락→ armed
-///                  │ 칩 밖으로 끌림              │ 칩 밖으로 끌림
+/// idle ─손 닿음→ pressed ─450ms·조립 지점 허락→ armed(그 순간 피드백 + 후보 패널 열기, R49)
+///                  │ 칩 밖으로 끌림              │ 칩 밖으로 끌림(이미 연 패널은 그대로)
 ///                  └──────────→ cancelled ←─────┘
-/// 손 뗌(칩 안): pressed → 짧은 탭 · armed → 후보 패널 · cancelled → 아무것도 · 그 뒤 idle
+/// 손 뗌(칩 안): pressed → 짧은 탭 · armed → 아무 일 없음(R49) · cancelled → 아무것도 · 그 뒤 idle
+/// 터치 잃음(시스템 취소 — `onEnded` 없음): 어느 단계든 → idle, 아무 동작 없음(`touchLost`, R49 검증 2-2)
 /// ```
 ///
 /// - **무장은 조립 지점이 허락할 때만**(`canArm`) — 퇴장 트랜지션(0.28초) 중인 칩도 히트 테스트를 받아 450ms 뒤엔
@@ -26,21 +28,9 @@ import KeyboardCore
 ///   (지시서 F7 · 7절 제안 1). 칩 경계에서 `cancelMargin`만큼은 봐준다 — 실기로 조정할 값이다.
 struct ChipPressState: Equatable {
 
-    enum Phase: Equatable {
-        case idle
-        case pressed
-        case armed
-        case cancelled
-    }
-
-    /// 손을 뗄 때 할 일
-    enum Release: Equatable {
-        case none
-        /// 짧은 탭 — 칩의 첫 후보를 넣는다(지금 그대로)
-        case tap
-        /// 무장 뒤 손 뗌 — 후보 패널을 연다(무장 순간이 아니다, v3.2 · AC-43)
-        case openCandidates
-    }
+    typealias Phase = SnippetChipPressPhase
+    /// 손을 뗄 때 할 일 — 짧은 탭이거나 아무것도 아니다(패널 열기는 무장 순간, R49)
+    typealias Release = SnippetChipRelease
 
     /// 무장까지 — 키 길게 누르기와 공유(AC-43)
     static let armDelay: Duration = KeyboardMetrics.longPressDelay
@@ -60,32 +50,35 @@ struct ChipPressState: Equatable {
         phase = .pressed
     }
 
-    /// 손가락이 움직였다. **지금 막 취소됐으면 true** — 뷰가 무장 타이머를 멈춘다
+    /// 손가락이 움직였다. **지금 막 취소됐으면 true** — 뷰가 무장 타이머를 멈춘다. 이미 연 패널은 닫지 않는다(`cancels` 주석)
     @discardableResult
     mutating func move(inside: Bool) -> Bool {
-        guard !inside, phase == .pressed || phase == .armed else { return false }
+        guard SnippetCandidateGate.cancels(phase: phase, inside: inside) else { return false }
         phase = .cancelled
         return true
     }
 
-    /// 450ms가 지났다. **지금 막 무장했으면 true** — 뷰가 피드백(소리·FA일 때 진동)을 1회 낸다.
+    /// 450ms가 지났다. **지금 막 무장했으면 true** — 뷰가 그 순간 피드백(소리·FA일 때 진동) 1회와 **후보 패널 열기**를 한다(R49).
     /// `canArm`은 누르고 있는 동안에만 묻는다(취소·손 뗀 뒤 늦은 타이머는 조립 지점을 부르지 않는다)
     mutating func timerFired(canArm: () -> Bool) -> Bool {
-        guard phase == .pressed, canArm() else { return false }
+        guard SnippetCandidateGate.armsAndOpens(phase: phase, canArm: canArm) else { return false }
         phase = .armed
         return true
     }
 
-    /// 손을 뗐다 — 칩 안에서 뗐을 때만 무엇이든 한다. 언제나 idle로 돌아간다
+    /// 손을 뗐다 — 누름인 채 칩 안에서 뗐을 때만 짧은 탭. 무장 뒤 떼기는 아무 일 없음(R49). 언제나 idle로 돌아간다
     mutating func release(inside: Bool) -> Release {
-        let result: Release
-        switch phase {
-        case .pressed: result = inside ? .tap : .none
-        case .armed: result = inside ? .openCandidates : .none
-        case .idle, .cancelled: result = .none
-        }
+        let result = SnippetCandidateGate.release(phase: phase, inside: inside)
         phase = .idle
         return result
+    }
+
+    /// 터치를 잃었다(제스처 끝 또는 시스템 취소, R49 검증 2-2) — 손 뗌이 처리하지 않은 누름을 아무 동작 없이 버린다.
+    /// **지금 막 버렸으면 true** — 뷰가 무장 타이머를 멈춘다. 정상 손 뗌 뒤엔 이미 idle이라 false(이중 정리 무해)
+    mutating func touchLost() -> Bool {
+        guard SnippetCandidateGate.discardsOnTouchLost(phase: phase) else { return false }
+        phase = .idle
+        return true
     }
 
     /// 뷰가 사라짐(칩 교체·퇴장 끝) — 진행 중이던 누름을 버린다
@@ -202,13 +195,18 @@ struct SnippetChip: View {
     /// 이 칩이 쥔 값은 누르기 시작한 때의 것이라 「+n」이 그새 바뀌었을 수 있다 — 칩을 가리키는 데(trigger)만 쓰고 개수는 지금 칩에서 본다.
     /// nil이면 길게 누르기가 없다(배선 전 — U7 전 칩과 같다)
     var onArm: (() -> Bool)? = nil
-    /// 무장 뒤 손 뗌·VoiceOver 동작 — 후보 패널을 연다. nil이면 길게 누르기가 없다
+    /// 무장 순간(R49)·VoiceOver 동작 — 후보 패널을 연다. nil이면 길게 누르기가 없다
     var onOpenCandidates: (() -> Void)? = nil
     /// 무장 피드백 — 키 터치다운과 같은 콜백(소리, 진동은 Full Access일 때만 — 조립 지점 규칙 그대로, 10-6 ⑤)
     var onPress: (() -> Void)? = nil
 
     @State private var press = ChipPressState()
     @State private var armTask: Task<Void, Never>?
+    /// 손가락이 칩에 닿아 있나 — `@GestureState`라 제스처가 끝나거나 **시스템이 취소하면 SwiftUI가 스스로 거짓으로 돌린다**.
+    /// `press`(`@State`)는 취소 때 `onEnded`가 오지 않아 그대로 남는다 — 이 값이 거짓이 되면 남은 누름을 버린다(R49 검증 2-2)
+    @GestureState private var isTouching = false
+    /// 누름 회차 — 한 박자 미룬 정리가 그사이 시작된 **다음** 누름을 건드리지 않게
+    @State private var touchGeneration = 0
     /// 칩 실측 크기 — 손가락이 칩 밖으로 나갔는지 본다. **항상 있는 배경**이라 구조를 바꾸지 않는다(키캡 선례)
     @State private var size: CGSize = .zero
 
@@ -228,6 +226,10 @@ struct SnippetChip: View {
             )
             .contentShape(Capsule())
             .gesture(pressGesture)
+            // 터치가 끝났다(정상 손 뗌이든 시스템 취소든) — 상태 값만 본다(뷰 구조 불변)
+            .onChange(of: isTouching) { _, touching in
+                if !touching { scheduleTouchLostCleanup() }
+            }
             // 칩이 `.id(title)` 교체·퇴장으로 사라지면 타이머·누름을 버린다(새는 작업 없음)
             .onDisappear {
                 armTask?.cancel()
@@ -253,8 +255,10 @@ struct SnippetChip: View {
     /// 눌림 즉시 반응하도록 키캡과 같은 `DragGesture(minimumDistance: 0)`. 판정은 `ChipPressState`가 한다
     private var pressGesture: some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($isTouching) { _, touching, _ in touching = true }
             .onChanged { value in
                 if press.phase == .idle {
+                    touchGeneration &+= 1
                     press.touchDown()
                     if acceptsLongPress { startArmTimer() }
                 } else if press.move(inside: ChipPressState.isInside(value.location, size: size)) {
@@ -263,15 +267,19 @@ struct SnippetChip: View {
             }
             .onEnded { value in
                 cancelArmTimer()
+                // 무장(= 패널을 이미 연) 뒤 손 뗌은 `.none` — 삽입도 닫기도 없다(R49). 떼는 순간 처리는 이 한 곳뿐이다
                 switch press.release(inside: ChipPressState.isInside(value.location, size: size)) {
                 case .tap: onTap()
-                case .openCandidates: onOpenCandidates?()
                 case .none: break
                 }
             }
     }
 
-    /// 450ms 뒤 조립 지점에 묻고, 허락되면 무장(점선)과 피드백 1회
+    /// 450ms 뒤 조립 지점에 묻고, 허락되면 무장(점선)·피드백 1회·**후보 패널 열기**(R49 — 손가락은 아직 칩 위).
+    ///
+    /// ★ 누르는 중 서브트리 불변 — 여기서 바뀌는 것은 이 칩의 `@State`(점선 투명도)와 조립 지점의 패널 상태뿐이다. 패널은
+    /// 루트 `VStack`의 **둘째 자식**(자판 자리)만 바꾸고 첫째 자식인 툴바와 이 칩(`.id(snippet.title)` 그대로)은 같은 뷰로 남아
+    /// 진행 중인 `DragGesture`가 이어진다. 패널 열기는 조립 지점에서 한 박자 미뤄(`DispatchQueue.main.async`) 이 콜백 밖에서 일어난다
     private func startArmTimer() {
         armTask?.cancel()
         armTask = Task {
@@ -279,7 +287,19 @@ struct SnippetChip: View {
             guard !Task.isCancelled else { return }
             if press.timerFired(canArm: { onArm?() ?? false }) {
                 onPress?()
+                onOpenCandidates?()
             }
+        }
+    }
+
+    /// 터치가 끝난 뒤 정리 — **한 박자 미뤄** 손 뗌(`onEnded`)이 먼저 처리되게 한다. 정상 손 뗌이면 그때 이미 idle이라
+    /// `touchLost()`가 아무것도 안 한다(이중 정리 무해 — 짧은 탭을 먼저 지워 버리는 순서가 생기지 않는다). 시스템 취소면 남은 누름을
+    /// 버리고 무장 타이머를 멈춘다 — 유령 패널·다음 탭 삼킴이 없다. 그사이 새 누름이 시작됐으면(회차가 바뀜) 건드리지 않는다
+    private func scheduleTouchLostCleanup() {
+        let generation = touchGeneration
+        Task { @MainActor in
+            guard generation == touchGeneration, press.touchLost() else { return }
+            cancelArmTimer()
         }
     }
 
