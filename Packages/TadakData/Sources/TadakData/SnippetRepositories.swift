@@ -45,6 +45,11 @@ public struct AppGroupSnippetRepository: SnippetRepository {
         self.suiteName = suiteName
     }
 
+    /// 저장된 JSON 그대로 — 키보드 로더가 앞부분만 디코드한다(B1 가′). 접근 불가·데이터 없음이면 nil
+    public func storedData() -> Data? {
+        UserDefaults(suiteName: suiteName)?.data(forKey: Self.storageKey)
+    }
+
     /// 사용자 문구를 읽는다. 접근 불가·데이터 없음이면 빈 배열 — 실패하지 않는다.
     public func entries() -> [SnippetEntry] {
         guard let defaults = UserDefaults(suiteName: suiteName),
