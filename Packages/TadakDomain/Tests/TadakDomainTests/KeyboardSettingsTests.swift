@@ -738,3 +738,34 @@ struct EmojiChipGateTests {
         #expect(KeyboardSettings.default.allowsEmojiChips(isSecureTextEntry: nil))
     }
 }
+
+/// 백로그 14 (가) — 이전 버전에서 이용 분석을 끈 사용자는 키보드가 종료 흔적을 만들지 않는다(N21, PDR 2-8 ①)
+@Suite("설정 — 키보드 종료 흔적")
+struct KeyboardExitTraceSettingTests {
+
+    @Test("기본은 켬, 이 키가 없는 옛 저장분도 켬으로 읽는다 — 다른 값은 그대로")
+    func exitTraceEnabledDefaultsTrueAndDecodesFromOldSavedSettings() throws {
+        #expect(KeyboardSettings.default.keyboardExitTraceEnabled == true)
+        let legacy = Data(#"{"suggestionsEnabled":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
+        #expect(decoded.keyboardExitTraceEnabled == true)
+        #expect(decoded.suggestionsEnabled == false)
+    }
+
+    @Test("끈 값은 저장·읽기에서 살아남는다")
+    func exitTraceEnabledRoundTrips() throws {
+        let off = KeyboardSettings.default.withExitTraceEnabled(false)
+        let roundTrip = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(off))
+        #expect(roundTrip.keyboardExitTraceEnabled == false)
+        #expect(roundTrip == off)
+    }
+
+    @Test("withExitTraceEnabled는 복사본을 돌려주고 원본은 그대로")
+    func withExitTraceEnabledReturnsCopyAndLeavesOriginalUnchanged() {
+        let original = KeyboardSettings.default
+        let copy = original.withExitTraceEnabled(false)
+        #expect(original.keyboardExitTraceEnabled == true)
+        #expect(copy.keyboardExitTraceEnabled == false)
+        #expect(copy.withExitTraceEnabled(true) == original)
+    }
+}

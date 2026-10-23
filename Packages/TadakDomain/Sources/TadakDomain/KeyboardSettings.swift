@@ -81,6 +81,10 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     public var emojiHistoryEnabled: Bool
     /// 이모지 기록 초기화 신호 — `learningResetToken`과 같은 방식. 끄면 +1.
     public var emojiHistoryResetToken: Int
+    /// 키보드가 종료 흔적(「열린 표시」·종료 의심 기록·카운터)을 만들어도 되는가 (기본 켬, 1.3.2 백로그 14 (가), 보안 규칙 N21).
+    /// 설정 화면 스위치가 아니다 — 앱이 **이전 버전에서 이용 분석을 끈 선택**을 여기에 옮겨 적는다(PDR `keyboard-crashlytics.md` 2-8 ①).
+    /// 키보드는 `false`를 읽으면 표시·대기·카운터를 지우고 새로 만들지 않는다. 앱→키보드 읽기라 전체 접근과 무관하다.
+    public var keyboardExitTraceEnabled: Bool
     /// 끈 내장 채움글 팩 id 목록 (`"bible"`, `"anthem"`). 옵트아웃이라 새 팩은 기본 켬.
     public var disabledSnippetPacks: [String]
     /// 날짜·시간 채움글 팩의 출력 형식 (v1.2.0, PDR `date-snippet-pack.md` 4절). 기본 **규범형**.
@@ -241,6 +245,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         learningResetToken: Int = 0,
         emojiHistoryEnabled: Bool = true,
         emojiHistoryResetToken: Int = 0,
+        keyboardExitTraceEnabled: Bool = true,
         snippetsEnabled: Bool = true,
         bibleSnippetPrefixEnabled: Bool = true,
         disabledSnippetPacks: [String] = [],
@@ -282,6 +287,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.learningResetToken = learningResetToken
         self.emojiHistoryEnabled = emojiHistoryEnabled
         self.emojiHistoryResetToken = emojiHistoryResetToken
+        self.keyboardExitTraceEnabled = keyboardExitTraceEnabled
         self.snippetsEnabled = snippetsEnabled
         self.bibleSnippetPrefixEnabled = bibleSnippetPrefixEnabled
         self.disabledSnippetPacks = disabledSnippetPacks
@@ -312,6 +318,13 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
 
     public func allowsEmojiChips(isSecureTextEntry: Bool?) -> Bool {
         suggestionsEnabled && emojiWordSuggestionsEnabled && isSecureTextEntry != true
+    }
+
+    /// 종료 흔적 허용만 바꾼 복사본 — 앱이 활성화될 때 이용 분석 저장값을 옮겨 적는다(값이 같으면 `==`라 저장이 일어나지 않는다)
+    public func withExitTraceEnabled(_ enabled: Bool) -> KeyboardSettings {
+        var copy = self
+        copy.keyboardExitTraceEnabled = enabled
+        return copy
     }
 
     /// 설정을 읽지 못했을 때 쓰는 기본값.
@@ -356,6 +369,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         learningResetToken = try container.decodeIfPresent(Int.self, forKey: .learningResetToken) ?? base.learningResetToken
         emojiHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .emojiHistoryEnabled) ?? base.emojiHistoryEnabled
         emojiHistoryResetToken = try container.decodeIfPresent(Int.self, forKey: .emojiHistoryResetToken) ?? base.emojiHistoryResetToken
+        keyboardExitTraceEnabled = try container.decodeIfPresent(Bool.self, forKey: .keyboardExitTraceEnabled) ?? base.keyboardExitTraceEnabled
         snippetsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snippetsEnabled) ?? base.snippetsEnabled
         bibleSnippetPrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .bibleSnippetPrefixEnabled) ?? base.bibleSnippetPrefixEnabled
         disabledSnippetPacks = try container.decodeIfPresent([String].self, forKey: .disabledSnippetPacks) ?? base.disabledSnippetPacks
