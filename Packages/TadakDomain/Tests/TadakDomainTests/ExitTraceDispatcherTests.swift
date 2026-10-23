@@ -64,6 +64,30 @@ struct ExitTraceDispatcherTests {
         #expect(plan.discarded == 1)
     }
 
+    // 「30일 초과」의 경계를 고정한다 — 정확히 720시간은 남고 721시간부터 만료(구현 검증 F3, 변이 `>`→`>=`)
+    @Test("만료 경계 — 생성 후 정확히 720시간은 남고 721시간이면 만료")
+    func retentionKeepsExactlyThirtyDaysAndExpiresTheHourAfter() {
+        #expect(ExitTraceRetention.maxAgeHours == 720)
+        #expect(!ExitTraceRetention.isExpired(createdAtHour: 1_000, nowHour: 1_000 + 720))
+        #expect(ExitTraceRetention.isExpired(createdAtHour: 1_000, nowHour: 1_000 + 721))
+        let kept = ExitTraceRetention.retained([1_000 - 720, 1_000 - 721], nowHour: 1_000, limit: 20, createdAtHour: { $0 })
+        #expect(kept.kept == [1_000 - 720])
+        #expect(kept.dropped == ExitTraceDropCount(overflow: 0, expired: 1))
+    }
+
+    @Test("만료 경계 — 생성 후 정확히 720시간 된 칸은 보내고, 721시간 된 칸은 보내지 않고 ack")
+    func dispatcherSendsAtExactlyThirtyDaysAndDiscardsTheHourAfter() {
+        let at720 = 500_010 - 720
+        let at721 = 500_010 - 721
+        let plan = ExitTraceDispatcher.plan(entries: [entry(1, record: record(createdAtHour: at720), createdAtHour: at720),
+                                                      entry(2, record: record(createdAtHour: at721), createdAtHour: at721)],
+                                            ack: 0, today: today, analyticsEnabled: true)
+        #expect(plan.steps.map(\.ackSeq) == [1, 2])
+        #expect(plan.steps[0].event != nil)
+        #expect(plan.steps[1].event == nil)
+        #expect(plan.discarded == 1)
+    }
+
     @Test("모르는 열거 값이 든 발신함 항목은 디코드에서 버린다")
     func dispatcherIgnoresEntriesWithUnknownEnumValues() throws {
         let good = try JSONEncoder().encode(entry(1, record: record()))
@@ -180,4 +204,54 @@ struct ExitTracePrivacyTests {
 extension ExitTraceMarker {
     static let sample = ExitTraceMarker(pid: 1, ownerToken: 1, setAtHour: 500_000, buildNumber: 1,
                                         os: ExitTraceOSVersion(major: 26, minor: 1, patch: 0), idiom: .phone)
+}
+
+// MARK: - 계획 실행(앱 리포터가 그대로 쓴다) — 보낸 **직후** 그 칸의 ack(M4), 보내지 않는 칸도 ack
+
+private final class AckSpy: ExitTraceAckWriting, @unchecked Sendable {
+    var log: [String] = []
+    func writeAck(_ seq: Int) { log.append("ack \(seq)") }
+}
+
+@Suite("종료 흔적 — 계획 실행")
+struct ExitTraceDeliveryTests {
+
+    @Test("이벤트를 보낸 직후 그 칸을 ack한다 — 순서가 칸마다 보냄→ack")
+    func deliverSendsThenAcksEachStepInOrder() {
+        let plan = ExitTraceDispatcher.plan(entries: [entry(3, record: record()), entry(4, stats: ExitTraceCounters(appearances: 1))],
+                                            ack: 2, today: today, analyticsEnabled: true)
+        let spy = AckSpy()
+        let sent = ExitTraceDispatcher.deliver(plan, send: { spy.log.append("send \($0.name)") }, ack: spy)
+        #expect(spy.log == ["send kb_exit_suspect", "ack 3", "send kb_exit_stats", "ack 4"])
+        #expect(sent == 2)
+    }
+
+    @Test("이용 분석을 끈 사용자 — 아무것도 보내지 않고 ack만")
+    func deliverAcksWithoutSendingWhenAnalyticsDisabled() {
+        let plan = ExitTraceDispatcher.plan(entries: [entry(1, record: record()), entry(2, record: record())],
+                                            ack: 0, today: today, analyticsEnabled: false)
+        let spy = AckSpy()
+        let sent = ExitTraceDispatcher.deliver(plan, send: { spy.log.append("send \($0.name)") }, ack: spy)
+        #expect(spy.log == ["ack 1", "ack 2"])
+        #expect(sent == 0)
+    }
+
+    @Test("30일 지난 칸은 보내지 않고 ack만 — 다른 칸은 그대로 보낸다")
+    func deliverSkipsExpiredButAcksIt() {
+        let old = 500_010 - 31 * 24
+        let plan = ExitTraceDispatcher.plan(entries: [entry(1, record: record(createdAtHour: old), createdAtHour: old),
+                                                      entry(2, record: record())],
+                                            ack: 0, today: today, analyticsEnabled: true)
+        let spy = AckSpy()
+        _ = ExitTraceDispatcher.deliver(plan, send: { spy.log.append("send \($0.name)") }, ack: spy)
+        #expect(spy.log == ["ack 1", "send kb_exit_suspect", "ack 2"])
+    }
+
+    @Test("보낼 칸이 없으면 보내지도 ack하지도 않는다")
+    func deliverWithNothingDueTouchesNothing() {
+        let plan = ExitTraceDispatcher.plan(entries: [entry(1, record: record())], ack: 1, today: today, analyticsEnabled: true)
+        let spy = AckSpy()
+        #expect(ExitTraceDispatcher.deliver(plan, send: { spy.log.append("send \($0.name)") }, ack: spy) == 0)
+        #expect(spy.log.isEmpty)
+    }
 }

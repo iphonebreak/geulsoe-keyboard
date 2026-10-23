@@ -13,6 +13,7 @@ struct RootView: View {
     @State private var settings = AppGroupSettingsRepository().load()
     /// 앱 로컬 상태 — App Group이 아니다 (키보드가 읽을 일이 없다)
     @AppStorage("hasSeenOnboarding") private var hasSeenOnboarding = false
+    @Environment(\.scenePhase) private var scenePhase
 
     private let repository = AppGroupSettingsRepository()
 
@@ -35,6 +36,13 @@ struct RootView: View {
             repository.save(updated)
             // 떠 있는 키보드가 즉시 다시 읽도록 (Darwin 알림, PDR field-traits-and-live-settings)
             SettingsChangeNotifier.post()
+        }
+        // 활성화될 때마다 — 키보드 종료 흔적(백로그 14 (가), PDR `keyboard-crashlytics.md` 2-8). ① 이전 버전에서 끈 이용 분석 선택을
+        // 키보드 설정에 전달한다(값이 같으면 변화 없음 → 위 `onChange`가 저장·알림을 한 곳에서 한다) ② 발신함을 보낸다(건별 ack)
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            guard phase == .active else { return }
+            settings = settings.withExitTraceEnabled(ExitTraceConsentSync.analyticsEnabled)
+            KeyboardExitReporter.report(analyticsEnabled: ExitTraceConsentSync.analyticsEnabled)
         }
         .fullScreenCover(isPresented: .init(
             get: { !hasSeenOnboarding },

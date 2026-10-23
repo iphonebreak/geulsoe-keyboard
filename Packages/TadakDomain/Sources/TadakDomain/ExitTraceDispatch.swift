@@ -58,6 +58,21 @@ public enum ExitTraceDispatcher {
         return ExitTraceDispatchPlan(steps: steps, discarded: steps.filter { $0.event == nil }.count)
     }
 
+    /// 계획을 실행한다 — 칸마다 (이벤트가 있으면) 보낸 **직후** 그 칸의 ack를 쓴다(M4: 중복 창을 호출~ack 사이로 줄인다).
+    /// 이벤트가 없는 칸(30일 초과·이용 분석 끔·빈 칸)도 ack한다. 보낸 이벤트 수를 돌려준다
+    @discardableResult
+    public static func deliver(_ plan: ExitTraceDispatchPlan, send: (ExitTraceEvent) -> Void, ack: any ExitTraceAckWriting) -> Int {
+        var sent = 0
+        for step in plan.steps {
+            if let event = step.event {
+                send(event)
+                sent += 1
+            }
+            ack.writeAck(step.ackSeq)
+        }
+        return sent
+    }
+
     private static func event(for entry: ExitTraceOutboxEntry, nowHour: Int) -> ExitTraceEvent? {
         guard !ExitTraceRetention.isExpired(createdAtHour: entry.createdAtHour, nowHour: nowHour) else { return nil }
         switch (entry.record, entry.stats) {
