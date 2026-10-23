@@ -579,6 +579,8 @@ final class KeyboardViewController: UIInputViewController {
         bibleSearchScheduler?.cancel()
         // U7 후보 패널 — 내려갈 때 닫고 목록(채움글 본문)을 놓는다. 등장(`viewWillAppear`)에서도 한 번 더 닫는다
         closeSnippetCandidatesPanel()
+        // ⌫ 길게 누르기 — 내려간 키보드에 큐로 남은 반복 박자가 지우지 않게 누름을 끝낸다(PDR backspace-word-acceleration 3-4)
+        inputController?.endAllBackspaceHolds()
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -613,6 +615,38 @@ final class KeyboardViewController: UIInputViewController {
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false  // 다시 타이핑 — 추천 재개
         releaseEmojiChipSuppressionIfDocumentChanged(since: revision)  // ⇧·한영·123으로는 안 풀린다(D17)
+        updateSuggestionBar(userEdited: true)
+    }
+
+    // MARK: - ⌫ 길게 누르기 단어 단계 (PDR `docs/design-reviews/backspace-word-acceleration.md`)
+
+    /// ⌫ 터치다운(동기) — 누름 세대와 문서 식별자를 둔다. 돌려주는 값 = 이 누름에서 단어 단계를 써도 되나:
+    /// secure면 문맥을 읽지 않고(글자 반복만), VoiceOver·스위치 제어 중에는 끈다(D2), 출시 상수가 꺼져 있으면 끈다(C2W-04).
+    /// 식별자·접근성 값은 여기서만 읽어 값으로 넘긴다
+    private func beginBackspaceHold(_ hold: UInt64) -> Bool {
+        guard let inputController else { return false }
+        inputController.beginBackspaceHold(hold, documentIdentifier: textDocumentProxy.documentIdentifier)
+        return BackspaceWordPhasePolicy.allows(
+            isSecureTextEntry: textDocumentProxy.isSecureTextEntry == true,
+            isVoiceOverRunning: UIAccessibility.isVoiceOverRunning,
+            isSwitchControlRunning: UIAccessibility.isSwitchControlRunning)
+    }
+
+    /// ⌫ 반복 박자 — 끝난 누름의 박자는 버린다(손 뗀 뒤 0건). 글자 박자는 현행 `handle(.backspace)` 그대로,
+    /// 닻·단어 박자는 컨트롤러가 판정하고 **문서가 실제로 바뀐 박자에만** 피드백·화면 갱신을 한다
+    private func handleBackspaceTick(_ hold: UInt64, _ phase: BackspaceRepeatPhase) {
+        guard let inputController, inputController.acceptsBackspaceTick(hold) else { return }
+        guard phase != .character else {
+            handle(.backspace)
+            return
+        }
+        let revision = inputController.documentRevision
+        _ = inputController.handleBackspaceRepeat(hold, phase: phase, documentIdentifier: textDocumentProxy.documentIdentifier)
+        guard inputController.documentRevision != revision else { return }
+        playKeyFeedback()
+        refreshLayout()
+        suppressesWordSuggestionsAfterCursorMove = false
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
     }
 
@@ -1868,6 +1902,12 @@ final class KeyboardViewController: UIInputViewController {
             },
             onSnippetCandidatesClose: { [weak self] in
                 DispatchQueue.main.async { self?.handleSnippetCandidatesClose() }
+            },
+            // ⌫ 길게 누르기 — 시작·끝은 동기(큐에 남은 박자를 막는다), 박자는 다른 키 이벤트처럼 한 박자 미룬다
+            onBackspaceHoldBegan: { [weak self] hold in self?.beginBackspaceHold(hold) ?? false },
+            onBackspaceHoldEnded: { [weak self] hold in self?.inputController?.endBackspaceHold(hold) },
+            onBackspaceTick: { [weak self] hold, phase in
+                DispatchQueue.main.async { self?.handleBackspaceTick(hold, phase) }
             },
             fillsContainer: Self.fillInputViewWithHost,   // 14차 H1 — 상자 전체 채움 + 하단 정렬
             transparentAbove: Self.transparentAboveContent  // 16차 — 자판 사각형 뒤에만 칠한다
