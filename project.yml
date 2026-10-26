@@ -76,9 +76,10 @@ targets:
       # 외부 채움글 저장소 쓰기(`PackStore`)·가져오기 — **앱 타깃에만**(키보드에 걸지 마라, 위 packages 주석)
       - package: PackImport
         product: PackImport
-      # ★ Firebase는 **이 앱 타깃에만** 건다. TadakKeyboard에는 절대 걸지 마라 —
+      # ★ Analytics는 **이 앱 타깃에만** 건다. TadakKeyboard에는 절대 걸지 마라 —
       #   익스텐션은 60MB 강제 종료 한계가 있고, 사용자가 입력하는 모든 것을 보는 자리다.
       #   security.md 1순위 규칙(입력 텍스트는 어디로도 나가지 않는다)은 그대로 살아 있다.
+      #   키보드에 허용된 Firebase는 **N4′의 `FirebaseCrashlytics` 제품 하나뿐**이다(아래 TadakKeyboard 타깃, 2026-10-23 승인).
       #
       #   ★ **`FirebaseAnalytics`가 아니라 `FirebaseAnalyticsCore`다** (사용자 결정 2026-09-14).
       #   넓은 쪽 `FirebaseAnalytics` 제품은 전이 의존으로 넷을 번들에 실었다:
@@ -98,8 +99,8 @@ targets:
       #   근거·실측: docs/release/firebase-on-hardening.md
       - package: Firebase
         product: FirebaseAnalyticsCore
-      # Crashlytics — 사용자 결정 2026-09-11(앞선 "넣지 마라" 철회). **앱 타깃만.**
-      # 익스텐션 크래시는 이걸로 안 잡힌다 — 한계와 판단 자료는 firebase-integration.md 10절.
+      # Crashlytics — 사용자 결정 2026-09-11(앞선 "넣지 마라" 철회).
+      # 앱 Crashlytics는 익스텐션 크래시를 못 잡는다 — 키보드는 1.3.2부터 자기 타깃에 따로 건다(스위치 기본 켜짐 ∧ 전체 접근, 아래 TadakKeyboard·N4′).
       - package: Firebase
         product: FirebaseCrashlytics
 
@@ -133,11 +134,20 @@ targets:
     platform: iOS
     sources:
       - path: Keyboard
+      # 키보드 Crashlytics 설정 — **설정 앱과 같은 파일**을 키보드 번들에도 넣는다(사장님 결정 2026-10-26, 키보드용 Firebase 앱 등록 없음).
+      # 파일은 gitignore(`.gitignore` — API 키)이고 CI는 `ci_scripts/ci_post_clone.sh`가 xcodegen **전에** 같은 자리에 복원한다.
+      # 런타임에 파일이 없으면 키보드는 조용히 시작하지 않는다(`KeyboardDiagnostics`).
+      - path: App/GoogleService-Info.plist
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.charging.tadak.keyboard
         INFOPLIST_FILE: Keyboard/Info.plist
         CODE_SIGN_ENTITLEMENTS: Keyboard/TadakKeyboard.entitlements
+        # `-ObjC`를 **넣지 않는다** — 앱 타깃 스코프에만 있다(위 주석). Crashlytics는 전부 소스 타깃이라 필요 없고,
+        # 넣으면 쓰지 않는 ObjC 코드까지 실려 60MB 한계선이 가까워진다.
+        # 키보드 `Info.plist`에 Firebase 수집 키(`FirebaseCrashlyticsCollectionEnabled` 등)도 넣지 않는다 — 시작 여부는
+        # 코드가 opt-in ∧ 전체 접근으로만 정한다(`Keyboard/KeyboardDiagnostics.swift`).
     dependencies:
       - package: HangulEngine
         product: HangulEngine
@@ -149,6 +159,29 @@ targets:
         product: TadakDomain
       - package: TadakData
         product: TadakData
+      # ★ 백로그 14 (나) — 보안 규칙 **N4′**(사용자 승인 2026-10-23): 키보드 네트워크 예외 **하나**. 조건 ①~⑥ 전부를 지킨다.
+      #   ① `FirebaseCrashlytics` **제품 하나만** — 앱과 같은 `Firebase` 패키지(exactVersion 12.19.1). Analytics·광고·IDFA 계열 금지
+      #   ② 설정 「키보드 크래시 보고」(기본 켜짐, 2026-10-26) ∧ 전체 접근일 때만 `configure` ③ `import Firebase*`는 `Keyboard/KeyboardDiagnostics.swift` 한 파일
+      #   ⑤ `Packages/*`에는 어떤 SDK도 링크하지 않는다 ⑥ 다른 SDK를 더하려면 코드 전에 사용자에게 묻는다.
+      #   위반은 `.claude/hooks/telemetry-gate.sh` 검사 C·D와 `tools/archive-compliance-check.sh`가 잡는다.
+      #   반려되면 이 묶음(이 의존성·리소스·dSYM 단계·`KeyboardDiagnostics.swift`·토글)을 한 번에 revert한다 — (가) 종료 흔적은 남는다.
+      - package: Firebase
+        product: FirebaseCrashlytics
+    postBuildScripts:
+      # 키보드 dSYM 업로드 — 앱 타깃의 같은 단계와 **같은 스크립트·같은 입력 목록**이다(그 주석 참조).
+      # 설정 파일이 앱과 같으므로 dSYM은 **설정 앱과 같은 `GOOGLE_APP_ID`**로 올라간다(사장님 결정 2026-10-26).
+      - name: Firebase Crashlytics dSYM upload
+        script: '"${SRCROOT}/tools/firebase-crashlytics-run"'
+        basedOnDependencyAnalysis: false
+        inputFiles:
+          - $(SRCROOT)/tools/firebase-crashlytics-run
+          - $(SRCROOT)/tools/upload-symbols
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Info.plist
+          - $(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/GoogleService-Info.plist
+          - $(TARGET_BUILD_DIR)/$(EXECUTABLE_PATH)
+          - ${DWARF_DSYM_FOLDER_PATH}/${DWARF_DSYM_FILE_NAME}/Contents/Resources/DWARF/${PRODUCT_NAME}.debug.dylib
 
   # 실기 검증 하네스 (XCUITest) — docs/simulator-input-verification.md. 앱 타깃을 호스트로 실기에서 돈다.
   TadakUITests:

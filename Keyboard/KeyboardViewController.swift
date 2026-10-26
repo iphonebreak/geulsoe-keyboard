@@ -352,6 +352,8 @@ final class KeyboardViewController: UIInputViewController {
         reloadSettingsIfChanged()
         exitTrace.willAppear(fullAccess: hasFullAccess, mode: exitTraceMode, panel: exitTracePanel,
                              width: view.bounds.width, screenWidth: ExitTraceHooks.screenWidth(of: view))
+        // 키보드 크래시 보고(스위치·기본 켜짐, 백로그 14 (나)) — 판정은 KeyboardCore, SDK 호출은 `KeyboardDiagnostics` 한 파일(N4′)
+        KeyboardDiagnostics.update(optedIn: settings.keyboardCrashReportEnabled, hasFullAccess: hasFullAccess)
         // 이모지 최근 사용 — 저장소에서 다시 읽고, 설정 앱이 껐으면 여기서 비운다(설정이 그대로여도 매번)
         refreshEmojiHistory()
         // 사용자 문구·외부 팩이 설정 앱에서 바뀌었으면 세대가 올라 있다 — 재구성 키가 다를 때만 다시 만든다(AC-9)
@@ -532,6 +534,7 @@ final class KeyboardViewController: UIInputViewController {
     private func applySettingsLive() {
         reloadSettingsIfChanged()
         exitTrace.settingsReloaded()
+        KeyboardDiagnostics.update(optedIn: settings.keyboardCrashReportEnabled, hasFullAccess: hasFullAccess)  // 끄면 그 자리에서 수집 정지
         rebuildSnippetMatcher()            // 내 채움글·외부 팩 저장도 같은 알림 — 키(세대·채움글 설정)가 같으면 0회(AC-9)
         rebuildSuggestionEngineIfNeeded()  // 학습 초기화 토큰
         updateHeight()

@@ -85,6 +85,12 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
     /// 설정 화면 스위치가 아니다 — 앱이 **이전 버전에서 이용 분석을 끈 선택**을 여기에 옮겨 적는다(PDR `keyboard-crashlytics.md` 2-8 ①).
     /// 키보드는 `false`를 읽으면 표시·대기·카운터를 지우고 새로 만들지 않는다. 앱→키보드 읽기라 전체 접근과 무관하다.
     public var keyboardExitTraceEnabled: Bool
+    /// 「키보드 크래시 보고」 — 키보드 Crashlytics 스위치 (**기본 켜짐** — 사용자 결정 2026-10-26, 1.3.2 백로그 14 (나), 보안 규칙 N4′ ②).
+    /// 키가 없는 옛 저장분(1.3.1 이하)도 켜짐으로 읽는다 — **이전 버전에서 이용 분석을 끈 사용자도 켬**(아래 독립 참조).
+    /// 설정 앱 개인정보 처리방침 화면 「키보드 크래시 보고」 절의 스위치다. 키보드는 이것 ∧ 전체 접근 ∧ 번들 설정 파일이 모두 있을 때만 SDK를 시작한다
+    /// (판정 KeyboardCore `KeyboardCrashReportGate`, 시작은 `Keyboard/KeyboardDiagnostics.swift`). **스택 전송만 제어한다** —
+    /// 종료 흔적(`keyboardExitTraceEnabled`)과 무관하고, 앱의 옛 `AnalyticsConsent.crashlyticsEnabled`와도 독립이다(PDR 5-3).
+    public var keyboardCrashReportEnabled: Bool
     /// 끈 내장 채움글 팩 id 목록 (`"bible"`, `"anthem"`). 옵트아웃이라 새 팩은 기본 켬.
     public var disabledSnippetPacks: [String]
     /// 날짜·시간 채움글 팩의 출력 형식 (v1.2.0, PDR `date-snippet-pack.md` 4절). 기본 **규범형**.
@@ -246,6 +252,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         emojiHistoryEnabled: Bool = true,
         emojiHistoryResetToken: Int = 0,
         keyboardExitTraceEnabled: Bool = true,
+        keyboardCrashReportEnabled: Bool = true,
         snippetsEnabled: Bool = true,
         bibleSnippetPrefixEnabled: Bool = true,
         disabledSnippetPacks: [String] = [],
@@ -288,6 +295,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         self.emojiHistoryEnabled = emojiHistoryEnabled
         self.emojiHistoryResetToken = emojiHistoryResetToken
         self.keyboardExitTraceEnabled = keyboardExitTraceEnabled
+        self.keyboardCrashReportEnabled = keyboardCrashReportEnabled
         self.snippetsEnabled = snippetsEnabled
         self.bibleSnippetPrefixEnabled = bibleSnippetPrefixEnabled
         self.disabledSnippetPacks = disabledSnippetPacks
@@ -370,6 +378,7 @@ public struct KeyboardSettings: Codable, Equatable, Sendable {
         emojiHistoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .emojiHistoryEnabled) ?? base.emojiHistoryEnabled
         emojiHistoryResetToken = try container.decodeIfPresent(Int.self, forKey: .emojiHistoryResetToken) ?? base.emojiHistoryResetToken
         keyboardExitTraceEnabled = try container.decodeIfPresent(Bool.self, forKey: .keyboardExitTraceEnabled) ?? base.keyboardExitTraceEnabled
+        keyboardCrashReportEnabled = try container.decodeIfPresent(Bool.self, forKey: .keyboardCrashReportEnabled) ?? base.keyboardCrashReportEnabled
         snippetsEnabled = try container.decodeIfPresent(Bool.self, forKey: .snippetsEnabled) ?? base.snippetsEnabled
         bibleSnippetPrefixEnabled = try container.decodeIfPresent(Bool.self, forKey: .bibleSnippetPrefixEnabled) ?? base.bibleSnippetPrefixEnabled
         disabledSnippetPacks = try container.decodeIfPresent([String].self, forKey: .disabledSnippetPacks) ?? base.disabledSnippetPacks

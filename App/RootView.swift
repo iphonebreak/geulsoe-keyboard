@@ -25,7 +25,7 @@ struct RootView: View {
                 .tabItem { Label("툴바", systemImage: "slider.horizontal.3") }
             AppearanceTab(settings: $settings)
                 .tabItem { Label("화면", systemImage: "paintpalette") }
-            InfoTab(onReplayOnboarding: { hasSeenOnboarding = false })
+            InfoTab(settings: $settings, onReplayOnboarding: { hasSeenOnboarding = false })
                 .tabItem { Label("정보", systemImage: "info.circle") }
         }
         // 앱 실행 때 한 번 — 외부 채움글 저장소의 옛 snapshot 세대·안 쓰는 변환본 정리(PDR `external-snippet-packs.md` 8-2, 앱 실행·변경
