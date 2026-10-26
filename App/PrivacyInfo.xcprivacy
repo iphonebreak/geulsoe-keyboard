@@ -3,9 +3,10 @@
 <!--
   컨테이너 앱(Tadak) 프라이버시 매니페스트.
 
-  ★ 이 파일은 **앱만** 덮는다. 키보드 익스텐션은 Keyboard/PrivacyInfo.xcprivacy 가 따로 있고
-    거기 NSPrivacyCollectedDataTypes 는 **빈 배열이 맞다** — 익스텐션에는 Firebase가 없다
-    (nm/otool 실측 심볼 0건). 사용자가 입력한 텍스트는 어디로도 나가지 않는다
+  ★ 이 파일은 **앱만** 덮는다. 키보드 익스텐션은 Keyboard/PrivacyInfo.xcprivacy 가 따로 있다.
+    1.3.2(백로그 14 (나), 보안 규칙 N4′)부터 키보드에 Firebase Crashlytics **하나**(설정 스위치, 기본 켜짐 — 2026-10-26)가 있어
+    거기도 CrashData·OtherDiagnosticData·DeviceID 를 선언한다(그 전까지는 빈 배열이었다 — 심볼 0건).
+    키보드의 Analytics는 여전히 0이다. 사용자가 입력한 텍스트는 어디로도 나가지 않는다
     (.claude/rules/security.md 1순위 규칙).
 
   왜 여기에 직접 적어야 하나 — SDK 매니페스트가 다 덮어주지 않는다.

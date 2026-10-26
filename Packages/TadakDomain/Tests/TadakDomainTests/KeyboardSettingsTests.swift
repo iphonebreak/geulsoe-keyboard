@@ -738,3 +738,88 @@ struct EmojiChipGateTests {
         #expect(KeyboardSettings.default.allowsEmojiChips(isSecureTextEntry: nil))
     }
 }
+
+/// 백로그 14 (가) — 이전 버전에서 이용 분석을 끈 사용자는 키보드가 종료 흔적을 만들지 않는다(N21, PDR 2-8 ①)
+@Suite("설정 — 키보드 종료 흔적")
+struct KeyboardExitTraceSettingTests {
+
+    @Test("기본은 켬, 이 키가 없는 옛 저장분도 켬으로 읽는다 — 다른 값은 그대로")
+    func exitTraceEnabledDefaultsTrueAndDecodesFromOldSavedSettings() throws {
+        #expect(KeyboardSettings.default.keyboardExitTraceEnabled == true)
+        let legacy = Data(#"{"suggestionsEnabled":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
+        #expect(decoded.keyboardExitTraceEnabled == true)
+        #expect(decoded.suggestionsEnabled == false)
+    }
+
+    @Test("끈 값은 저장·읽기에서 살아남는다")
+    func exitTraceEnabledRoundTrips() throws {
+        let off = KeyboardSettings.default.withExitTraceEnabled(false)
+        let roundTrip = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(off))
+        #expect(roundTrip.keyboardExitTraceEnabled == false)
+        #expect(roundTrip == off)
+    }
+
+    @Test("withExitTraceEnabled는 복사본을 돌려주고 원본은 그대로")
+    func withExitTraceEnabledReturnsCopyAndLeavesOriginalUnchanged() {
+        let original = KeyboardSettings.default
+        let copy = original.withExitTraceEnabled(false)
+        #expect(original.keyboardExitTraceEnabled == true)
+        #expect(copy.keyboardExitTraceEnabled == false)
+        #expect(copy.withExitTraceEnabled(true) == original)
+    }
+}
+
+/// 백로그 14 (나) — 「키보드 크래시 보고」(보안 규칙 N4′ ②, PDR `keyboard-crashlytics.md` 5-3). **기본 켜짐**(사용자 결정 2026-10-26 —
+/// 이전 버전에서 설정 앱 이용 분석을 끈 사용자도 켬, `AnalyticsConsent`와 독립)
+@Suite("설정 — 키보드 크래시 보고")
+struct KeyboardCrashReportSettingTests {
+
+    @Test("새 설치는 켜짐")
+    func crashReportDefaultsOn() {
+        #expect(KeyboardSettings.default.keyboardCrashReportEnabled == true)
+        #expect(KeyboardSettings().keyboardCrashReportEnabled == true)
+    }
+
+    @Test("이 키가 없는 옛 저장분(1.3.1 이하)도 켜짐으로 읽는다 — 이용 분석을 끈 흔적(종료 흔적 false)이 있어도 켜짐, 다른 값은 그대로")
+    func crashReportDecodesOnFromOldSavedSettings() throws {
+        let legacy = Data(#"{"suggestionsEnabled":false,"keyboardExitTraceEnabled":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: legacy)
+        #expect(decoded.keyboardCrashReportEnabled == true)
+        #expect(decoded.suggestionsEnabled == false)
+        #expect(decoded.keyboardExitTraceEnabled == false)
+    }
+
+    @Test("명시적으로 끈 저장분은 꺼짐으로 남는다 — 기본값이 사용자의 선택을 덮지 않는다")
+    func crashReportExplicitOffSurvivesDecoding() throws {
+        let saved = Data(#"{"keyboardCrashReportEnabled":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: saved)
+        #expect(decoded.keyboardCrashReportEnabled == false)
+
+        var off = KeyboardSettings.default
+        off.keyboardCrashReportEnabled = false
+        let roundTrip = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(off))
+        #expect(roundTrip.keyboardCrashReportEnabled == false)
+        #expect(roundTrip == off)
+    }
+
+    @Test("켠 값은 저장·읽기에서 살아남는다")
+    func crashReportEnabledRoundTrips() throws {
+        var on = KeyboardSettings.default
+        on.keyboardCrashReportEnabled = true
+        let roundTrip = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(on))
+        #expect(roundTrip.keyboardCrashReportEnabled == true)
+        #expect(roundTrip == on)
+    }
+
+    @Test("크래시 보고 스위치는 종료 흔적 허용과 독립이다 — 한쪽을 바꿔도 다른 쪽은 그대로(PDR 5-3: 스택 전송만 제어)")
+    func crashReportIsIndependentOfExitTrace() {
+        var on = KeyboardSettings.default
+        on.keyboardCrashReportEnabled = true
+        #expect(on.withExitTraceEnabled(false).keyboardCrashReportEnabled == true)
+        var off = KeyboardSettings.default
+        off.keyboardCrashReportEnabled = false
+        #expect(off.withExitTraceEnabled(false).keyboardCrashReportEnabled == false)
+        #expect(on.keyboardExitTraceEnabled == true)
+    }
+}

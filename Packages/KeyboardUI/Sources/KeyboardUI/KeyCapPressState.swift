@@ -29,6 +29,9 @@ struct KeyCapPressState: Equatable {
     private(set) var cursorMode = false
     /// ⌫ 반복(500ms 뒤 80ms마다) 진행 중
     private(set) var isRepeating = false
+    /// ⌫ 누름 세대 H — 이 터치의 반복 박자에 붙는다. 손 뗌·터치 잃음·사라짐에서 뷰가 **이 값으로** 누름을 끝내고(동기),
+    /// 상태가 처음으로 돌아가며 지워진다(PDR `backspace-word-acceleration.md` 3-4)
+    private(set) var backspaceHold: UInt64?
 
     /// 손이 닿았다(`onChanged`) — **지금 막 눌렸으면 true**: 뷰가 터치다운 일(클릭음·⌫ 1회·타이머)을 한다. 누른 채 움직이면 false
     mutating func touchDown() -> Bool {
@@ -37,10 +40,11 @@ struct KeyCapPressState: Equatable {
         return true
     }
 
-    /// ⌫ 반복을 시작한다 — 누르고 있을 때만
-    mutating func startRepeating() {
+    /// ⌫ 반복을 시작한다 — 누르고 있을 때만. `hold`는 이 터치의 누름 세대
+    mutating func startRepeating(hold: UInt64? = nil) {
         guard isPressed else { return }
         isRepeating = true
+        backspaceHold = hold
     }
 
     /// 반복 한 번을 해도 되나 — **아직 누르고 있고 반복 중일 때만**. 반복 Task의 루프 조건이다:

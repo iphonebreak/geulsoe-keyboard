@@ -6,13 +6,17 @@ import TadakDomain
 // 외부 채움글 1-e ③ — 보안 검토(`docs/release/review-ext-1e-security.md`) S1~S7 수정 고정 + 「③ 뒤 뮤테이션에서 꼭 볼 것」 미리 넣기.
 // **시간 폭탄(S1·S2·S3)은 결과만 보면 작은 입력에서 고치기 전과 같다** — 큰 입력 + 경과 시간 상한으로 고정한다(검토 6절 1번).
 // 시간 상한은 고치기 전 실측(검토 7절, `-O`)의 몇 분의 일이고, 고친 뒤 실측의 수십 배다(디버그 빌드 기준) — 흔들림에 넉넉하다.
+// **잴 때는 벽시계가 아니라 이 스레드의 CPU 시간을 쓴다**(백로그 16) — 변이 시험처럼 다른 무거운 일과 함께 돌면 벽시계는
+// CPU를 나눠 쓰느라 늘어나 상한에 걸렸다(`verify-v131-u7-open-on-arm.md` 10절). 스레드 CPU 시간은 우리 작업이 실제로 쓴
+// 계산량이라 부하에 거의 늘지 않고, 시간 폭탄(고치기 전 수 초~수십 분의 계산)은 그대로 잡는다.
 
 private typealias F = XLSXFixture
 
-/// 경과 시간(초)
+/// 이 스레드가 `work`에 쓴 CPU 시간(초) — 벽시계 아님. 재는 작업(XLSX 열기·초안 만들기)은 부른 스레드에서 동기로 돈다
 private func seconds(_ work: () -> Void) -> Double {
-    let duration = ContinuousClock().measure(work)
-    return Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+    let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+    work()
+    return Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9
 }
 
 private func openFailure(_ data: Data) -> XLSXWorkbookFailure? {
