@@ -134,20 +134,21 @@ struct PackEntryListTests {
         let pack = phrases((0..<3_000).map { index in
             SnippetEntry(triggers: ["단축어 \(index)", "별칭\(index)"], title: "제목 \(index)", body: "\(index)번째 \(body)")
         })
-        let clock = ContinuousClock()
+        // 벽시계가 아니라 이 스레드의 CPU 시간으로 잰다(백로그 16) — 다른 무거운 일과 함께 돌면 벽시계 3초 상한에 걸렸다.
+        // 목록 만들기·검색은 부른 스레드에서 동기로 돈다. 바이트 검색이 글자 단위로 되돌아가는 회귀는 계산량이라 그대로 잡힌다
         var list: PackEntryList?
-        let build = clock.measure { list = PackEntryList(pack) }
+        let build = cpuTime { list = PackEntryList(pack) }
         guard let list else { Issue.record("목록을 만들지 못했다"); return }
         #expect(list.rows.count == 3_000)
         var found: [PackEntryList.Row] = []
-        let miss = clock.measure { found = list.rows(matching: "어디에도없는말") }   // 끝까지 다 훑는 가장 나쁜 경우
+        let miss = cpuTime { found = list.rows(matching: "어디에도없는말") }   // 끝까지 다 훑는 가장 나쁜 경우
         #expect(found.isEmpty)
-        let hit = clock.measure { found = list.rows(matching: "별칭 2999") }
+        let hit = cpuTime { found = list.rows(matching: "별칭 2999") }
         #expect(found.map(\.id) == [2_999])
-        let broad = clock.measure { found = list.rows(matching: "가나") }
+        let broad = cpuTime { found = list.rows(matching: "가나") }
         #expect(found.count == 3_000)
         print("R31 3,000 항목 — 만들기 \(build) · 없는 말 \(miss) · 한 개 \(hit) · 전부 맞음 \(broad)")
-        // 디버그 빌드·기기 차를 넉넉히 본 상한 — 실측(2026-10-07, 디버그): 만들기 0.5~0.9초(다른 시험과 함께 돌면 느려진다) · 검색 약 7ms.
+        // 디버그 빌드·기기 차를 넉넉히 본 상한 — 실측(2026-10-07, 디버그, 벽시계): 만들기 0.5~0.9초 · 검색 약 7ms.
         // 검색이 글자 단위 `String.contains`였을 때는 release로도 0.14초였다 — 바이트 검색이 풀리면 이 상한이 잡는다
         #expect(build < .seconds(3))
         #expect(miss < .milliseconds(100) && hit < .milliseconds(100) && broad < .milliseconds(100))
@@ -167,4 +168,11 @@ struct PackEntryListTests {
         #expect(PackNoticeCopy.allEntriesHeader(count: 12, isSearching: true) == "찾은 채움글 12개")
         #expect(PackNoticeCopy.allEntriesNoMatch.hasSuffix("요."))
     }
+}
+
+/// 이 스레드가 `work`에 쓴 CPU 시간 — 벽시계 아님(백로그 16, 부하에서 흔들리지 않게)
+private func cpuTime(_ work: () -> Void) -> Duration {
+    let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+    work()
+    return .nanoseconds(Int64(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start))
 }

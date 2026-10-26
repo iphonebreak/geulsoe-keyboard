@@ -4,8 +4,9 @@ iOS 한글 커스텀 키보드. 두벌식·천지인·단모음 세 자판과 �
 채움글(트리거 문구 → 전문 자동완성), 추천단어, 인증번호 붙여넣기, 클립보드 기록, 이모지를 쓸 수 있다.
 
 - Swift 6 / SwiftUI, 최소 iOS 17. 키보드 익스텐션 + 설정 앱.
-- **키보드가 입력한 내용을 수집·저장·전송하지 않는다.** 키보드 익스텐션에는 네트워크 코드가 없다
-  (`Keyboard/`·`Packages/KeyboardCore`·`Packages/KeyboardUI`에 어떤 네트워크 SDK도 링크하지 않는다).
+- **키보드가 입력한 내용을 수집·저장·전송하지 않는다.** 키보드 익스텐션의 네트워크 SDK는 **Firebase Crashlytics 하나뿐**이고
+  (1.3.2, 보안 규칙 N4′) 설정 「키보드 크래시 보고」(기본 켜짐, 2026-10-26 — 개인정보 처리방침 화면에서 끔)가 켜져 있고 전체 접근도 허용한 경우에만 시작한다 — 크래시 진단만 보내며
+  입력 내용은 대상이 아니다. `import Firebase*`는 `Keyboard/KeyboardDiagnostics.swift` 한 파일뿐이고 `Packages/`에는 어떤 SDK도 링크하지 않는다.
 - 설정 앱에는 Firebase Analytics·Crashlytics가 있다(2026-09-14 도입). 앱 사용 통계와 크래시만
   보내고, **입력한 텍스트·클립보드·학습 단어는 대상이 아니다** — 그 경로가 생기지 않도록
   `.claude/hooks/telemetry-gate.sh`가 빌드 검사에서 막는다.
