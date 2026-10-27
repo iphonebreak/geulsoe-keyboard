@@ -23,6 +23,12 @@ public struct BundledWordDictionary: WordDictionary {
         self.init(url: (bundle ?? .module).url(forResource: "words", withExtension: "tdw"))
     }
 
+    /// 다른 번들 사전(B5 C9 — 영어 `words-en`). 포맷은 같다 — 조회는 키 바이트 접두라 ASCII 소문자 키에도 그대로 동작한다
+    /// (`candidates(jamoPrefix:)`의 이름은 한글 자모 키에서 왔지만 뜻은 「키 접두」다)
+    public init(resource: String, bundle: Bundle? = nil) {
+        self.init(url: (bundle ?? .module).url(forResource: resource, withExtension: "tdw"))
+    }
+
     /// 테스트 주입용. 파일이 없거나 형식이 깨졌으면 모든 조회가 빈 배열인 빈 사전이 된다.
     init(url: URL?) {
         guard let url,

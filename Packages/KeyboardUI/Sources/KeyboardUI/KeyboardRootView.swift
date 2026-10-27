@@ -265,7 +265,8 @@ public struct KeyboardRootView: View {
 /// **별도 View인 이유:** 후보는 거의 매 키 입력마다 바뀐다. 루트 body에서 읽으면
 /// @Observable 추적이 루트에 걸려 자판 전체가 키마다 재평가된다 — 여기(자식 body)로
 /// 격리해 무효화 범위를 툴바로 좁힌다 (성능 규율).
-private struct SuggestionToolbar: View {
+/// `internal` — 영어 후보 줄을 그린 화면으로 재는 시험(`EnglishChipWidthTests`)이 직접 그린다(B5 C12)
+struct SuggestionToolbar: View {
 
     let state: KeyboardViewState
     let theme: ResolvedTheme
@@ -314,13 +315,13 @@ private struct SuggestionToolbar: View {
         // **칩이 실제로 있을 때만** 켠다. 후보가 하나도 없는 경우(도구 행·"글쇠" 자리 표시)도
         // `words.isEmpty`라서, 그 조건만 보면 도구 행이 선행 `Spacer`에 눌려 회귀한다.
         let centersChipOnly = (snippet != nil || state.pasteSuggestion != nil) && words.isEmpty
-        return HStack(spacing: 10) {
+        return HStack(spacing: KeyboardMetrics.candidateRowSpacing) {
             if centersChipOnly { Spacer(minLength: 0) }
             if let paste = state.pasteSuggestion, let onPasteboardCodeTap {
                 PasteChip(suggestion: paste, theme: theme, action: onPasteboardCodeTap)
             }
             if let snippet, let onSnippetTap {
-                // U7 — 길게 눌러 무장(조립 지점이 허락할 때만)·손 떼면 후보 패널. 배선이 없으면 U7 전 칩과 같다.
+                // U7 — 길게 눌러 무장(조립 지점이 허락할 때만)하는 순간 후보 패널(R49 — 연 뒤 손을 떼면 아무 일 없음). 배선이 없으면 U7 전 칩과 같다.
                 // 콜백은 **이 칩의 값**을 함께 넘긴다 — 퇴장 중인 옛 칩을 눌렀을 때 조립 지점이 지금 칩과 구별한다(R3)
                 SnippetChip(
                     suggestion: snippet,
@@ -334,7 +335,18 @@ private struct SuggestionToolbar: View {
                 .transition(.move(edge: .bottom).combined(with: .scale(scale: 0.85)).combined(with: .opacity))
                 .id(snippet.title)  // 다른 절로 바뀌면 새 칩으로 다시 애니메이션
             }
-            if let onWordTap, !words.isEmpty {
+            if let onWordTap, !words.isEmpty, words.allSatisfy(\.isEnglish) {
+                // ★ B5 C12(실기 결함 2026-10-15) — **영어 줄만** 긴 후보에 더 넓게 배분하고(`EnglishCandidateRowLayout`),
+                //   0.7배로도 셋이 안 들어가면 **마지막(빈도 가장 낮은) 후보를 숨긴다**(`ViewThatFits`) — 어느 칩도 말줄임되지 않는다.
+                //   같은 폭 분배에서는 393pt 칸 85pt에 `communication`(0.7배에서 86pt)이 넘쳐 「communicati…」가 됐다.
+                //   한글·이모지 줄은 아래 기존 경로 그대로다. 영어 줄에는 채움글 칩·이모지 칩이 함께 뜨지 않는다(게이트·C8).
+                let padding = KeyboardMetrics.wordChipHorizontalPadding(hasEmojiChips: false)
+                ViewThatFits(in: .horizontal) {
+                    englishRow(words, padding: padding, action: onWordTap)
+                    englishRow(Array(words.dropLast(words.count > 1 ? 1 : 0)), padding: padding, action: onWordTap)
+                }
+                .frame(maxWidth: .infinity)
+            } else if let onWordTap, !words.isEmpty {
                 // 이모지 칩(v1.3.0 ⑤)이 있으면 `[단어][단어][🚗 자동차][🚗]`, 배지가 있으면 `[단어][🚗 자동차 │ 🚗]` —
                 // 칸 묶기·여백은 `KeyboardMetrics`(테스트로 고정). 이모지가 없으면 v1.2.0과 같다(칸 하나에 후보 하나·여백 6).
                 let hasEmojiChips = words.contains { $0.emoji != nil }
@@ -407,6 +419,21 @@ private struct SuggestionToolbar: View {
         .animation(.spring(duration: 0.28, bounce: 0.25), value: snippet?.title)
     }
 
+    /// 영어 후보 줄 — 칩과 구분선을 `EnglishCandidateRowLayout`에 번갈아 넣는다(구분선은 `CandidateDividerKey`로 표시)
+    private func englishRow(
+        _ candidates: [WordSuggestionCandidate], padding: CGFloat,
+        action: @escaping (WordSuggestionCandidate) -> Void
+    ) -> some View {
+        EnglishCandidateRowLayout(padding: padding) {
+            ForEach(Array(candidates.enumerated()), id: \.offset) { index, candidate in
+                if index > 0 {
+                    candidateDivider.layoutValue(key: CandidateDividerKey.self, value: true)
+                }
+                wordChip(candidate, padding: padding, action: action)
+            }
+        }
+    }
+
     private var candidateDivider: some View {
         Rectangle()
             .fill(theme.keyText.opacity(0.2))
@@ -427,12 +454,21 @@ private struct SuggestionToolbar: View {
             // 배지가 오른쪽 폭을 가져가므로 긴 후보는 줄여 넣는다 (계획서 2-1).
             // 자르는 대신 줄이는 이유: 「창조하시니라」가 「창조하…」가 되면
             // 무엇을 넣을지 알 수 없다.
-            .minimumScaleFactor(0.7)
+            .minimumScaleFactor(KeyboardMetrics.wordChipMinimumScale)
             .padding(.horizontal, padding)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
             .buttonStyle(.plain)
-            .accessibilityLabel(candidate.accessibilityLabel)
+            .accessibilityLabel(Self.chipAccessibilityLabel(candidate))
+    }
+
+    /// 영어 후보는 VoiceOver가 **영어로** 읽게 언어를 붙인다(B5 C10) — 한국어 음성이 「hello」를 한국어로 읽지 않게.
+    /// 노드 구조는 같다(라벨 값만 다르다). 실제 발음 확인은 1.3.1 밖(VoiceOver 점검 N5와 별개)
+    static func chipAccessibilityLabel(_ candidate: WordSuggestionCandidate) -> Text {
+        guard candidate.isEnglish else { return Text(candidate.accessibilityLabel) }
+        var label = AttributedString(candidate.accessibilityLabel)
+        label.languageIdentifier = "en"
+        return Text(label)
     }
 
     /// 성경 검색 배지 — 건수가 있을 때만 그린다. **자리는 두 가지다** (v1.1.0).

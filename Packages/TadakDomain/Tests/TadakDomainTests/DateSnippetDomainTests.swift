@@ -38,7 +38,21 @@ struct DateSnippetSettingsTests {
 
     @Test("설정 화면 이름")
     func displayNames() {
-        #expect(DateSnippetStyle.allCases.map(\.displayName) == ["규범형", "관행형", "한글형"])
+        #expect(DateSnippetStyle.allCases.map(\.displayName) == ["규범형", "관행형", "한글형", "국제 표준(ISO 8601)"])
+    }
+
+    /// v1.3.1 국제 표준 형식(사용자 결정 2026-10-13). 저장 값은 `iso8601` — 바꾸면 고른 사용자의 설정이 규범형으로 떨어진다
+    @Test("형식은 넷이고, 국제 표준은 맨 뒤에 붙는다 — 저장 값 iso8601")
+    func fourStyles() {
+        #expect(DateSnippetStyle.allCases == [.formal, .common, .korean, .iso8601])
+        #expect(DateSnippetStyle.iso8601.rawValue == "iso8601")
+    }
+
+    @Test("저장분의 iso8601을 국제 표준으로 읽는다")
+    func decodesISO8601() throws {
+        let json = #"{"dateSnippetStyle": "iso8601"}"#
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: Data(json.utf8))
+        #expect(decoded.dateSnippetStyle == .iso8601)
     }
 }
 
@@ -57,5 +71,33 @@ struct DateSnippetOverlapWarningTests {
     ])
     func doesNotWarn(triggers: [String]) {
         #expect(!SnippetEntry.mayOverlapDateSnippets(triggers))
+    }
+}
+
+/// B5 E13 — 「영어 추천단어」 스위치(N12, 기본 켬). 옛 저장분은 켬, 왕복, 상위 추천단어 끔 = 영어도 끔
+@Suite("B5 E13 — 영어 추천단어 설정")
+struct EnglishSuggestionSettingsTests {
+
+    @Test("기본 켬 · 옛 저장분(키 없음)도 켬 · 왕복")
+    func defaultsAndRoundTrip() throws {
+        #expect(KeyboardSettings.default.englishSuggestionsEnabled)
+        let legacy = try JSONDecoder().decode(KeyboardSettings.self, from: Data("{}".utf8))
+        #expect(legacy.englishSuggestionsEnabled)
+        var settings = KeyboardSettings.default
+        settings.englishSuggestionsEnabled = false
+        let decoded = try JSONDecoder().decode(KeyboardSettings.self, from: JSONEncoder().encode(settings))
+        #expect(decoded.englishSuggestionsEnabled == false)
+    }
+
+    @Test("상위 추천단어 끔 = 영어도 끔 · secure 끔")
+    func gate() {
+        var settings = KeyboardSettings.default
+        #expect(settings.allowsEnglishSuggestions(isSecureTextEntry: false))
+        #expect(!settings.allowsEnglishSuggestions(isSecureTextEntry: true))
+        settings.suggestionsEnabled = false
+        #expect(!settings.allowsEnglishSuggestions(isSecureTextEntry: false))
+        settings.suggestionsEnabled = true
+        settings.englishSuggestionsEnabled = false
+        #expect(!settings.allowsEnglishSuggestions(isSecureTextEntry: false))
     }
 }

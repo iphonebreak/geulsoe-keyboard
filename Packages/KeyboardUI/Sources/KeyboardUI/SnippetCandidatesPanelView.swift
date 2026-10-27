@@ -3,7 +3,7 @@ import SwiftUI
 import KeyboardCore
 import TadakDomain
 
-/// 겹치는 채움글 후보 패널(U7) — 칩을 길게 눌러 무장한 뒤 손을 떼면 자판 자리를 대신한다.
+/// 겹치는 채움글 후보 패널(U7) — 칩을 길게(450ms) 눌러 **무장하는 순간** 자판 자리를 대신한다(R49 — 연 뒤 손을 떼도 그대로).
 ///
 /// 계약: PDR `docs/design-reviews/external-snippet-packs.md` 10-6 ②⑥⑦ · AC-39·46 · R32 (다) · 시안 8-D·8-I·8-J.
 /// 클립보드·구절 찾기 패널과 **같은 구조**다(`BibleSearchPanelView` 선례) — 자판 자리, 문자 키 색 둥근 행, 아래 「돌아가기」 막대.

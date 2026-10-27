@@ -57,6 +57,8 @@ public final class SuggestionEngine {
 
     private let dictionary: (any WordDictionary)?
     private let userWordRepository: (any UserWordRepository)?
+    /// 영어 엔진인가(B5) — 영어는 `english(dictionary:)`로만 만든다
+    private var isEnglish = false
     private let userWordLimit: Int
     private var userWords: [String: Int]
     /// 단어 → 자모 키. 매 키 입력마다 사용자 단어 전체를 재분해하지 않기 위한 캐시.
@@ -85,8 +87,17 @@ public final class SuggestionEngine {
         }
     }
 
-    /// 입력 중인 단어(마지막 한글 run, 조합 중 음절 포함)에 대한 후보. 최대 `limit`개.
+    /// **영어 엔진(B5 C1)** — 저장소 인자가 **없는** 팩토리다. 학습 저장소(`AppGroupUserWordRepository`)를 넘길 길이 없고
+    /// `learn`은 언제나 아무 것도 하지 않는다(영어 학습 없음 N10 — 정책이 아니라 구조로). 사전 키는 소문자 lookupKey다.
+    public static func english(dictionary: any WordDictionary) -> SuggestionEngine {
+        let engine = SuggestionEngine(dictionary: dictionary)
+        engine.isEnglish = true
+        return engine
+    }
+
+    /// 입력 중인 단어(마지막 한글 run, 조합 중 음절 포함 — 영어 엔진은 라틴 run)에 대한 후보. 최대 `limit`개.
     public func suggestions(forWord word: String, limit: Int = 3) -> [String] {
+        if isEnglish { return englishSuggestions(forWord: word, limit: limit) }
         guard limit > 0, !word.isEmpty, let jamo = JamoDecomposer.decompose(word)
         else { return [] }
 
@@ -115,6 +126,7 @@ public final class SuggestionEngine {
     /// 확정된 단어를 학습한다. **완성 음절 2자 이상만** — "안녕ㅎ"처럼 조합 중 자음이
     /// 낀 run은 단어가 아니다. 저장 실패는 정상 경로 — 세션 학습으로 남는다.
     public func learn(word: String) {
+        guard !isEnglish else { return }   // C1 — 영어는 학습하지 않는다
         guard word.count >= 2,
               word.allSatisfy({ HangulSyllable.decompose($0) != nil }) else { return }
         userWords[word, default: 0] += 1
@@ -127,5 +139,32 @@ public final class SuggestionEngine {
             }
         }
         userWordRepository?.save(userWords)
+    }
+
+    /// 영어 후보(E3) — 조회는 정규화 키, 자기 자신(키가 같은 것) 제외, 표시는 입력 모양을 따른다:
+    /// `hel`→`hello` · `Hel`→`Hello` · `HEL`(2자 이상 전부 대문자)→`HELLO`. 손질 원형(`I'm`·`Monday`·`iPhone`)은 그대로 둔다
+    private func englishSuggestions(forWord word: String, limit: Int) -> [String] {
+        guard limit > 0, word.count >= 2, word.allSatisfy(LatinWordRun.isRunCharacter), let dictionary else { return [] }
+        let key = LatinWordRun.lookupKey(word)
+        let letters = word.filter(\.isLetter)
+        let allCaps = letters.count >= 2 && letters.allSatisfy(\.isUppercase)
+        let leadingCapital = letters.first?.isUppercase == true
+        var results: [String] = []
+        for candidate in dictionary.candidates(jamoPrefix: key, limit: limit + 2) {
+            if results.count >= limit { break }
+            guard candidate.word.lowercased() != key else { continue }
+            let shaped: String
+            if candidate.word != candidate.word.lowercased() {
+                shaped = candidate.word
+            } else if allCaps {
+                shaped = candidate.word.uppercased()
+            } else if leadingCapital {
+                shaped = candidate.word.prefix(1).uppercased() + candidate.word.dropFirst()
+            } else {
+                shaped = candidate.word
+            }
+            if !results.contains(shaped) { results.append(shaped) }
+        }
+        return results
     }
 }
