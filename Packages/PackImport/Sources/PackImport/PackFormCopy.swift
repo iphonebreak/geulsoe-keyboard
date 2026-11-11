@@ -77,7 +77,6 @@ public enum PackFormCopy {
         case .placeholderCount: "{n}이 꼭 한 번 있어야 해요"
         case .prefixTooShort: "앞 글자가 \(PackNoticeCopy.number(TemplatePatternSpec.minimumPrefixCharacters))자 이상이어야 해요"
         case .prefixEndsWithDigit, .prefixAllDigits: "앞 글자가 숫자로 끝나면 번호와 붙어 읽혀요. 끝에 글자를 넣어 주세요"
-        case .suffixEmpty: "{n} 뒤에 글자가 한 자 이상 있어야 해요"
         case .literalContainsNewline: "틀에는 줄바꿈을 쓸 수 없어요"
         case .reservedDateSuffix: "「날짜」「시간」「시각」으로 끝나면 날짜 채움글과 겹쳐요"
         case .literalTooLong: "틀은 \(PackNoticeCopy.number(PackLimits.templateLiteral.characters))자까지예요. \(String(expandedTriggerRule.dropLast()))"

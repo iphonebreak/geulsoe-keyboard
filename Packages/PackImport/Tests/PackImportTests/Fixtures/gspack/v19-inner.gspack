@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "xlsx",
+  "meta": {
+    "name": "인사말 모음",
+    "rights": "글쇠 예시 · 자유 이용"
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "p4EqktatkjYlu58zoDmcfw==",
+    "nonce": "rLxn5t0MzT9L1JD/"
+  },
+  "ciphertext": "4FI3snirFb62AaQMFhm+AYJuEczw4PP+HJWGOrOCfYPqQoXEYsQ1S1mrWipcILRKTOESDVB0M3KuhgyDKZBuCHuuPyiQ06/zoyhU/HKTmg=="
+}

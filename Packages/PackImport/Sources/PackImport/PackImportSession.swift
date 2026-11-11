@@ -8,12 +8,17 @@ public enum PackImportSource: Equatable, Sendable {
     case file(Data)
     /// 붙여 넣은 글(3-E) — 이미 글자라 인코딩 단계가 없다
     case paste(String)
+    /// 잠금 파일(`.gspack`) 봉투 원본 — 비밀번호 전(PDR 12-10). 확장자로만 가른다(내용 냄새 맡기 없음 — 12-7)
+    case locked(Data)
+    /// 잠금 파일을 푼 안쪽 글 — **붙여넣기와 같은 글자 경로**(인코딩 확인 없음, 12-8). 봉투의 표시 메타(복호로 인증됨)를 함께 든다
+    case unlocked(String, GSPackMeta)
 
+    /// 잠금 파일도 「파일」이다 — 화면 문구(읽는 중·거부 제목·다른 파일 고르기)가 파일 쪽을 따른다
     public enum Kind: Equatable, Sendable { case file, paste }
 
     public var kind: Kind {
         switch self {
-        case .file: .file
+        case .file, .locked, .unlocked: .file
         case .paste: .paste
         }
     }
@@ -21,8 +26,22 @@ public enum PackImportSource: Equatable, Sendable {
     /// 파일 바이트 상한과 같은 잣대(붙여넣기는 UTF-8 바이트, PDR 5-2 검증 F5)
     var byteCount: Int {
         switch self {
-        case .file(let data): data.count
-        case .paste(let text): text.utf8.count
+        case .file(let data), .locked(let data): data.count
+        case .paste(let text), .unlocked(let text, _): text.utf8.count
+        }
+    }
+
+    /// 실을 때의 바이트 상한 — 봉투는 12-3 ①, 나머지는 평문 파일 상한
+    var byteLimit: Int {
+        if case .locked = self { return GSPackLimits.envelopeBytes }
+        return PackLimits.fileBytes
+    }
+
+    /// 상한을 넘었을 때의 거부 — 잠금 파일은 M3(계층을 알리지 않는다, 12-7)
+    var tooLargeProblem: PackImportProblem {
+        switch self {
+        case .locked, .unlocked: .locked(.tooLarge)
+        case .file, .paste: .structural(.fileTooLarge)
         }
     }
 }
@@ -36,6 +55,20 @@ public enum PackImportProblem: Error, Equatable, Sendable {
     /// 받을 수 있는 행이 0 — 영구 비활성(5-5). 건너뛴 행의 **위치와 사유만** 들고 간다(검증 F-7 — 초안을 들면 `#이름`·`#권리`·`#틀`
     /// 원문이 오류 값에 실린다. 4-G 화면이 보이는 것은 사유 묶음과 위치뿐이다)
     case noValidRecords([SkippedRecord])
+    /// 잠금 파일(`.gspack`) 거부 — M1 형식·M2 새 버전·M3 크기·M5 안쪽 읽기(12-7). M4·M6은 비밀번호 화면에 머물러 여기로 오지 않는다
+    case locked(GSPackFailure)
+}
+
+/// 비밀번호 화면 값(PDR 12-10 ④) — 봉투의 표시 메타는 **복호 전 미인증**이다(「확인 전」으로 보인다)
+public struct PackPasswordPrompt: Equatable, Sendable {
+    public let meta: GSPackMeta
+    /// 같은 화면에 보이는 오류 — M4(비밀번호·변조)·M6(너무 김)만. 필드는 그대로 둔다(오타 고치기)
+    public var failure: GSPackFailure?
+
+    public init(meta: GSPackMeta, failure: GSPackFailure? = nil) {
+        self.meta = meta
+        self.failure = failure
+    }
 }
 
 /// 미리보기 모델(시안 4-E·4-F·4-H·4-I) — 받을 항목 · 건너뛴 행과 사유 · 겹치는 단축어
@@ -121,6 +154,21 @@ public struct PackImportSession: Equatable, Sendable {
         case sheet(PackSheetChoice)
         case preview(PackImportPreview)
         case failed(PackImportProblem)
+        /// 잠금 파일 — 봉투 검사(KDF 전)를 통과했고 비밀번호를 기다린다(PDR 12-10 ④)
+        case password(PackPasswordPrompt)
+    }
+
+    /// 비밀번호 한 번 — 메인 밖 `open`에 넘긴다. 비밀번호는 이 값과 화면 상태에만 잠깐 있다(로그·파일·분석 금지, 12-4)
+    public struct UnlockRun: Sendable {
+        public let generation: Int
+        let envelope: GSPackEnvelope
+        let password: String
+    }
+
+    /// `open`의 결과 — `receiveUnlock`으로 돌려준다
+    public struct UnlockResult: Equatable, Sendable {
+        public let generation: Int
+        public let result: Result<String, GSPackFailure>
     }
 
     /// 칸 나누기를 바꿔 읽기가 실패했을 때 그 자리에서 돌아갈 곳(R29) — 거부 화면이 「되돌리기」를 보인다
@@ -154,6 +202,8 @@ public struct PackImportSession: Equatable, Sendable {
             case chooseDelimiter([CSVDelimiter])
             case chooseSheet([PackSheetSummary])
             case failed(PackImportProblem)
+            /// 잠금 파일 봉투가 검사를 통과했다 — 비밀번호 화면으로(복호는 아직)
+            case password(GSPackEnvelope)
         }
 
         public let generation: Int
@@ -191,6 +241,8 @@ public struct PackImportSession: Equatable, Sendable {
     private var pendingSheetFallback = false
     /// 고른 시트를 읽지 못한 거부 화면이다(원본을 지니고 있다)
     private var sheetFallbackActive = false
+    /// 검사를 통과한 잠금 파일 봉투 — 비밀번호 화면 동안만. 풀거나 취소·거부하면 비운다
+    private var envelope: GSPackEnvelope?
 
     public init(acceptsWorkbookFiles: Bool = PackCopySet.current.acceptsWorkbookFiles) {
         self.acceptsWorkbookFiles = acceptsWorkbookFiles
@@ -229,8 +281,8 @@ public struct PackImportSession: Equatable, Sendable {
     /// 열어 둔 원본을 싣는다 — `begin`이 준 표(ticket)가 지금 것이 아니면(취소·새 시작) 받지 않는다. 바이트 상한을 넘으면 계산 없이 거부
     public mutating func load(_ source: PackImportSource, ticket: Int) -> Run? {
         guard ticket == generation, phase == .reading, self.source == nil, source.kind == sourceKind else { return nil }
-        guard source.byteCount <= PackLimits.fileBytes else {
-            finish(.failed(.structural(.fileTooLarge)))
+        guard source.byteCount <= source.byteLimit else {
+            finish(.failed(source.tooLargeProblem))
             return nil
         }
         self.source = source
@@ -271,6 +323,72 @@ public struct PackImportSession: Equatable, Sendable {
             phase = .encoding(review)
         }
         return true
+    }
+
+    // MARK: - 잠금 파일 (PDR 12-10 ④)
+
+    /// 「열기」 — 빈 비밀번호는 시도하지 않고, 256바이트를 넘으면 KDF 없이 같은 화면에 M6을 보인다. 동시에 하나만(12-4)
+    public mutating func unlock(password: String) -> UnlockRun? {
+        guard !isWorking, case .password(var prompt) = phase, let envelope else { return nil }
+        do throws(GSPackFailure) {
+            _ = try GSPackPassword.keyMaterial(password)
+        } catch {
+            if error == .passwordTooLong {
+                prompt.failure = error
+                phase = .password(prompt)
+            }
+            return nil
+        }
+        generation += 1
+        isWorking = true
+        return UnlockRun(generation: generation, envelope: envelope, password: password)
+    }
+
+    /// 풀린 결과를 받는다 — 성공이면 안쪽 글을 원본으로 바꿔 **붙여넣기와 같은 글자 경로**로 읽을 `Run`을 낸다(12-8).
+    /// M4·M6은 비밀번호 화면에 머물고(필드 유지), 그 밖의 실패(M3·M5)는 거부 화면이다. 옛 세대(취소 뒤)면 버린다
+    public mutating func receiveUnlock(_ unlocked: UnlockResult) -> Run? {
+        guard unlocked.generation == generation, isWorking, case .password(var prompt) = phase, let envelope else { return nil }
+        switch unlocked.result {
+        case .success(let text):
+            let opened = PackImportSource.unlocked(text, envelope.meta)
+            guard opened.byteCount <= opened.byteLimit else {
+                finish(.failed(opened.tooLargeProblem))
+                return nil
+            }
+            self.envelope = nil
+            source = opened
+            prompt.failure = nil
+            phase = .password(prompt)
+            return Run(generation: generation, source: opened, options: options, acceptsWorkbookFiles: acceptsWorkbookFiles)
+        case .failure(let failure):
+            switch failure {
+            case .wrongPasswordOrDamaged, .passwordTooLong, .passwordEmpty:
+                isWorking = false
+                prompt.failure = failure == .passwordEmpty ? nil : failure
+                phase = .password(prompt)
+            case .malformed, .newerVersion, .tooLarge, .unreadableContent:
+                finish(.failed(.locked(failure)))
+            }
+            return nil
+        }
+    }
+
+    /// 메인 밖에서 — 봉투를 푼다(KDF·GCM). 취소할 수 없는 C 호출이라 취소 = 결과를 버림(세대 비교, 12-5)
+    public static func open(_ run: UnlockRun, deriveKey: GSPackKeyDerivation = GSPackOpener.pbkdf2) -> UnlockResult {
+        let result: Result<String, GSPackFailure>
+        do throws(GSPackFailure) {
+            result = .success(try GSPackOpener.open(run.envelope, password: run.password, deriveKey: deriveKey))
+        } catch {
+            result = .failure(error)
+        }
+        return UnlockResult(generation: run.generation, result: result)
+    }
+
+    /// `open`을 전역 큐에서 — KDF(수백 ms~수 초) 동안 화면이 멈추지 않게
+    public static func performUnlock(_ run: UnlockRun, queue: DispatchQueue = .global(qos: .userInitiated)) async -> UnlockResult {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume(returning: open(run)) }
+        }
     }
 
     // MARK: - 선택
@@ -382,6 +500,7 @@ public struct PackImportSession: Equatable, Sendable {
         sheetChoice = nil
         pendingSheetFallback = false
         sheetFallbackActive = false
+        envelope = nil
     }
 
     // MARK: - 안
@@ -407,6 +526,9 @@ public struct PackImportSession: Equatable, Sendable {
             let choice = PackSheetChoice(sheets: sheets, selected: 0)
             sheetChoice = choice
             phase = .sheet(choice)
+        case .password(let envelope):
+            self.envelope = envelope
+            phase = .password(PackPasswordPrompt(meta: envelope.meta))
         case .failed(let problem):
             if let fallback {
                 // R29 — 칸 나누기를 바꿔 실패했다: 거부 화면이지만 원본을 지니고 돌아갈 곳을 둔다
@@ -435,6 +557,7 @@ public struct PackImportSession: Equatable, Sendable {
         sheetChoice = nil
         pendingSheetFallback = false
         sheetFallbackActive = false
+        envelope = nil
     }
 
     // MARK: - 메인 밖에서 할 일
@@ -442,6 +565,17 @@ public struct PackImportSession: Equatable, Sendable {
     /// 한 번의 읽기 — **순수**하다(같은 Run이면 같은 결과). 원본 바이트에서 인코딩→구분자→파싱→검증을 전부 한다(5-1·AC-18).
     /// - Parameter library: 단축어 겹침(4-I)을 셀 지금 목록 — 못 읽었으면 nil(겹침 안내 없이 미리보기)
     public static func compute(_ run: Run, library: PackImpact.Library?) -> Computation {
+        // 잠금 파일 — 봉투 검사만(KDF 전, 12-2 ⓐ~ⓕ). 통과하면 비밀번호 화면, 아니면 M1~M3
+        if case .locked(let data) = run.source {
+            let outcome: Computation.Outcome
+            do throws(GSPackFailure) {
+                outcome = .password(try GSPackEnvelope.parse(data))
+            } catch {
+                outcome = .failed(.locked(error))
+            }
+            return Computation(generation: run.generation, review: nil, outcome: outcome)
+        }
+
         // xlsx — 받는 판이고 원본이 ZIP·OLE2 매직이면. 인코딩·구분자 단계가 없다(6-1)
         if case .file(let data) = run.source, run.acceptsWorkbookFiles, PackImporter.isWorkbook(data) {
             let outcome: Computation.Outcome
@@ -462,13 +596,14 @@ public struct PackImportSession: Equatable, Sendable {
         let outcome: Computation.Outcome
         do throws(PackImportFailure) {
             let read: PackImportOutcome = switch run.source {
-            case .file(let data): try PackImporter.read(data, options: run.options)
-            case .paste(let text): try PackImporter.read(text: text, delimiter: run.options.delimiter)
+            case .file(let data), .locked(let data): try PackImporter.read(data, options: run.options)
+            case .paste(let text), .unlocked(let text, _): try PackImporter.read(text: text, delimiter: run.options.delimiter)
             }
             switch read {
             case .chooseDelimiter(let candidates):
                 outcome = .chooseDelimiter(candidates)
-            case .draft(let draft):
+            case .draft(var draft):
+                if case .unlocked(_, let meta) = run.source { draft.adoptLockedPack(meta) }
                 outcome = previewOutcome(draft, library: library)
                 review?.recordCount = draft.dataRecordCount
                 review?.multilineBodyCount = draft.mode == .numbered ? draft.items.filter { $0.body.contains("\n") }.count

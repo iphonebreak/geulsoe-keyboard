@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "Iter",
+    "rights": ""
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "llS6l35kKhtsv2Xx/seaOQ==",
+    "nonce": "vFgmORz44DyGG7y2"
+  },
+  "ciphertext": "2aADpriGj0DjXsYvY4zLr5mJFqVj8CENskj5FAgJYO+PSL2AMHM29qw1pxc="
+}

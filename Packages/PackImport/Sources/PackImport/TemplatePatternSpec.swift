@@ -16,8 +16,6 @@ public enum TemplatePatternSpec {
         case prefixEndsWithDigit
         /// 접두가 숫자뿐(숫자 단독 금지, R3)
         case prefixAllDigits
-        /// 접미가 정규화 뒤 비었다
-        case suffixEmpty
         /// literal 안에 개행
         case literalContainsNewline
         /// 접미가 `날짜`·`시간`·`시각`으로 끝난다 — 날짜·시간 팩 끝말(전체 일치가 아니라 endsWith, 10-1)
@@ -48,7 +46,8 @@ public enum TemplatePatternSpec {
         guard prefix.count >= minimumPrefixCharacters else { return .failure(.prefixTooShort) }
         if prefix.allSatisfy(isASCIIDigit) { return .failure(.prefixAllDigits) }
         if let last = prefix.last, isASCIIDigit(last) { return .failure(.prefixEndsWithDigit) }
-        guard !suffix.isEmpty else { return .failure(.suffixEmpty) }
+        // 접미는 비어도 된다(2026-11-08 사장님 결정, 10-1 개정) — `찬송가{n}`처럼 번호가 입력 끝이다. 키보드 매처는 빈 접미를
+        // 「꼬리 끝이 숫자열」로 그대로 맞히고(`PackTemplateMatcher`, 코드 변경 없음), 치는 도중 짧은 번호 칩이 먼저 보인다(알려진 부작용)
         if reservedDateSuffixes.contains(where: suffix.hasSuffix) { return .failure(.reservedDateSuffix) }
         guard PackLimits.templateLiteral.admits(prefix + suffix) else { return .failure(.literalTooLong) }
         return .success(TemplatePattern(prefix: prefix, suffix: suffix))

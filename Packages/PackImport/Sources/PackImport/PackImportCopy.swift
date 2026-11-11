@@ -501,6 +501,8 @@ public enum PackImportCopy {
             return "가져올 수 있는 행이 없어요. 건너뛴 이유를 확인해 주세요."
         case .structural(let failure):
             return message(failure, kind: kind)
+        case .locked(let failure):
+            return PackLockedCopy.failure(failure)
         }
     }
 

@@ -86,6 +86,19 @@ keyboard_firebase_check() {
   return $rc
 }
 
+# ── 잠금 팩(.gspack, v1.4.0) 복호화는 **앱 전용**(PackImport) — 키보드에 암호 호출이 끌려오면 실패 ──
+# CryptoKit(`$s9CryptoKit` 맹글링 접두)·CommonCrypto PBKDF(`CCKeyDerivationPBKDF`)는 OS 제공이라
+# 4절의 「시스템 밖 라이브러리 0」이 잡지 못한다(PDR `external-snippet-packs.md` 12-10 ⑥-3·12-12 ⑥(b)).
+KB_CRYPTO_DENY='\$s9CryptoKit|CCKeyDerivation'
+# $1 = 키보드 nm -a 출력. 실패가 하나라도 있으면 1
+keyboard_crypto_check() {
+  local nmf="$1" hit
+  hit=$(grep -E "$KB_CRYPTO_DENY" "$nmf" | head -5 || true)
+  if [ -z "$hit" ]; then ok "키보드 CryptoKit·CCKeyDerivation 심볼 0건 — 잠금 팩 복호화는 앱에만 있다"; return 0; fi
+  bad "키보드에 암호 호출 심볼 — $(printf '%s' "$hit" | awk '{print $NF}' | tr '\n' ' ')(PackImport·CryptoKit은 앱 전용이다)"
+  return 1
+}
+
 FAIL=0
 say()  { printf '%s\n' "$*"; }
 bad()  { printf '  ✗ %s\n' "$*" >&2; FAIL=1; }
@@ -93,8 +106,9 @@ ok()   { printf '  ✓ %s\n' "$*"; }
 
 if [ "${1:-}" = "--keyboard-nm" ]; then
   [ -f "${2:-}" ] || { echo "사용법: bash tools/archive-compliance-check.sh --keyboard-nm <nm 출력 파일>" >&2; exit 2; }
-  say "== 4) 키보드 Firebase 허용 목록 (보조 모드 — 제출 판정 아님) =="
+  say "== 4) 키보드 Firebase 허용 목록 · 암호 호출 0 (보조 모드 — 제출 판정 아님) =="
   keyboard_firebase_check "$2"
+  keyboard_crypto_check "$2"
   [ "$FAIL" -eq 0 ] && { echo "결과: 통과"; exit 0; }
   echo "결과: 실패" >&2; exit 1
 fi
@@ -258,12 +272,16 @@ for i in "${!NMS[@]}"; do
   T=$((T+c))
 done
 ITS=$(info "$APP" ITSAppUsesNonExemptEncryption) || ITS="없음"
-[ "$ITS" = "false" ] && ok "ITSAppUsesNonExemptEncryption = false" || bad "ITSAppUsesNonExemptEncryption = $ITS (false 여야 한다)"
+[ "$ITS" = "false" ] && ok "ITSAppUsesNonExemptEncryption = false — OS 제공 암호 호출만(면제 해석, PDR external-snippet-packs 12-12 — 법적 분류기가 아니다)" \
+                     || bad "ITSAppUsesNonExemptEncryption = $ITS (false 여야 한다)"
 if [ "$T" -eq 0 ]; then
   ok "열거한 암호 구현 이름 패턴 0건(심볼 판정 대상 ${#SOURCES[@]} 개) — 이름을 감춘 자체 구현까지 증명하지는 않는다(소스·의존성 검토와 함께 본다)"
 else
   bad "암호화 심볼 $T 건 — false 근거가 무너진다. 사람이 재판단할 것"
 fi
+# 알려진 OS 암호 호출(허용 목록, v1.4.0 잠금 팩) — 앱에만 있어야 한다. 앱 쪽 수는 기록용이다(실패 조건 아님 —
+# 위 CRYPTO 패턴이 「목록 밖」 구현을 막는다). 키보드 쪽 0은 4절 keyboard_crypto_check가 강제한다
+say "  (참고) 앱의 알려진 OS 암호 호출 — CryptoKit: $(count "$APP_NM" '\$s9CryptoKit') · CCKeyDerivationPBKDF: $(count "$APP_NM" 'CCKeyDerivationPBKDF') · CC_SHA: $(count "$APP_NM" '_CC_SHA')"
 
 say "== 3) 추적 표면 =="
 ADS=0; IDFA=0
@@ -293,7 +311,12 @@ else
   EXTRA=$(printf '%s\n' "$elo" | awk '/^\t/ {print $1}' | grep -vE '^(/System/Library/|/usr/lib/)' || true)
   [ -z "$EXTRA" ] && ok "otool -L — 키보드는 시스템 라이브러리(/System/Library·/usr/lib)만 링크한다" \
                   || bad "otool -L — 키보드가 시스템 밖 라이브러리를 링크한다: $(printf '%s' "$EXTRA" | tr '\n' ' ')"
+  # 위 허용(/System/Library)이 OS 암호 프레임워크를 못 거른다 — 잠금 팩 복호화가 키보드로 새면 여기서 멈춘다
+  printf '%s\n' "$elo" | grep -q 'CryptoKit\.framework' \
+    && bad "otool -L — 키보드가 CryptoKit.framework 를 링크한다(잠금 팩 복호화는 앱 전용)" \
+    || ok "otool -L — 키보드에 CryptoKit.framework 링크 없음"
 fi
+keyboard_crypto_check "$APPEX_NM"
 
 say "== 5) 프라이버시 매니페스트 — 존재·파싱·필수 키·required-reason·수집 선언 =="
 python3 - "$APP/PrivacyInfo.xcprivacy" "앱" "$EXPECTED_APP_API" "$EXPECTED_APP_COLLECTED" \

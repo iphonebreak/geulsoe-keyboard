@@ -807,7 +807,7 @@ struct PackWorkbookSessionTests {
     @Test("★ 파일 고르기 형식 — CSV 전용판은 CSV·TSV·글만, xlsx 중심판은 xlsx(org.openxmlformats.spreadsheetml.sheet)를 앞에 더한다")
     func pickerTypes() throws {
         let csv = PackImportFileTypes.allowed(for: .csv)
-        #expect(csv == [.commaSeparatedText, .tabSeparatedText, .plainText])
+        #expect(csv == [.commaSeparatedText, .tabSeparatedText, .plainText, PackImportFileTypes.lockedPack])   // 잠금 파일은 두 판 공통(1.4.0)
         let xlsx = PackImportFileTypes.allowed(for: .xlsx)
         #expect(Array(xlsx.dropFirst()) == csv)
         let workbook = try #require(xlsx.first)

@@ -3,7 +3,7 @@ import PackImport
 import TadakDomain
 
 // 외부 채움글 1-c 4·5단계 — 가져오기 시트: 4-A 읽는 중 · 4-B·4-C 글자 확인 · 구분자 고르기 · 4-D 시트 고르기(엑셀, 1-e ③) ·
-// 4-E·4-F·4-H·4-I 미리보기 · 4-G 거부
+// 4-E·4-F·4-H·4-I 미리보기 · 4-G 거부 · 잠긴 팩 비밀번호(1.4.0 `.gspack`, PDR 12-10 ④)
 // → (5단계) 「팩 정보」 폼 · 확정 · 4-M 완료(`PackImportFormView.swift`)
 // (계획서 `external-snippet-packs-1c-plan.md` 3-3·3-4절·5절 4·5행, 시안 4-A~4-C·4-E~4-M·5-A~5-C, PDR 5-1·5-2·5-3b·5-5·5-6·9-2, AC-3·17~20·34).
 //
@@ -24,6 +24,9 @@ struct PackImportRequest: Identifiable {
 
     let id = UUID()
     let origin: Origin
+    /// 거부 화면의 「다른 파일 고르기」를 보일지 — 선택기를 다시 열 화면(채움글 설정)에서 연 시트만 참이다.
+    /// 「글쇠로 열기」(루트, 12-10 ②)는 다시 열 선택기가 없어 「닫기」를 보인다
+    var canPickAnother = true
 
     var kind: PackImportSource.Kind {
         if case .paste = origin { return .paste }
@@ -56,6 +59,10 @@ struct PackImportFlowView: View {
     @State private var formDraft: PackDraft?
     /// 폼에서 정리 화면으로 갔다 — 돌아오면 목록을 다시 읽는다(같은 이름·revision·틀 소유가 새 목록을 따른다)
     @State private var reloadsLibraryOnReturn = false
+    /// 잠긴 팩 비밀번호 — 화면 상태에만. 풀리거나 거부되거나 시트가 닫히면 지운다(12-4 메모리 위생 — 최선 노력: SwiftUI 문자열은
+    /// 즉시 영점화되지 않는다). 틀리면(M4) 그대로 둬서 고쳐 칠 수 있게 한다. 로그·분석에 싣지 않는다
+    @State private var password = ""
+    @FocusState private var passwordFocused: Bool
 
     enum Destination: Hashable {
         case guide, allRows, allSkipped, form, cleanup
@@ -89,8 +96,12 @@ struct PackImportFlowView: View {
             }
         }
         .task { await start() }
-        // 끌어 내려 닫아도 원본을 비운다
-        .onDisappear { session.cancel() }
+        // 끌어 내려 닫아도 원본을 비운다. 받은 편지함 사본(「글쇠로 열기」)은 여기서 지우지 않는다 — 시트가 뜨는 순간 화면이 사라졌다
+        // 다시 생기면(온보딩 덮개가 닫히는 중) 첫 화면이 사본을 지워 둘째 화면이 못 읽었다(시뮬레이터 실측 2026-11-08). 띄운 쪽의 `onDismiss`가 지운다
+        .onDisappear {
+            session.cancel()
+            password = ""
+        }
         // 저장하는 동안은 끌어 내려 닫지 않는다(결과를 받을 화면이 사라지지 않게)
         .interactiveDismissDisabled(confirmation?.phase == .working)
         .onChange(of: completion) { _, done in
@@ -143,6 +154,64 @@ struct PackImportFlowView: View {
                 onHowToFix: { path.append(.guide) }, onPartial: { showsPartialConfirmation = true })
         case .failed(let problem):
             failureContent(problem)
+        case .password(let prompt):
+            passwordContent(prompt)
+        }
+    }
+
+    /// 잠긴 팩(12-10 ④) — 봉투의 이름·출처는 「확인 전」으로만, 비밀번호 칸 하나, 「열기」(빈 값·푸는 중 비활성), 도움말·오류는 같은 화면.
+    /// 「취소」(도구 막대)는 푸는 중에도 된다 — 결과를 버린다
+    @ViewBuilder
+    private func passwordContent(_ prompt: PackPasswordPrompt) -> some View {
+        Section {
+            VStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 40))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+                Text(PackLockedCopy.lead)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+        .listRowBackground(Color.clear)
+
+        // 비밀번호 절을 정보 절 **위에** 둔다 — 아이폰 SE(4.7형)에서 정보 절 아래에 두면 자동 초점으로 올라온 자판이 필드를 가렸다(시뮬레이터 실측 2026-11-08)
+        Section {
+            // KDF 중에도 필드는 막지 않는다 — 막으면 초점이 풀려 M4 뒤 자판이 내려갔다(12-10 ④ 「필드 유지·초점 유지」). 진행 중 중복 시도는 세션이 거른다
+            SecureField(PackLockedCopy.passwordLabel, text: $password)
+                .focused($passwordFocused)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .onSubmit(unlock)
+            Button(session.isWorking ? PackLockedCopy.opening : PackLockedCopy.open, action: unlock)
+                .disabled(password.isEmpty || session.isWorking)
+        } footer: {
+            VStack(alignment: .leading, spacing: 6) {
+                if let failure = prompt.failure {
+                    Text(PackLockedCopy.failure(failure))
+                        .foregroundStyle(.red)
+                }
+                Text(PackLockedCopy.help)
+            }
+        }
+        .onAppear { passwordFocused = true }
+
+        Section {
+            LabeledContent(PackLockedCopy.nameLabel) {
+                Text(verbatim: prompt.meta.name.isEmpty ? PackLockedCopy.emptyValue : prompt.meta.name)
+            }
+            LabeledContent(PackLockedCopy.sourceLabel) {
+                Text(verbatim: prompt.meta.rights.isEmpty ? PackLockedCopy.emptyValue : prompt.meta.rights)
+            }
+        } header: {
+            Text(PackLockedCopy.metaHeader)
+        } footer: {
+            Text(PackLockedCopy.metaFooter)
         }
     }
 
@@ -388,8 +457,10 @@ struct PackImportFlowView: View {
 
         Section {
             Button(PackImportCopy.guideTitle) { path.append(.guide) }
-            if request.kind == .file {
+            if request.kind == .file, request.canPickAnother {
                 Button(PackImportCopy.pickAnotherFile) { close(.pickAnotherFile) }
+            } else if request.kind == .file {
+                Button(PackImportCopy.close) { close(.closed) }
             } else {
                 Button(PackImportCopy.backToPaste) { close(.closed) }
             }
@@ -456,6 +527,7 @@ struct PackImportFlowView: View {
         case .delimiter: PackImportCopy.delimiterTitle
         case .sheet: PackImportCopy.sheetTitle
         case .preview: PackImportCopy.previewTitle
+        case .password: PackLockedCopy.title
         case .idle, .reading, .failed: PackImportCopy.flowTitle
         }
     }
@@ -480,6 +552,9 @@ struct PackImportFlowView: View {
                 // 4-D 「다음」 — 고른 시트로 원본에서 다시 읽는다
                 Button(PackImportCopy.next) { run(session.confirmSheet()) }
                     .disabled(session.isWorking)
+            case .password:
+                Button(PackLockedCopy.open, action: unlock)
+                    .disabled(password.isEmpty || session.isWorking)
             case .preview(let preview):
                 // 4-H는 확인 전에 「다음」이 없다(자동 진행 금지, R10). 「다음」 = 「팩 정보」 폼(5-A·5-B)
                 if completion == nil, !preview.draft.requiresConfirmation || session.partialImportConfirmed {
@@ -543,6 +618,11 @@ struct PackImportFlowView: View {
         async let loadedLibrary = PackStoreClient.live.impactLibrary()
         let source: Result<PackImportSource, PackImportProblem> = switch request.origin {
         case .paste(let text): .success(.paste(text))
+        case .file(let url) where PackImportFileTypes.isLockedPack(url):
+            // 잠금 파일 — 봉투 상한(12-3 ①)으로 제한 읽기, 넘으면 M3
+            await PackFileReader.read(url, limit: GSPackLimits.envelopeBytes)
+                .map { .locked($0) }
+                .mapError { $0 == .structural(.fileTooLarge) ? .locked(.tooLarge) : $0 }
         case .file(let url): await PackFileReader.read(url).map { .file($0) }
         case .pickFailed: .failure(.fileUnreadable)
         }
@@ -560,6 +640,23 @@ struct PackImportFlowView: View {
         Task {
             let computation = await PackImportSession.perform(run, library: library)
             session.receive(computation)
+        }
+    }
+
+    /// 잠긴 팩 「열기」 — 메인 밖에서 푼다(KDF). 풀리면 비밀번호를 지우고 안쪽 글을 붙여넣기와 같은 길로 읽는다(12-8).
+    /// 틀리면(M4) 같은 화면에 오류, 비밀번호 칸은 그대로·초점 유지. 그 밖의 실패는 거부 화면(비밀번호를 지운다)
+    private func unlock() {
+        guard !password.isEmpty, let unlockRun = session.unlock(password: password) else { return }
+        Task {
+            let result = await PackImportSession.performUnlock(unlockRun)
+            if let next = session.receiveUnlock(result) {
+                password = ""
+                run(next)
+            } else if case .password = session.phase {
+                passwordFocused = true
+            } else {
+                password = ""
+            }
         }
     }
 
@@ -739,6 +836,9 @@ private struct PackImportPreviewSections: View {
         if draft.hiddenColumnCount > 0 { notes.append(PackImportCopy.hiddenColumns(draft.hiddenColumnCount)) }
         if draft.sanitizedCharacterCount > 0 { notes.append(PackImportCopy.sanitized(draft.sanitizedCharacterCount)) }
         if draft.strayQuoteCount > 0 { notes.append(PackImportCopy.strayQuotes(draft.strayQuoteCount)) }
+        // 잠금 파일을 푼 팩 — 저장은 잠금이 풀린 채(12-8 한계 고지), 봉투 표시와 안쪽 메타가 다르면 안쪽을 쓴다
+        if draft.lockedMetaDiffers { notes.append(PackLockedCopy.metaDiffers) }
+        if draft.readFromLockedPack { notes.append(PackLockedCopy.storedUnlocked) }
         return notes
     }
 

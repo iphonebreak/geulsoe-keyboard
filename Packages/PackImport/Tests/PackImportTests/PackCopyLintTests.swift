@@ -107,6 +107,7 @@ var stage6Copy: [String] {
 /// 엑셀 사유·시트 고르기 문구(`workbookOnlyCopy`)는 xlsx를 받는 판에서만 화면에 닿는다(CSV 전용판 세션은 xlsx를 읽지 않는다 — AC-35)
 var allScreenCopy: [String] {
     stage1To3Copy + stage4Copy + PackImportCopy.guideSheet.flatMap { $0 } + stage5Copy + [PackNoticeCopy.unreadableListFooter] + stage6Copy
+        + PackLockedCopy.all
         + (PackCopySet.current.acceptsWorkbookFiles ? workbookOnlyCopy : [])
 }
 

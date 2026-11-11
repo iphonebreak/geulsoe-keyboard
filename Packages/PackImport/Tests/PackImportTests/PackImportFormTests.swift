@@ -311,8 +311,8 @@ struct PackTemplateReviewTests {
         ("성 {n}번", .prefixTooShort),
         ("회차2{n}번", .prefixEndsWithDigit),
         ("12{n}번", .prefixAllDigits),
-        ("사자성어{n}", .suffixEmpty),
-        ("사자성어 {n}  ", .suffixEmpty),
+        ("사자성어{n}", nil),          // 빈 접미 허용(2026-11-08)
+        ("사자성어 {n}  ", nil),
         ("사자성어 번", .placeholderCount),
         ("사자성어 {n}번 {n}", .placeholderCount),
         ("회차{n}시간", .reservedDateSuffix),
@@ -1058,7 +1058,7 @@ var stage5Copy: [String] {
 }
 
 private let allPatternFailures: [TemplatePatternSpec.Failure] = [
-    .placeholderCount, .prefixTooShort, .prefixEndsWithDigit, .prefixAllDigits, .suffixEmpty, .literalContainsNewline,
+    .placeholderCount, .prefixTooShort, .prefixEndsWithDigit, .prefixAllDigits, .literalContainsNewline,
     .reservedDateSuffix, .literalTooLong, .collidesWithBible(n: 51)
 ]
 
