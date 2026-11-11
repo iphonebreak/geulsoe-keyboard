@@ -136,7 +136,15 @@ public struct BibleSearchCascade: Sendable {
     /// 한 바퀴(최대 10회 훑기)를 끝까지 돌 이유가 없다 — 결과는 어차피 버려진다.
     /// 훑기 하나하나는 스캐너가 **절 256개마다** 끊고
     /// (`BibleByteScanner.cancellationCheckInterval`), 훑기 **사이**는 여기서 끊는다.
+    ///
+    /// ## ★ 꼬리가 공백·개행으로 끝나면 찾지 않는다 (사장님 결정 2026-11-10)
+    ///
+    /// 낱말 창은 마지막 낱말 끝에서 자르므로 「엘리사 」의 결과는 「엘리사」(공백 없음)다. 그런데 패널 가드와
+    /// 구절 삽입(`insertSnippet`)은 **꼬리가 `typedText`로 끝나야** 성립한다 — 배지는 뜨는데 누르면 패널이
+    /// 열리자마자 닫혀 아무 일이 없었다(실기 신고). 띄어쓰기를 치면 배지를 숨기는 쪽으로 정했다 —
+    /// 결과가 나오면 언제나 꼬리가 `typedText`로 끝난다.
     public func search(tail: String) -> BibleSearchResult? {
+        guard let lastCharacter = tail.last, !lastCharacter.isWhitespace else { return nil }
         let words = tail.split(whereSeparator: { $0.isWhitespace })
         guard let lastWord = words.last else { return nil }
         guard !Task.isCancelled else { return nil }
