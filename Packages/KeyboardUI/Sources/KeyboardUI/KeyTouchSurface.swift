@@ -8,12 +8,13 @@ struct KeyTouchHandlers {
     var began: @MainActor () -> Void = {}
     /// 닿은 자리부터의 가로 이동량(pt)
     var moved: @MainActor (CGFloat) -> Void = { _ in }
-    var ended: @MainActor () -> Void = {}
+    /// 손 뗌 — `handledBySystem`이 참이면 이 누름은 시스템 키보드 목록이 판정했다(짧은 탭의 한영은 VC가 낸다). 키 이벤트를 내지 않는다
+    var ended: @MainActor (_ handledBySystem: Bool) -> Void = { _ in }
     /// 시스템 취소·다른 인식기에 밀림 — 입력 없이 버린다
     var lost: @MainActor () -> Void = {}
-    /// 따라가는 터치의 **모든 단계 이벤트**를 그대로 넘긴다(시작·움직임·끝·취소) — 한영 키의 시스템 키보드 목록(`InputModeListHandler`).
-    /// 시스템은 터치의 첫 이벤트부터 받아야 판정한다. nil이면 넘기지 않는다
-    var forward: (@MainActor (UIView, UIEvent) -> Void)? = nil
+    /// 시스템 키보드 목록 통로(한영 키, `InputModeListHandler`) — 닿을 때 `claimPress()`로 이 누름을 넘길지 정하고,
+    /// 넘기면 **그 누름이 끝날 때까지** 그 통로로 모든 단계(시작·움직임·끝·취소)를 넘긴다. nil이면 넘기지 않는다
+    var inputModeList: InputModeListHandler? = nil
 }
 
 /// 키캡 위의 **투명 UIKit 터치 층** — iOS에서 키 누름을 SwiftUI `DragGesture` 대신 받는다.
@@ -75,6 +76,9 @@ final class KeyTouchRecognizer: UIGestureRecognizer {
 
     var handlers = KeyTouchHandlers()
     private var tracker = KeyTouchTracker<ObjectIdentifier>()
+    /// 지금 누름을 시스템에 넘기는 통로 — **닿을 때** 정해 끝까지 쓴다. 누르는 도중 키캡이 알림을 바꿔 끼워도(배열 갱신)
+    /// 시스템이 시작 없는 끝이나 끝 없는 시작을 받지 않는다(리뷰 LOW — 이중 동작·무전환)
+    private var systemPress: InputModeListHandler?
 
     init() {
         super.init(target: nil, action: nil)
@@ -86,6 +90,7 @@ final class KeyTouchRecognizer: UIGestureRecognizer {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in touches {
             if let note = tracker.began(ObjectIdentifier(touch), x: touch.location(in: nil).x) {
+                systemPress = handlers.inputModeList.flatMap { $0.claimPress() ? $0 : nil }
                 deliver(note)
                 forward(touch, event)
             } else {
@@ -105,7 +110,7 @@ final class KeyTouchRecognizer: UIGestureRecognizer {
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in touches {
             guard let note = tracker.ended(ObjectIdentifier(touch)) else { continue }
-            forward(touch, event)
+            forward(touch, event)   // 시스템의 짧은 탭 판정(`advanceToNextInputMode`)이 여기서 동기로 끝난다 — 키캡 손 뗌보다 먼저
             finish(with: note)
         }
     }
@@ -118,21 +123,25 @@ final class KeyTouchRecognizer: UIGestureRecognizer {
         }
     }
 
-    /// 따라가는 터치의 이벤트를 넘긴다 — `from:`은 **그 터치가 속한 뷰**여야 시스템이 터치를 찾는다(`touchesForView:`)
+    /// 따라가는 터치의 이벤트를 넘긴다 — `from:`은 **그 터치가 속한 뷰**여야 시스템이 터치를 찾는다(`touchesForView:`).
+    /// 다른 뷰로 대신 넘기면 시스템은 터치를 못 찾아 「시작」으로 처리한다(목록이 뜬다) — 그럴 바엔 넘기지 않는다(리뷰 LOW)
     private func forward(_ touch: UITouch, _ event: UIEvent) {
-        guard let forward = handlers.forward, let owner = touch.view ?? view else { return }
-        forward(owner, event)
+        guard let systemPress, let owner = touch.view else { return }
+        systemPress.forward(owner, event)
     }
 
-    /// 손 뗌·취소 뒤(이미 추적 끝 — 알림 없음) 또는 **다른 인식기에 밀려** 초기화될 때(추적 중 — 터치 잃음)
+    /// 손 뗌·취소 뒤(이미 추적 끝 — 알림 없음) 또는 **다른 인식기에 밀려** 초기화될 때(추적 중 — 터치 잃음).
+    /// 밀렸을 때 시스템에는 아무것도 넘기지 않는다 — 저장해 둔 이벤트는 터치를 못 찾아 「시작」이 되어 더 나쁘다(지구본도 같다, PDR 한계)
     override func reset() {
         super.reset()
         if let note = tracker.reset() { deliver(note) }
+        systemPress = nil
     }
 
     /// 끝 알림 뒤 실패로 돌려 UIKit이 이 인식기를 초기화하게 한다(인식한 적이 없으니 다른 인식기에 아무 영향 없다)
     private func finish(with note: KeyTouchTracker<ObjectIdentifier>.Event) {
         deliver(note)
+        systemPress = nil
         state = .failed
     }
 
@@ -140,7 +149,7 @@ final class KeyTouchRecognizer: UIGestureRecognizer {
         switch note {
         case .began: handlers.began()
         case .moved(let translation): handlers.moved(translation)
-        case .ended: handlers.ended()
+        case .ended: handlers.ended(systemPress != nil)
         case .lost: handlers.lost()
         }
     }

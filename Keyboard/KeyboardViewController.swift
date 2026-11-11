@@ -1886,14 +1886,15 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: - 한영 키 = 짧게 한영 · 길게 키보드 목록 (1.4.0, 사장님 요청 2026-11-11 — 네이버 키보드 방식, PDR `language-globe-key.md`)
 
-    /// 지구본을 요구하는 기기(홈 버튼 아이폰·아이패드)에서 문자 자판의 지구본을 한영 키에 합친다
-    /// (`LayoutDefinition.mergingGlobeIntoLanguageKey` — 한영 키가 없는 기호·키패드·숫자 패드는 지구본 그대로)
+    /// 지구본을 요구하는 기기(`needsInputModeSwitchKey == true` — 홈 버튼 아이폰 등)에서 문자·기호 자판의 지구본을 한영 키로 합친다
+    /// (`LayoutDefinition.mergingGlobeIntoLanguageKey` — 숫자 전용 입력란의 숫자 패드만 지구본 그대로)
     static let mergesGlobeIntoLanguageKey = true
 
     /// 한영 키 터치를 시스템에 넘기는 중 — 그 사이 시스템이 부르는 `advanceToNextInputMode`는 **짧은 탭**이라는 판정이다
     private var isForwardingLanguageKeyTouch = false
 
-    /// 한영 키 터치의 모든 단계를 시스템 키보드 목록에 넘긴다 — 길게(시스템 기준 약 200ms)면 목록, 짧으면 아래 `advanceToNextInputMode`
+    /// 한영 키 터치의 모든 단계를 시스템 키보드 목록에 넘긴다 — 길게(시스템 기준 약 200ms)면 목록, 짧으면 아래 `advanceToNextInputMode`.
+    /// 넘길지는 키캡 터치 층이 누름마다 정한다(빠른 연타의 둘째는 넘기지 않고 키캡이 한영을 낸다 — `InputModeListGate`)
     private func forwardLanguageKeyTouch(from view: UIView, with event: UIEvent) {
         isForwardingLanguageKeyTouch = true
         defer { isForwardingLanguageKeyTouch = false }

@@ -109,6 +109,7 @@ struct KeyCapView: View {
                         .padding(.trailing, 5)
                         .opacity(press.alternateArmed ? 0 : 1)
                         .allowsHitTesting(false)
+                        .accessibilityHidden(true)   // 키 이름·로터 동작이 대신 알린다 — 지구본 그림이 「지구본」으로 따로 읽히지 않게
                 }
             }
             .modifier(KeyCapSurface(
@@ -299,8 +300,9 @@ struct KeyCapView: View {
     }
 
     /// 손을 뗐다 — 트랙패드였으면 스페이스를 넣지 않고, ⌫는 누를 때 이미 지웠다. 길게 눌러 무장됐으면 대체 입력(","·".com").
-    /// iOS는 누름이 살아 있을 때만 넣는다 — 키가 사라진 뒤 늦게 온 손 뗌은 버린다(`KeyCapPressState.releaseIfPressed`)
-    private func handleTouchUp() {
+    /// iOS는 누름이 살아 있을 때만 넣는다 — 키가 사라진 뒤 늦게 온 손 뗌은 버린다(`KeyCapPressState.releaseIfPressed`).
+    /// `handledBySystem`: 이 누름을 시스템 키보드 목록이 판정했다(합친 한영 키) — 누름 상태만 정리하고 이벤트는 내지 않는다
+    private func handleTouchUp(handledBySystem: Bool = false) {
         cancelPressTasks()
         endBackspaceHold()
         #if os(iOS)
@@ -308,8 +310,9 @@ struct KeyCapView: View {
         #else
         let release = press.release(isBackspace: key.event == .backspace)
         #endif
-        // 키보드 목록으로 넘기는 키는 손 뗌에 자기 이벤트를 내지 않는다 — 짧은 탭의 한영 전환은 시스템 판정 뒤 VC가 낸다(이중 전환 방지)
-        guard InputModeListRule.emitsReleaseEvent(key, handlerAvailable: inputModeList != nil) else { return }
+        // 시스템에 넘긴 누름은 손 뗌에 자기 이벤트를 내지 않는다 — 짧은 탭의 한영 전환은 시스템 판정 뒤 VC가 낸다(이중 전환 방지).
+        // 넘기지 않은 누름(빠른 연타의 둘째 — `InputModeListGate`)은 평범한 한영 키처럼 여기서 낸다
+        guard !handledBySystem else { return }
         switch release {
         case .primary: onEvent(key.event)
         case .alternate: onEvent(key.alternate ?? key.event)
@@ -340,9 +343,9 @@ struct KeyCapView: View {
                 handleTouchMove(translation: 0)
             },
             moved: { handleTouchMove(translation: $0) },
-            ended: { handleTouchUp() },
+            ended: { handleTouchUp(handledBySystem: $0) },
             lost: { handleTouchLost() },
-            forward: routesToInputModeList ? inputModeList?.forward : nil
+            inputModeList: routesToInputModeList ? inputModeList : nil
         )
     }
     #else

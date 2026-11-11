@@ -26,7 +26,7 @@ public struct LayoutDefinition: Equatable, Sendable {
         /// 이 필드는 비워 둔다. 표시 전용 — 동작은 `alternate`가 정한다.
         public let alternateHint: String?
         /// 길게 누르면 **시스템 키보드 목록**(지구본 길게 누르기와 같은 팝업)을 연다 — 짧게 누르면 `event` 그대로.
-        /// 지구본을 요구하는 기기(홈 버튼 아이폰·아이패드)에서 한영 키에 지구본을 합칠 때만 켠다(`mergingGlobeIntoLanguageKey`).
+        /// 지구본을 요구하는 기기(`needsInputModeSwitchKey == true` — 홈 버튼 아이폰 등)에서 지구본을 한영 키로 합칠 때만 켠다(`mergingGlobeIntoLanguageKey`).
         /// 짧게/길게 판정은 **시스템이** 한다 — UI는 이 키의 터치를 `handleInputModeList`에 넘기기만 한다(PDR `language-globe-key.md`)
         public let opensInputModeList: Bool
 
@@ -581,7 +581,10 @@ public struct LayoutDefinition: Equatable, Sendable {
         if !inputModeSwitchKey {
             base = base.removingGlobe()
         } else if mergesGlobeIntoLanguageKey {
-            base = base.mergingGlobeIntoLanguageKey()
+            base = base.mergingGlobeIntoLanguageKey(letterMode: letterMode)
+            // 쿼티형 기호의 문자 복귀 키는 늘 「ABC」였다 — 옆 한영 키가 「ABC」(영어로)를 보이면 둘이 같아진다.
+            // 합칠 때만 키패드형처럼 돌아갈 언어를 보인다(한글이면 「가」)
+            if mode.isSymbols, letterMode != .english { base = base.relabelingLetterReturn("가") }
         }
         // 키패드형도 제외 — 숫자 페이지가 따로 있고, 기호 페이지 위에 숫자 줄이 붙으면 6행이 된다(PDR 4-4절)
         guard numberRow, !mode.isSymbols, !mode.isNumberPad, !mode.isKeypadPad,
@@ -623,17 +626,30 @@ public struct LayoutDefinition: Equatable, Sendable {
         return LayoutDefinition(rows: Array(rows.dropLast()) + [bottom], alignsColumns: alignsColumns)
     }
 
-    /// 지구본을 **한영 키에 합친** 배열 — 지구본을 요구하는 기기(홈 버튼 아이폰·아이패드)용(사장님 요청 2026-11-11, 네이버 키보드 방식).
-    /// 배열은 `removingGlobe()`와 같고(한영이 지구본 자리, 스페이스가 넓어짐), 한영 키만 길게 누르면 키보드 목록을 연다.
-    /// 하단 행에 한영 키가 없으면(기호·키패드형·숫자 패드) **그대로** — 지구본이 다른 키보드로 가는 유일한 길이다
-    public func mergingGlobeIntoLanguageKey() -> LayoutDefinition {
-        guard let bottom = rows.last,
-              bottom.contains(where: { $0.id == "globe" }),
-              bottom.contains(where: { $0.id == "language" }) else { return self }
-        let globeless = removingGlobe()
-        guard let merged = globeless.rows.last else { return self }
-        let bottomRow = merged.map { $0.id == "language" ? $0.openingInputModeList() : $0 }
-        return LayoutDefinition(rows: Array(globeless.rows.dropLast()) + [bottomRow], alignsColumns: alignsColumns)
+    /// 지구본을 **한영 키에 합친** 배열 — 지구본을 요구하는 기기(`needsInputModeSwitchKey == true`, 홈 버튼 아이폰 등)용
+    /// (사장님 요청 2026-11-11, 네이버 키보드 방식). 합친 한영 키는 짧게 = 한영, 길게 = 키보드 목록(`opensInputModeList`).
+    ///
+    /// - 문자 자판(한영 키가 있다): 배열은 `removingGlobe()`와 같다(한영이 지구본 자리, 스페이스가 넓어짐)
+    /// - 기호 자판(문자 복귀 키 `.symbols`가 있고 한영 키가 없다 — 쿼티형 두 페이지·키패드형 4페이지): 지구본 **자리에, 같은 폭으로**
+    ///   한영 키를 둔다. 라벨은 문자 자판처럼 바꿀 언어(`letterMode`가 한글이면 「ABC」, 영어면 「한글」)
+    ///   (사장님 SE2 2026-11-11 「123 누르면 글로벌키가 나오는데 글로벌키+한영키가 아니네」)
+    /// - 숫자 패드(숫자 전용 입력란 — 문자 복귀 키가 없다): **그대로** — 언어가 없는 화면이고, 지구본이 다른 키보드로 가는 길이다
+    public func mergingGlobeIntoLanguageKey(letterMode: InputMode = .hangul) -> LayoutDefinition {
+        guard let bottom = rows.last, let globeIndex = bottom.firstIndex(where: { $0.id == "globe" }) else { return self }
+        let bottomRow: [Key]
+        if bottom.contains(where: { $0.id == "language" }) {
+            guard let globeless = removingGlobe().rows.last else { return self }
+            bottomRow = globeless.map { $0.id == "language" ? $0.openingInputModeList() : $0 }
+        } else if bottom.contains(where: { $0.event == .symbols }) {
+            let globe = bottom[globeIndex]
+            var row = bottom
+            row[globeIndex] = Key(id: "language", label: letterMode == .english ? "한글" : "ABC", event: .toggleLanguage,
+                                  width: globe.width, isFunctionKey: true, opensInputModeList: true)
+            bottomRow = row
+        } else {
+            return self
+        }
+        return LayoutDefinition(rows: Array(rows.dropLast()) + [bottomRow], alignsColumns: alignsColumns)
     }
 
     /// 문자 복귀 키(`.symbols`)의 라벨만 바꾼 배열 — 키패드형이 영어로 돌아갈 때 「ABC」

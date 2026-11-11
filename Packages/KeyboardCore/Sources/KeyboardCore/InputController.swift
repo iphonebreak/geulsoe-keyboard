@@ -268,7 +268,13 @@ public final class InputController {
         case .shift: handleShift()
         case .toggleLanguage:
             commitComposition()
-            mode = (mode == .hangul) ? .english : .hangul
+            if mode.isSymbols || mode.isKeypadPad {
+                // 기호 자판의 한영 키(지구본을 한영에 합친 기기, 1.4.0) — 애플 지구본이 기호 화면에서 하듯 들어오기 전과
+                // **다른 언어의 문자 자판**으로 간다. `letterMode`는 문자 자판에서는 뜻이 없고, 다음에 기호로 들어갈 때 다시 적힌다
+                mode = (letterMode == .hangul) ? .english : .hangul
+            } else {
+                mode = (mode == .hangul) ? .english : .hangul
+            }
             shift = .off
         case .symbols:
             commitComposition()
