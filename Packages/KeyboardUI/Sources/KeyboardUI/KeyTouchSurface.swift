@@ -11,6 +11,9 @@ struct KeyTouchHandlers {
     var ended: @MainActor () -> Void = {}
     /// 시스템 취소·다른 인식기에 밀림 — 입력 없이 버린다
     var lost: @MainActor () -> Void = {}
+    /// 따라가는 터치의 **모든 단계 이벤트**를 그대로 넘긴다(시작·움직임·끝·취소) — 한영 키의 시스템 키보드 목록(`InputModeListHandler`).
+    /// 시스템은 터치의 첫 이벤트부터 받아야 판정한다. nil이면 넘기지 않는다
+    var forward: (@MainActor (UIView, UIEvent) -> Void)? = nil
 }
 
 /// 키캡 위의 **투명 UIKit 터치 층** — iOS에서 키 누름을 SwiftUI `DragGesture` 대신 받는다.
@@ -84,6 +87,7 @@ final class KeyTouchRecognizer: UIGestureRecognizer {
         for touch in touches {
             if let note = tracker.began(ObjectIdentifier(touch), x: touch.location(in: nil).x) {
                 deliver(note)
+                forward(touch, event)
             } else {
                 ignore(touch, for: event)   // 같은 키의 둘째 손가락 — 첫 누름을 건드리지 않는다
             }
@@ -92,20 +96,32 @@ final class KeyTouchRecognizer: UIGestureRecognizer {
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in touches {
-            if let note = tracker.moved(ObjectIdentifier(touch), x: touch.location(in: nil).x) { deliver(note) }
+            guard let note = tracker.moved(ObjectIdentifier(touch), x: touch.location(in: nil).x) else { continue }
+            deliver(note)
+            forward(touch, event)
         }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in touches {
-            if let note = tracker.ended(ObjectIdentifier(touch)) { finish(with: note) }
+            guard let note = tracker.ended(ObjectIdentifier(touch)) else { continue }
+            forward(touch, event)
+            finish(with: note)
         }
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
         for touch in touches {
-            if let note = tracker.cancelled(ObjectIdentifier(touch)) { finish(with: note) }
+            guard let note = tracker.cancelled(ObjectIdentifier(touch)) else { continue }
+            forward(touch, event)
+            finish(with: note)
         }
+    }
+
+    /// 따라가는 터치의 이벤트를 넘긴다 — `from:`은 **그 터치가 속한 뷰**여야 시스템이 터치를 찾는다(`touchesForView:`)
+    private func forward(_ touch: UITouch, _ event: UIEvent) {
+        guard let forward = handlers.forward, let owner = touch.view ?? view else { return }
+        forward(owner, event)
     }
 
     /// 손 뗌·취소 뒤(이미 추적 끝 — 알림 없음) 또는 **다른 인식기에 밀려** 초기화될 때(추적 중 — 터치 잃음)

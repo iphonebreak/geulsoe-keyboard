@@ -25,11 +25,15 @@ public struct LayoutDefinition: Equatable, Sendable {
         /// 귀퉁이와 무장 표시에 쓴다(PDR `number-symbol-keypad.md` 6절). 문자 키는 `alternateLabel`(자동 파생)을 쓰고
         /// 이 필드는 비워 둔다. 표시 전용 — 동작은 `alternate`가 정한다.
         public let alternateHint: String?
+        /// 길게 누르면 **시스템 키보드 목록**(지구본 길게 누르기와 같은 팝업)을 연다 — 짧게 누르면 `event` 그대로.
+        /// 지구본을 요구하는 기기(홈 버튼 아이폰·아이패드)에서 한영 키에 지구본을 합칠 때만 켠다(`mergingGlobeIntoLanguageKey`).
+        /// 짧게/길게 판정은 **시스템이** 한다 — UI는 이 키의 터치를 `handleInputModeList`에 넘기기만 한다(PDR `language-globe-key.md`)
+        public let opensInputModeList: Bool
 
         public init(id: String, label: String, shiftedLabel: String? = nil,
                     event: KeyEvent, width: Double = 1, isFunctionKey: Bool = false,
                     symbol: String? = nil, alternate: KeyEvent? = nil, labelSize: Double? = nil,
-                    alternateHint: String? = nil) {
+                    alternateHint: String? = nil, opensInputModeList: Bool = false) {
             self.id = id
             self.label = label
             self.shiftedLabel = shiftedLabel ?? label
@@ -40,6 +44,7 @@ public struct LayoutDefinition: Equatable, Sendable {
             self.alternate = alternate
             self.labelSize = labelSize
             self.alternateHint = alternateHint
+            self.opensInputModeList = opensInputModeList
         }
 
         /// 길게 누르기 대체 입력의 표시 라벨 (문자 이벤트만 — 그 문자열 자체)
@@ -52,21 +57,28 @@ public struct LayoutDefinition: Equatable, Sendable {
         public func relabeled(label: String? = nil, symbol: String?) -> Key {
             Key(id: id, label: label ?? self.label, shiftedLabel: shiftedLabel, event: event,
                 width: width, isFunctionKey: isFunctionKey, symbol: symbol, alternate: alternate,
-                labelSize: labelSize, alternateHint: alternateHint)
+                labelSize: labelSize, alternateHint: alternateHint, opensInputModeList: opensInputModeList)
         }
 
         /// 폭만 바꾼 복사 — 지구본이 빠질 때 이웃 키가 그 폭을 흡수한다 (`removingGlobe`)
         public func resized(width: Double) -> Key {
             Key(id: id, label: label, shiftedLabel: shiftedLabel, event: event,
                 width: width, isFunctionKey: isFunctionKey, symbol: symbol, alternate: alternate,
-                labelSize: labelSize, alternateHint: alternateHint)
+                labelSize: labelSize, alternateHint: alternateHint, opensInputModeList: opensInputModeList)
         }
 
         /// 길게 누르기 대체 입력만 바꾼 복사 — 문자 키에 기호를 붙일 때 (`addingLongPressSymbols`)
         public func withAlternate(_ alternate: KeyEvent?) -> Key {
             Key(id: id, label: label, shiftedLabel: shiftedLabel, event: event,
                 width: width, isFunctionKey: isFunctionKey, symbol: symbol, alternate: alternate,
-                labelSize: labelSize, alternateHint: alternateHint)
+                labelSize: labelSize, alternateHint: alternateHint, opensInputModeList: opensInputModeList)
+        }
+
+        /// 키보드 목록 열기만 켠 복사 — 한영 키에 지구본을 합칠 때 (`mergingGlobeIntoLanguageKey`)
+        func openingInputModeList() -> Key {
+            Key(id: id, label: label, shiftedLabel: shiftedLabel, event: event,
+                width: width, isFunctionKey: isFunctionKey, symbol: symbol, alternate: alternate,
+                labelSize: labelSize, alternateHint: alternateHint, opensInputModeList: true)
         }
     }
 
@@ -533,10 +545,14 @@ public struct LayoutDefinition: Equatable, Sendable {
     ///     숫자 제외)를 붙인다 (`addingLongPressSymbols`). 천지인·기호·숫자 패드에는 붙지 않는다.
     ///   - letterMode: 키패드형에서 돌아갈 문자 모드(`InputController.letterMode`) — 문자 복귀 키 라벨만 정한다
     ///     (한글 「가」, 영어 「ABC」). 다른 자판에서는 쓰지 않는다(쿼티형 기호 자판의 「ABC」는 그대로).
+    ///   - mergesGlobeIntoLanguageKey: `inputModeSwitchKey`가 참일 때 한영 키가 있는 자판이면 지구본을 한영 키에 합친다 —
+    ///     배열은 지구본 없는 배열과 같고, 한영 키가 길게 누르면 키보드 목록을 연다(`mergingGlobeIntoLanguageKey`).
+    ///     한영 키가 없는 자판(기호·키패드형·숫자 패드)은 지구본을 그대로 둔다. `inputModeSwitchKey`가 거짓이면 아무 일 없다
     public static func layout(
         for mode: InputMode, hangulLayout: HangulLayout, numberRow: Bool = false,
         inputModeSwitchKey: Bool = true, punctuation: PunctuationKeySpec = .standard,
-        longPressSymbols: Bool = false, letterMode: InputMode = .hangul
+        longPressSymbols: Bool = false, letterMode: InputMode = .hangul,
+        mergesGlobeIntoLanguageKey: Bool = false
     ) -> LayoutDefinition {
         var base: LayoutDefinition
         switch mode {
@@ -562,7 +578,11 @@ public struct LayoutDefinition: Equatable, Sendable {
             base = base.addingLongPressSymbols()
         }
         if punctuation != .standard { base = base.replacingPunctuation(punctuation) }
-        if !inputModeSwitchKey { base = base.removingGlobe() }
+        if !inputModeSwitchKey {
+            base = base.removingGlobe()
+        } else if mergesGlobeIntoLanguageKey {
+            base = base.mergingGlobeIntoLanguageKey()
+        }
         // 키패드형도 제외 — 숫자 페이지가 따로 있고, 기호 페이지 위에 숫자 줄이 붙으면 6행이 된다(PDR 4-4절)
         guard numberRow, !mode.isSymbols, !mode.isNumberPad, !mode.isKeypadPad,
               !(mode == .hangul && hangulLayout == .cheonjiin) else { return base }
@@ -601,6 +621,19 @@ public struct LayoutDefinition: Equatable, Sendable {
             bottom[absorber] = bottom[absorber].resized(width: bottom[absorber].width + globe.width)
         }
         return LayoutDefinition(rows: Array(rows.dropLast()) + [bottom], alignsColumns: alignsColumns)
+    }
+
+    /// 지구본을 **한영 키에 합친** 배열 — 지구본을 요구하는 기기(홈 버튼 아이폰·아이패드)용(사장님 요청 2026-11-11, 네이버 키보드 방식).
+    /// 배열은 `removingGlobe()`와 같고(한영이 지구본 자리, 스페이스가 넓어짐), 한영 키만 길게 누르면 키보드 목록을 연다.
+    /// 하단 행에 한영 키가 없으면(기호·키패드형·숫자 패드) **그대로** — 지구본이 다른 키보드로 가는 유일한 길이다
+    public func mergingGlobeIntoLanguageKey() -> LayoutDefinition {
+        guard let bottom = rows.last,
+              bottom.contains(where: { $0.id == "globe" }),
+              bottom.contains(where: { $0.id == "language" }) else { return self }
+        let globeless = removingGlobe()
+        guard let merged = globeless.rows.last else { return self }
+        let bottomRow = merged.map { $0.id == "language" ? $0.openingInputModeList() : $0 }
+        return LayoutDefinition(rows: Array(globeless.rows.dropLast()) + [bottomRow], alignsColumns: alignsColumns)
     }
 
     /// 문자 복귀 키(`.symbols`)의 라벨만 바꾼 배열 — 키패드형이 영어로 돌아갈 때 「ABC」

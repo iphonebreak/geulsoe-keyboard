@@ -224,7 +224,8 @@ final class KeyboardViewController: UIInputViewController {
             layout: .layout(for: controller.mode, hangulLayout: settings.activeHangulLayout,
                             numberRow: settings.numberRowEnabled,
                             inputModeSwitchKey: needsInputModeSwitchKey,
-                            longPressSymbols: settings.longPressSymbolsEnabled),
+                            longPressSymbols: settings.longPressSymbolsEnabled,
+                            mergesGlobeIntoLanguageKey: Self.mergesGlobeIntoLanguageKey),
             themeSpec: themeRepository.theme(id: settings.selectedThemeID),
             appearance: settings.appearance,
             keyboardHeight: keyboardAreaHeight,
@@ -501,7 +502,8 @@ final class KeyboardViewController: UIInputViewController {
             inputModeSwitchKey: viewState.needsInputModeSwitchKey,  // 지구본 불필요 시 하단 행 재배치
             punctuation: fieldPunctuation,                          // 입력란 종류별 문장부호 키
             longPressSymbols: settings.longPressSymbolsEnabled,     // 문자 키 길게 → 기호 (설정)
-            letterMode: inputController.letterMode)                 // 키패드 문자 복귀 키 「가」/「ABC」
+            letterMode: inputController.letterMode,                 // 키패드 문자 복귀 키 「가」/「ABC」
+            mergesGlobeIntoLanguageKey: Self.mergesGlobeIntoLanguageKey)  // 지구본 필요 시 한영에 합침
         if viewState.layout != layout {
             // 자판이 바뀌면 **기준 열 수가 바뀔 수 있다**(두벌식 10 ↔ 천지인 4 ↔ 숫자 패드 3).
             // 높이는 그 열 수에서 나오므로 여기서 다시 걸지 않으면 이전 자판의 높이가 남는다.
@@ -1882,10 +1884,45 @@ final class KeyboardViewController: UIInputViewController {
     static let reuseHostingController = true
     private static var sharedHostingController: UIHostingController<KeyboardRootView>?
 
+    // MARK: - 한영 키 = 짧게 한영 · 길게 키보드 목록 (1.4.0, 사장님 요청 2026-11-11 — 네이버 키보드 방식, PDR `language-globe-key.md`)
+
+    /// 지구본을 요구하는 기기(홈 버튼 아이폰·아이패드)에서 문자 자판의 지구본을 한영 키에 합친다
+    /// (`LayoutDefinition.mergingGlobeIntoLanguageKey` — 한영 키가 없는 기호·키패드·숫자 패드는 지구본 그대로)
+    static let mergesGlobeIntoLanguageKey = true
+
+    /// 한영 키 터치를 시스템에 넘기는 중 — 그 사이 시스템이 부르는 `advanceToNextInputMode`는 **짧은 탭**이라는 판정이다
+    private var isForwardingLanguageKeyTouch = false
+
+    /// 한영 키 터치의 모든 단계를 시스템 키보드 목록에 넘긴다 — 길게(시스템 기준 약 200ms)면 목록, 짧으면 아래 `advanceToNextInputMode`
+    private func forwardLanguageKeyTouch(from view: UIView, with event: UIEvent) {
+        isForwardingLanguageKeyTouch = true
+        defer { isForwardingLanguageKeyTouch = false }
+        handleInputModeList(from: view, with: event)
+    }
+
+    /// 한영 키에서 온 「다음 키보드」(짧은 탭 판정)는 **한영 전환**으로 바꾼다 — 그 밖(지구본 키·VoiceOver)은 시스템 그대로.
+    /// 짧게/길게를 시스템 하나가 정하므로 한영 전환과 목록이 함께 일어나지 않는다(키캡은 손 뗌에 자기 이벤트를 내지 않는다)
+    override func advanceToNextInputMode() {
+        guard isForwardingLanguageKeyTouch else {
+            super.advanceToNextInputMode()
+            return
+        }
+        DispatchQueue.main.async { [weak self] in self?.handle(.toggleLanguage) }   // 키 이벤트와 같은 경로(`onEvent`)
+    }
+
+    /// VoiceOver 로터 「다음 키보드」 — 한영 키에 합쳐져 지구본이 없으니 다른 키보드로 가는 길
+    private func advanceToNextKeyboardFromLanguageKey() {
+        super.advanceToNextInputMode()
+    }
+
     private func installKeyboardView(state: KeyboardViewState) {
         let root = KeyboardRootView(
             state: state,
             inputModeSwitchButton: AnyView(InputModeSwitchButton(controller: self)),
+            inputModeListHandler: InputModeListHandler(
+                forward: { [weak self] view, event in self?.forwardLanguageKeyTouch(from: view, with: event) },
+                advance: { [weak self] in self?.advanceToNextKeyboardFromLanguageKey() }
+            ),
             onEvent: { [weak self] event in
                 DispatchQueue.main.async { self?.handle(event) }
             },

@@ -27,6 +27,8 @@ struct KeyCapView: View {
     var onBackspaceHoldEnded: ((UInt64) -> Void)? = nil
     /// ⌫ 반복 박자(글자·닻·단어) — 없으면 글자 박자는 현행 `onEvent(.backspace)`이고 단어 단계를 쓰지 않는다
     var onBackspaceTick: ((UInt64, BackspaceRepeatPhase) -> Void)? = nil
+    /// 시스템 키보드 목록 통로 — 목록을 여는 키(한영에 지구본을 합친 키)에만 주입한다(`InputModeListRule`)
+    var inputModeList: InputModeListHandler? = nil
 
     /// 누름 상태 — 눌림·⌫ 반복·대체 입력 무장·트랙패드(`KeyCapPressState`). 시스템 터치 취소 때도 정리된다(`touchLost`)
     @State private var press = KeyCapPressState()
@@ -75,6 +77,12 @@ struct KeyCapView: View {
         key.alternateHint ?? key.alternateLabel
     }
 
+    /// 귀퉁이 힌트 — 길게 누르기 문구, 없으면 키보드 목록을 여는 한영 키의 작은 지구본(네이버 키보드와 같은 표시)
+    private var cornerHint: Text? {
+        if let alternateText { return Text(alternateText) }
+        return routesToInputModeList ? Text(Image(systemName: "globe")) : nil
+    }
+
     var body: some View {
         face
             .foregroundStyle(theme.keyText)
@@ -89,11 +97,11 @@ struct KeyCapView: View {
                 }
             )
             .overlay(alignment: .topTrailing) {
-                // 길게 누르기 힌트 (문장부호 키의 ","·".com") — 무장되면 라벨 자체가 바뀌므로 숨긴다.
+                // 길게 누르기 힌트 (문장부호 키의 ","·".com", 키보드 목록을 여는 한영 키의 🌐) — 무장되면 라벨 자체가 바뀌므로 숨긴다.
                 // 뷰를 넣고 빼지 않고 투명도만 바꾼다 (누르는 도중 구조 변경 금지 — face 주석 참조)
-                if let hint = alternateText {
+                if let hint = cornerHint {
                     // 힌트 크기는 라벨 크기에 비례 (기본 22 → 10, 천지인 28 → 13)
-                    Text(hint)
+                    hint
                         .font(.system(size: key.labelSize.map { CGFloat($0) * 0.45 } ?? 10, weight: .medium))
                         .foregroundStyle(theme.keyText.opacity(0.55))
                         .lineLimit(1)
@@ -150,6 +158,12 @@ struct KeyCapView: View {
                     Button(action.name) {
                         onPress?()
                         onEvent(action.event)
+                    }
+                }
+                // 키보드 목록을 여는 한영 키 — 길게 누르기 대신 로터 「다음 키보드」(지구본이 빠졌으니 다른 키보드로 가는 길)
+                if routesToInputModeList, let inputModeList {
+                    Button(KeyCapAccessibility.nextKeyboardActionName) {
+                        inputModeList.advanceToNextKeyboard()
                     }
                 }
             }
@@ -294,11 +308,18 @@ struct KeyCapView: View {
         #else
         let release = press.release(isBackspace: key.event == .backspace)
         #endif
+        // 키보드 목록으로 넘기는 키는 손 뗌에 자기 이벤트를 내지 않는다 — 짧은 탭의 한영 전환은 시스템 판정 뒤 VC가 낸다(이중 전환 방지)
+        guard InputModeListRule.emitsReleaseEvent(key, handlerAvailable: inputModeList != nil) else { return }
         switch release {
         case .primary: onEvent(key.event)
         case .alternate: onEvent(key.alternate ?? key.event)
         case .none: break
         }
+    }
+
+    /// 이 키의 터치를 시스템 키보드 목록으로 넘기나
+    private var routesToInputModeList: Bool {
+        InputModeListRule.routes(key, handlerAvailable: inputModeList != nil)
     }
 
     /// 터치를 잃었다(시스템 취소·다른 인식기에 밀림) — 남은 누름을 **아무 입력 없이** 버린다(무장된 대체 입력도 넣지 않는다).
@@ -320,7 +341,8 @@ struct KeyCapView: View {
             },
             moved: { handleTouchMove(translation: $0) },
             ended: { handleTouchUp() },
-            lost: { handleTouchLost() }
+            lost: { handleTouchLost() },
+            forward: routesToInputModeList ? inputModeList?.forward : nil
         )
     }
     #else
@@ -454,6 +476,9 @@ enum KeyCapAccessibility {
         guard case .multiTap = key.event else { return nil }
         return "빠르게 다시 누를 때마다 다음 기호로 바뀜. 이 기호들은 다음 페이지에도 있음"
     }
+
+    /// 키보드 목록을 여는 한영 키의 로터 동작 이름 — 애플 지구본 키의 VoiceOver 이름과 같은 말
+    static let nextKeyboardActionName = "다음 키보드"
 
     private static let spokenNames: [String: String] = [
         ".": "마침표", ",": "쉼표", "*": "별표", "/": "슬래시", "+": "더하기", "-": "하이픈"
