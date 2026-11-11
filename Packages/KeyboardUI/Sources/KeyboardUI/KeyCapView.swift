@@ -284,11 +284,17 @@ struct KeyCapView: View {
         }
     }
 
-    /// 손을 뗐다 — 트랙패드였으면 스페이스를 넣지 않고, ⌫는 누를 때 이미 지웠다. 길게 눌러 무장됐으면 대체 입력(","·".com")
+    /// 손을 뗐다 — 트랙패드였으면 스페이스를 넣지 않고, ⌫는 누를 때 이미 지웠다. 길게 눌러 무장됐으면 대체 입력(","·".com").
+    /// iOS는 누름이 살아 있을 때만 넣는다 — 키가 사라진 뒤 늦게 온 손 뗌은 버린다(`KeyCapPressState.releaseIfPressed`)
     private func handleTouchUp() {
         cancelPressTasks()
         endBackspaceHold()
-        switch press.release(isBackspace: key.event == .backspace) {
+        #if os(iOS)
+        let release = press.releaseIfPressed(isBackspace: key.event == .backspace)
+        #else
+        let release = press.release(isBackspace: key.event == .backspace)
+        #endif
+        switch release {
         case .primary: onEvent(key.event)
         case .alternate: onEvent(key.alternate ?? key.event)
         case .none: break

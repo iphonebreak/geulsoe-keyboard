@@ -29,6 +29,8 @@ struct KeyCapPressStateTests {
         case cursorTimer
         /// 손 뗌 — `onEnded`
         case release
+        /// 손 뗌 — iOS UIKit 터치 층(`KeyTouchSurface`의 `ended`). 누름이 살아 있을 때만 넣는다
+        case touchRelease
         /// 터치를 잃음(제스처 끝 또는 시스템 취소 — `@GestureState` 복귀 뒤 미룬 정리)
         case touchLost
         /// 뷰가 사라짐 — `onDisappear`
@@ -67,8 +69,11 @@ struct KeyCapPressStateTests {
                 if kind == .alternate, state.armAlternate() { result.feedback += 1 }
             case .cursorTimer:
                 if kind == .space, state.enterCursorMode() { result.feedback += 1 }
-            case .release:
-                switch state.release(isBackspace: kind == .backspace) {
+            case .release, .touchRelease:
+                let release = step == .release
+                    ? state.release(isBackspace: kind == .backspace)
+                    : state.releaseIfPressed(isBackspace: kind == .backspace)
+                switch release {
                 case .primary: result.primary += 1
                 case .alternate: result.alternate += 1
                 case .none: break
@@ -179,5 +184,29 @@ struct KeyCapPressStateTests {
         let cleaned = state.touchLost()
         #expect(cleaned)
         #expect(!state.isPressed && !state.repeatTickAllowed && !state.alternateArmed && !state.cursorMode)
+    }
+
+    // MARK: - iOS UIKit 터치 층 (1.4.0 — PDR `key-touch-uikit.md`)
+
+    @Test("iOS 손 뗌 — 누르고 있었으면 옛 손 뗌과 같다(탭·⌫·무장·트랙패드)")
+    func touchReleaseMatchesReleaseWhilePressed() {
+        #expect(run(.letter, [.down, .touchRelease]).primary == 1)
+        #expect(run(.backspace, [.down, .repeatTick, .touchRelease]).primary == 0, "⌫는 누를 때 이미 지웠다")
+        let armed = run(.alternate, [.down, .alternateTimer, .touchRelease])
+        #expect(armed.alternate == 1 && armed.primary == 0)
+        #expect(run(.space, [.down, .cursorTimer, .touchRelease]).primary == 0, "트랙패드였으면 공백 없음")
+        #expect(run(.letter, [.down, .touchRelease]).final == KeyCapPressState())
+    }
+
+    /// 두 엄지로 칠 때 — 글자 키를 누른 채 다른 엄지로 「123」·한영을 **먼저** 떼면 자판이 바뀌어 글자 키캡이 사라진다(`onDisappear` → `reset`).
+    /// 그 뒤 UIKit이 떨어져 나간 뷰의 인식기에 손 뗌을 보내도 **사라진 자판의 글자가 새 자판에 들어가지 않는다**(리뷰 M1, 2026-11-11)
+    @Test("★ iOS 손 뗌 — 키가 사라진 뒤 늦게 온 손 뗌은 아무것도 넣지 않는다")
+    func touchReleaseAfterDisappearInsertsNothing() {
+        let letter = run(.letter, [.down, .disappear, .touchRelease])
+        #expect(letter.primary == 0 && letter.alternate == 0)
+        let armed = run(.alternate, [.down, .alternateTimer, .disappear, .touchRelease])
+        #expect(armed.primary == 0 && armed.alternate == 0, "무장된 대체 입력도 넣지 않는다")
+        #expect(run(.letter, [.down, .touchLost, .touchRelease]).primary == 0, "터치 잃음 뒤 손 뗌도 같다")
+        #expect(run(.letter, [.touchRelease]).primary == 0, "누른 적 없는 손 뗌")
     }
 }

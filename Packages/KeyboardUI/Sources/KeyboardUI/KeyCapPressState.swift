@@ -81,6 +81,20 @@ struct KeyCapPressState: Equatable {
         return result
     }
 
+    /// 손을 뗐다 — **iOS UIKit 터치 층**(`KeyTouchSurface`) 전용. 누름이 살아 있을 때만 `release`와 같고, 아니면 아무것도 넣지 않는다.
+    ///
+    /// iOS에서는 닿음이 언제나 동기로 `isPressed`를 켜고 손 뗌·터치 잃음은 서로 배타라, 손 뗌 때 눌려 있지 않다는 것은
+    /// **키가 사라진 뒤**(`reset`) 늦게 온 손 뗌이라는 뜻이다 — 두 엄지로 칠 때 글자 키를 누른 채 「123」·한영을 먼저 떼면
+    /// 자판이 바뀌어 글자 키캡이 사라진다. 그 글자를 새 자판에 넣지 않는다(리뷰 M1, 2026-11-11).
+    /// macOS `DragGesture` 경로는 옛 `onEnded` 그대로 `release`를 쓴다(미룬 정리가 먼저 도는 순서 — `releaseMatchesOldOnEnded`)
+    mutating func releaseIfPressed(isBackspace: Bool) -> Release {
+        guard isPressed else {
+            self = KeyCapPressState()
+            return .none
+        }
+        return release(isBackspace: isBackspace)
+    }
+
     /// 터치를 잃었다(제스처 끝 또는 **시스템 취소**) — 손 뗌이 처리하지 않은 누름을 **아무 입력 없이** 버린다:
     /// ⌫ 반복 정지·무장된 대체 입력 버림(넣지 않는다)·트랙패드 해제·눌림 해제. **지금 막 버렸으면 true**(뷰가 남은 Task를 끊는다).
     /// 정상 손 뗌 뒤에는 이미 처음 상태라 false — 이중 정리 무해

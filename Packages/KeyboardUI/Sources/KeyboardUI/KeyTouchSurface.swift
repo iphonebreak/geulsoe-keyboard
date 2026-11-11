@@ -20,7 +20,10 @@ struct KeyTouchHandlers {
 /// 단모음 3행(ㅋ)은 눌림 표시 777ms·길게 누르기 무장 1,250ms였다(2행 ㄴ 113ms·585ms). Face ID 기기에서만, SE2는 정상.
 /// UIKit 인식기는 판정기와 **같은 때** 터치를 받으므로, 인식(recognize)하지 않고 `touchesBegan`에서 곧바로 알리면 기다림이 없다.
 ///
-/// - 인식기는 **끝까지 인식하지 않는다**(`.possible` → 끝나면 `.failed`) — 다른 인식기·시스템 제스처를 막지도 늦추지도 않는다
+/// - 인식기는 **끝까지 인식하지 않는다**(`.possible` → 끝나면 `.failed`) — 다른 인식기·시스템 제스처를 막지도 늦추지도 않는다.
+///   **전제: 키의 조상에 다른 제스처가 없다**(2026-11-11 기준). 누름 내내 `.possible`이므로, 이 인식기의 실패를 기다리는 인식기
+///   (예: 자판 전체에 쓸기 제스처)를 나중에 붙이면 그것은 손을 뗄 때까지 늦춰진다
+/// - iOS 경로는 `swift test`(macOS)가 **컴파일하지 않는다** — 이 파일을 고치면 `/keyboard-check`의 `xcodebuild build`까지 돌린다
 /// - 시스템 취소(`touchesCancelled`)와 다른 인식기에 밀린 초기화(`reset`)는 **터치 잃음**이다 — 1.3.1 `isTouching` 정리와 같은 뜻
 /// - 판정(어느 터치·무엇을 알릴지)은 `KeyTouchTracker`(시험 고정), 이 파일은 UIKit 배선만
 /// - **항상 붙어 있는 overlay 하나**다 — 누르는 도중 뷰 구조가 바뀌지 않는다(키캡 원칙). 알림 클로저만 갱신마다 바꿔 끼운다
@@ -37,6 +40,12 @@ struct KeyTouchSurface: UIViewRepresentable {
     func updateUIView(_ view: KeyTouchView, context: Context) {
         // 키캡 값(라벨·이벤트)이 바뀌면 클로저도 새 값을 본다 — 진행 중인 추적 상태는 인식기에 남는다
         view.recognizer.handlers = handlers
+    }
+
+    /// 키캡이 사라졌다(자판 전환 등) — 알림을 비운다. UITouch가 떨어져 나간 뷰의 인식기에 손 뗌을 계속 보내도
+    /// 사라진 키의 입력이 나가지 않는다(리뷰 M1 — `KeyCapPressState.releaseIfPressed`와 이중 방어)
+    static func dismantleUIView(_ view: KeyTouchView, coordinator: ()) {
+        view.recognizer.handlers = KeyTouchHandlers()
     }
 }
 

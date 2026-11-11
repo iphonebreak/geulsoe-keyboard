@@ -80,6 +80,24 @@ struct KeyTouchTrackerTests {
         #expect(fresh.reset() == nil)
     }
 
+    @Test("취소 뒤 UIKit이 부르는 reset — 터치 잃음을 두 번 알리지 않는다")
+    func resetAfterCancelIsSilent() {
+        var tracker = Tracker()
+        _ = tracker.began(1, x: 100)
+        _ = tracker.cancelled(1)
+
+        #expect(tracker.reset() == nil)
+    }
+
+    @Test("닿기 전의 움직임·손 뗌 — 무시한다")
+    func eventsBeforeBeganAreIgnored() {
+        var tracker = Tracker()
+
+        #expect(tracker.moved(1, x: 120) == nil)
+        #expect(tracker.ended(1) == nil)
+        #expect(!tracker.isTracking)
+    }
+
     @Test("끝난 뒤 새 누름 — 새 시작점에서 다시 잰다")
     func nextPressStartsFresh() {
         var tracker = Tracker()
