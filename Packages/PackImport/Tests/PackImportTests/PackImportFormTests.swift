@@ -1093,17 +1093,17 @@ struct PackFormCopyTests {
         #expect(PackFormCopy.templateFailure(.placeholderCount) == "{n}이 꼭 한 번 있어야 해요")
         #expect(PackFormCopy.templateFailure(.prefixTooShort) == "앞 글자가 2자 이상이어야 해요")
         #expect(PackFormCopy.templateFailureExample(.prefixTooShort) == "예: 사자성어 {n}번")
-        #expect(PackFormCopy.templateFailure(.reservedDateSuffix) == "「날짜」「시간」「시각」으로 끝나면 날짜 채움글과 겹쳐요")
+        #expect(PackFormCopy.templateFailure(.reservedDateSuffix) == "'날짜', '시간', '시각'으로 끝나면 날짜 채움글과 겹쳐요")
         #expect(PackFormCopy.templateFailureExample(.reservedDateSuffix) == "예: 회차{n}번", "화면 확인 N-3 — 거부되는 「회차{n}시간」이 아니라 통과하는 예")
-        #expect(PackFormCopy.reviewTitle(.outranked(by: "a"), name: { _ in "예시 번호 팩 2" }) == "「예시 번호 팩 2」도 이 틀을 써요")
+        #expect(PackFormCopy.reviewTitle(.outranked(by: "a"), name: { _ in "예시 번호 팩 2" }) == "'예시 번호 팩 2'도 이 틀을 써요")
         #expect(PackFormCopy.reviewDetail(.outranked(by: "a"), replacing: false, name: { _ in "예시 번호 팩 2" })
-                    == "새 팩은 목록 맨 아래에 붙어서 위에 있는 「예시 번호 팩 2」가 이 틀을 가져요.")
-        #expect(PackFormCopy.reviewTitle(.shadowed(triggers: ["장"], owner: .userSnippets), name: { $0 }) == "내 채움글 「장」에 가려져요")
+                    == "새 팩은 목록 맨 아래에 붙어서 위에 있는 '예시 번호 팩 2'가 이 틀을 가져요.")
+        #expect(PackFormCopy.reviewTitle(.shadowed(triggers: ["장"], owner: .userSnippets), name: { $0 }) == "내 채움글 '장'에 가려져요")
         #expect(PackFormCopy.reviewDetail(.shadowed(triggers: ["장"], owner: .userSnippets), replacing: false, name: { $0 })
-                    == "「…장」으로 끝나는 입력에서는 내 채움글이 먼저 떠요.")
+                    == "'...장'으로 끝나는 입력에서는 내 채움글이 먼저 떠요.")
         #expect(PackFormCopy.sameNameMessage("사자성어 예시 팩")
-                    == "「사자성어 예시 팩」이 이미 있어요. 바꾸면 목록 자리와 켬/끔은 그대로고 내용만 새 파일로 바뀌어요.")
-        #expect(PackFormCopy.doneSummary(name: "사자성어 예시 팩", count: 641) == "「사자성어 예시 팩」 · 641개")
+                    == "'사자성어 예시 팩'이 이미 있어요. 바꾸면 목록 자리와 켬/끔은 그대로고 내용만 새 파일로 바뀌어요.")
+        #expect(PackFormCopy.doneSummary(name: "사자성어 예시 팩", count: 641) == "'사자성어 예시 팩', 641개")
         #expect(PackFormCopy.skippedLine(4) == "건너뛴 4개는 가져오지 않았어요.")
     }
 
@@ -1119,7 +1119,7 @@ struct PackFormCopyTests {
                     == "파일에 적힌 출처를 고치지 않고 그대로 골라 뒀어요. 맞지 않으면 다른 것을 골라 주세요. "
                     + "고른 선택지는 증명이 아니에요. 이 내용을 써도 되는지는 가져오는 분이 직접 확인해 주세요.")
         #expect(PackFormCopy.licenseFooter(hasFileLicense: false)
-                    == "하나를 직접 골라야 「가져오기」가 켜져요. 고른 선택지는 증명이 아니에요. 이 내용을 써도 되는지는 가져오는 분이 직접 확인해 주세요.")
+                    == "하나를 직접 골라야 '가져오기'가 켜져요. 고른 선택지는 증명이 아니에요. 이 내용을 써도 되는지는 가져오는 분이 직접 확인해 주세요.")
         // 보이는 글자에 「권리」가 남지 않는다(이 표 전부 — `PackCopyLintTests`가 화면 전체를 다시 본다)
         for text in stage5Copy { #expect(!text.contains("권리"), "\(text)") }
     }
@@ -1150,7 +1150,7 @@ struct PackFormCopyTests {
     @Test("★ 숫자는 필드 상한·시안 예시뿐 — 예산 한도 숫자 0 — 두 판 모두(검증 G2)", arguments: PackCopySet.allCases)
     func onlyAllowedNumbers(_ set: PackCopySet) {
         for text in PackCopySet.$previewing.withValue(set, operation: { stage5Copy }) {
-            var rest = text.replacingOccurrences(of: #"「[^」]*」 · [\d,]+개"#, with: "", options: .regularExpression)
+            var rest = text.replacingOccurrences(of: #"'[^']*', [\d,]+개"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"(건너뛴|외) [\d,]+개"#, with: "", options: .regularExpression)
             for allowed in stage5AllowedNumbers { rest = rest.replacingOccurrences(of: allowed, with: "") }
             #expect(!rest.contains { $0.isNumber }, "\(text)")

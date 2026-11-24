@@ -1225,7 +1225,7 @@ struct PackStoreClientTests {
         let outcome = await client.saveUserSnippet(entry(String(repeating: "나", count: 50)), editing: nil)
         #expect(outcome.isAccepted)
         #expect(outcome.notice?.reason == .packRested)
-        #expect(outcome.notice?.message == "대신 「회사 상용구」가 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
+        #expect(outcome.notice?.message == "대신 '회사 상용구'가 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
     }
 
     @Test("★ A2·A3 — 같은 baseline 거부도 저장 전 상태로 갈린다(옛 초과본이면 A3)")
@@ -1856,7 +1856,7 @@ struct PackImpactStoreTests {
         let off = try h.importedID(h.store.importPack(numbered("사자성어 예시 팩", count: 12), source: .csv, enabled: false))
         let list = try #require(h.store.packEntries(off))
         #expect(list.rows.map(\.trigger) == (1...12).map { "사자성어 \($0)번" })
-        #expect(list.rows.map(\.result) == (1...12).map { "→ 예시 본문 \($0)" })
+        #expect(list.rows.map(\.result) == (1...12).map { "-> 예시 본문 \($0)" })
         #expect(list.rows.count == h.store.packDetail(off)?.summary.itemCount, "「전체 보기 (n개)」의 n과 줄 수가 같다")
         #expect(h.store.packDetail(off)?.summary.status == .off)
 

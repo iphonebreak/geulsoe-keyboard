@@ -866,7 +866,7 @@ private struct PackImportRowsSection: View {
         switch draft.mode {
         case .numbered:
             ForEach(limited(draft.items), id: \.n) { item in
-                row(title: item.title.isEmpty ? "\(item.n)" : "\(item.n) · \(item.title)", detail: firstLine(item.body))
+                row(title: item.title.isEmpty ? "\(item.n)" : "\(item.n). \(item.title)", detail: firstLine(item.body))
             }
         case .phrases:
             ForEach(Array(limited(draft.entries).enumerated()), id: \.offset) { _, entry in
@@ -881,7 +881,7 @@ private struct PackImportRowsSection: View {
 
     private func firstLine(_ body: String) -> String {
         let line = body.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? body
-        return line.count < body.count ? line + "…" : line
+        return line.count < body.count ? line + "..." : line
     }
 
     private func row(title: String, detail: String) -> some View {

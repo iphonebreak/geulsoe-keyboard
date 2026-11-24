@@ -89,7 +89,7 @@ public struct PasteSuggestion: Equatable, Sendable {
             .split(whereSeparator: { $0.isWhitespace || $0.isNewline })
             .joined(separator: " ")
         guard folded.count > previewLimit else { return folded }
-        return String(folded.prefix(previewLimit)) + "…"
+        return String(folded.prefix(previewLimit)) + "..."
     }
 }
 

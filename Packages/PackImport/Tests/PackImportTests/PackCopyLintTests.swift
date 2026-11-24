@@ -35,6 +35,17 @@ enum PackCopyLint {
     /// 금칙어
     static let bannedWords = ["트리거", "잠시 뒤"]
 
+    /// 금칙 문자 — AI 글투 특수 문자(사장님 지시 2026-11-24). 화면 문구는 키보드로 칠 수 있는 문자로 쓴다
+    /// (「」『』 → '', “” → "", · → 「, 」 또는 「/」, — → 「 - 」·「:」·괄호, … → ..., → → ->, ▸ › → >)
+    static let bannedCharacters = ["「", "」", "『", "』", "“", "”", "‘", "’", "·", "・", "—", "–", "…", "→", "←", "↔", "⇒",
+                                   "•", "※", "★", "☆", "✓", "✔", "×", "▶", "◀", "▸", "›", "⌫", "⏎", "⇧", "〜", "～"]
+
+    /// 금칙 문자 예외 — **정확히 이 문자열만**. 엑셀이 한국어(CP949)로 저장할 때 실제로 바꾸는 기호를 예로 보이는 안내라
+    /// 그 기호(`—`)가 곧 내용이다(`verify-csv-real-mac.md`). 「' '」 같은 나머지 글자는 규칙대로 바꿨다
+    static let bannedCharacterExceptions = [
+        "한국어(CP949)로 저장한 파일은 일부 기호(예: —)가 저장할 때 이미 바뀌었을 수 있어요. 엑셀에서 'CSV UTF-8'로 다시 저장하면 바뀌지 않아요."
+    ]
+
     /// R27 — 외부 채움글 화면·샘플에서 물러난 낱말(보이는 이름은 「출처」)
     static let retiredWords = ["권리"]
     /// R27 — 앱 전체(처리방침 포함)에서 물러난 말
@@ -74,7 +85,9 @@ enum PackCopyLint {
         return churchWords.filter(checked.contains)
     }
 
-    static func bannedWords(in text: String) -> [String] { bannedWords.filter(text.contains) }
+    static func bannedWords(in text: String) -> [String] {
+        bannedWords.filter(text.contains) + (bannedCharacterExceptions.contains(text) ? [] : bannedCharacters.filter(text.contains))
+    }
 
     /// 실기 피드백 2(2026-10-08) — 머리글 자리를 「첫 줄」로 말하지 않는다: 정보 줄(#…)·빈 줄이 머리글 위에 와도 된다(판정 규칙).
     /// 머리글을 말하는 문구에만 건다 — 「예시 본문 첫 줄…」(시트 그림의 칸)처럼 본문의 첫 줄을 말하는 글은 대상이 아니다
@@ -139,6 +152,9 @@ private func bundledSampleFiles() throws -> [URL] {
 /// 앱(`App/`) 소스의 문자열 리터럴 — 화면에 직접 쓴 문구가 표를 거치지 않았어도 AC-35 검색에 걸리게. 주석(`//`·`/* */`)은 건너뛰고,
 /// 보간 `\( … )` 안의 리터럴도 따로 모은다. 여러 줄 리터럴(`"""`)도 받는다
 private struct SwiftStringLiterals {
+    /// 보간 자리 표시 — 금칙 문자(`…`)가 아닌 글자로(그렇지 않으면 보간이 든 리터럴이 모두 금칙 문자에 걸린다)
+    static let interpolationMark = "\u{FFFC}"
+
     private let characters: [Character]
     private var index = 0
     private(set) var literals: [String] = []
@@ -187,7 +203,7 @@ private struct SwiftStringLiterals {
                 if peek(1) == "(" {
                     index += 2
                     code(untilClosingParen: true)
-                    text += "…"
+                    text += Self.interpolationMark
                 } else {
                     if let escaped = peek(1) { text.append(escaped) }
                     index += 2
@@ -368,7 +384,7 @@ struct PackCopyLintTests {
         let literals = SwiftStringLiterals(source).literals
         #expect(literals.contains("가나"))
         #expect(literals.contains("안쪽") && literals.contains("다른"))
-        #expect(literals.contains("앞 … 뒤"))
+        #expect(literals.contains("앞 \(SwiftStringLiterals.interpolationMark) 뒤"))
         #expect(literals.contains { $0.contains("여러 줄") })
         #expect(!literals.contains { $0.contains("xlsx") || $0.contains("엑셀") })
     }
@@ -417,7 +433,7 @@ struct PackCopyLintTests {
 
     @Test("R27 예외는 그 문자열 하나뿐이고 낡지 않았다 — 실제로 화면에 나가고(파일·붙여넣기 둘 다), 「권리」를 품고 있어 예외가 아니면 걸린다")
     func retiredExceptionIsLive() {
-        #expect(PackCopyLint.retiredExceptions == ["「#출처」와 「#권리」는 같은 정보 줄이에요. 하나만 남겨 주세요."])
+        #expect(PackCopyLint.retiredExceptions == ["'#출처'와 '#권리'는 같은 정보 줄이에요. 하나만 남겨 주세요."])
         for exception in PackCopyLint.retiredExceptions {
             #expect(allScreenCopy.contains(exception))
             #expect(PackImportCopy.failureMessage(.structural(.duplicateSourceMeta(record: 1, line: 1)), source: .paste) == exception)
@@ -436,7 +452,7 @@ struct PackCopyLintTests {
         for (file, literal) in literals {
             #expect(!PackCopyLint.retiredAppPhrases.contains(where: literal.contains), "\(file): \(literal)")
         }
-        #expect(literals.contains { $0.file == "PrivacyPolicyView.swift" && $0.literal.contains("(팩 이름·단축어·본문·출처)") },
+        #expect(literals.contains { $0.file == "PrivacyPolicyView.swift" && $0.literal.contains("(팩 이름, 단축어, 본문, 출처)") },
                 "처리방침의 가져온 팩 문장이 「출처」로 바뀌었다")
     }
 
@@ -458,6 +474,29 @@ struct PackCopyLintTests {
         }
     }
 
+    @Test("★ 금칙 문자 규칙 — AI 글투 특수 문자는 하나씩 걸리고, 키보드로 칠 수 있는 대체 문자는 걸리지 않는다(사장님 지시 2026-11-24)")
+    func bannedCharacterRule() {
+        for character in PackCopyLint.bannedCharacters {
+            #expect(PackCopyLint.bannedWords(in: "가져오기 \(character) 다음") == [character], "\(character)")
+        }
+        for allowed in ["'가져오기'를 눌러요", "\"허용\"으로 바꾸세요", "쉼표, 세미콜론, 탭", "TRUE/FALSE", "3번째 항목: 이유",
+                        "정보 줄(#...)", "-> 안녕하세요", "파일 > 다른 이름으로 저장", "- 문장"] {
+            #expect(PackCopyLint.bannedWords(in: allowed).isEmpty, "\(allowed)")
+        }
+        let source = #"Text("「가져오기」를 눌러요"); Text("쉬는 중 · \(reason)")"#
+        #expect(SwiftStringLiterals(source).literals.allSatisfy { !PackCopyLint.bannedWords(in: $0).isEmpty }, "앱 리터럴에도 걸린다")
+    }
+
+    @Test("금칙 문자 예외는 그 문자열 하나뿐이고 낡지 않았다 — 실제로 화면에 나가고, 금칙 문자를 품고 있어 예외가 아니면 걸린다")
+    func bannedCharacterExceptionIsLive() {
+        for exception in PackCopyLint.bannedCharacterExceptions {
+            #expect(allScreenCopy.contains(exception))
+            #expect(PackCopyLint.bannedCharacters.contains(where: exception.contains))
+            #expect(PackCopyLint.bannedWords(in: exception).isEmpty)
+            #expect(PackCopyLint.bannedWords(in: exception + " —") == ["—"], "같은 글자가 다른 문장에 들면 걸린다")
+        }
+    }
+
     // MARK: 머리글 자리 (실기 피드백 2, 2026-10-08)
 
     @Test("★ 실기 피드백 2 — 두 판의 화면 문구 전부에서 머리글 자리를 「첫 줄」로 말하지 않는다(정보 줄·빈 줄이 위에 와도 된다)",
@@ -473,7 +512,7 @@ struct PackCopyLintTests {
         for old in ["첫 줄에 머리글이 있는 엑셀 파일(.xlsx)을 골라요.", "첫 줄은 머리글", "머리글을 찾지 못했어요. 첫 줄(머리글)을 확인해 주세요."] {
             #expect(!PackCopyLint.headerPositionWords(in: old).isEmpty, "\(old)")
         }
-        #expect(PackImportCopy.guideSheet.joined().contains("예시 본문 첫 줄…"))
-        #expect(PackCopyLint.headerPositionWords(in: "예시 본문 첫 줄…").isEmpty)
+        #expect(PackImportCopy.guideSheet.joined().contains("예시 본문 첫 줄..."))
+        #expect(PackCopyLint.headerPositionWords(in: "예시 본문 첫 줄...").isEmpty)
     }
 }

@@ -27,8 +27,8 @@ struct PasteSuggestionPreviewTests {
     func truncatesBeyondLimit() {
         let long = String(repeating: "가", count: 100)
         let preview = PasteSuggestion.previewLine(from: long)
-        #expect(preview.count == PasteSuggestion.previewLimit + 1, "40자 + 말줄임표 1자")
-        #expect(preview.hasSuffix("…"))
+        #expect(preview.count == PasteSuggestion.previewLimit + 3, "40자 + 말줄임 3자(...)")
+        #expect(preview.hasSuffix("..."))
         #expect(preview.hasPrefix(String(repeating: "가", count: 10)))
     }
 
@@ -36,21 +36,21 @@ struct PasteSuggestionPreviewTests {
     func doesNotTruncateAtExactlyLimit() {
         let exact = String(repeating: "나", count: PasteSuggestion.previewLimit)
         #expect(PasteSuggestion.previewLine(from: exact) == exact)
-        #expect(!PasteSuggestion.previewLine(from: exact).hasSuffix("…"))
+        #expect(!PasteSuggestion.previewLine(from: exact).hasSuffix("..."))
     }
 
     /// **접은 뒤의 길이로 자른다.** 줄바꿈이 잔뜩 든 짧은 글이 공백 때문에 잘리면 안 된다.
     @Test("줄바꿈이 많아도 접은 결과가 40자 이하면 그대로 보인다")
     func foldsBeforeMeasuring() {
         let text = (1...10).map { "줄\($0)" }.joined(separator: "\n\n\n")
-        #expect(!PasteSuggestion.previewLine(from: text).hasSuffix("…"))
+        #expect(!PasteSuggestion.previewLine(from: text).hasSuffix("..."))
     }
 
     @Test("이모지·결합 문자도 글자 단위로 센다 — 중간에서 깨지지 않는다")
     func countsGraphemeClusters() {
         let preview = PasteSuggestion.previewLine(from: String(repeating: "👨‍👩‍👧‍👦", count: 50))
-        #expect(preview.count == PasteSuggestion.previewLimit + 1)
-        #expect(preview.dropLast().allSatisfy { $0 == "👨‍👩‍👧‍👦" }, "가족 이모지가 쪼개지지 않는다")
+        #expect(preview.count == PasteSuggestion.previewLimit + 3)
+        #expect(preview.dropLast(3).allSatisfy { $0 == "👨‍👩‍👧‍👦" }, "가족 이모지가 쪼개지지 않는다")
     }
 }
 
@@ -76,7 +76,7 @@ struct PasteSuggestionKindTests {
         let clipboard = String(repeating: "가", count: 100)
         let suggestion = try #require(PasteSuggestion.make(from: clipboard))
         #expect(suggestion.kind == .text)
-        #expect(suggestion.preview.count == PasteSuggestion.previewLimit + 1)
+        #expect(suggestion.preview.count == PasteSuggestion.previewLimit + 3)
         #expect(suggestion.insertText == clipboard, "원문 100자가 그대로 들어간다")
     }
 

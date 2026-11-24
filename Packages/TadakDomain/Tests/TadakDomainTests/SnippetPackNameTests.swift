@@ -11,8 +11,8 @@ struct SnippetPackNameTests {
     @Test("★ 보이는 글자 고정 — 성경은 설정용(판본까지)과 출처용(짧게) 두 이름")
     func names() {
         #expect(SnippetPackName.anthem == "국가 상징문")
-        #expect(SnippetPackName.greetings == "인사·상용구")
-        #expect(SnippetPackName.date == "날짜·시간")
+        #expect(SnippetPackName.greetings == "인사와 상용구")
+        #expect(SnippetPackName.date == "날짜와 시간")
         #expect(SnippetPackName.bible == "성경 (개역한글)")
         #expect(SnippetPackName.bibleShort == "성경")
     }

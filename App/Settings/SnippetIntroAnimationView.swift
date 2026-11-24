@@ -64,7 +64,7 @@ struct SnippetIntroAnimationView: View {
         .accessibilityLabel("채움글 사용 예")
         // 장면이 다섯이라 한 문장에 담는다 — 카드 전체가 한 요소라 장면마다 값을 바꾸면 VoiceOver가 계속 새로 읽는다
         .accessibilityValue("생일축하를 치면 칩이 뜨고 누르면 축하 인사 전문으로 바뀌어요. 사랑을 치면 성경 구절 찾기 배지가 뜨고, "
-            + "오늘 날짜·사흘 후 날짜·지금 시간을 치면 계산한 날짜와 시각을 넣어요.")
+            + "오늘 날짜, 사흘 후 날짜, 지금 시간을 치면 계산한 날짜와 시각을 넣어요.")
         .accessibilityAddTraits(.isImage)
         .task(id: TimelineKey(isActive: scenePhase == .active, reduceMotion: reduceMotion)) {
             guard !reduceMotion, scenePhase == .active else {

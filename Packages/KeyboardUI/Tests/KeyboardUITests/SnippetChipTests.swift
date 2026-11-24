@@ -227,7 +227,7 @@ struct SnippetChipTextTests {
     func header() {
         let rows = [candidate("새해 인사", origin: .user), candidate("새해 인사", origin: .pack(name: "우리 회사 상용구")),
                     candidate("새해 인사", origin: .builtIn(id: SnippetPack.greetings))]
-        #expect(SnippetCandidatesPanelView.header(for: rows) == "「새해인사」 후보 3개")
+        #expect(SnippetCandidatesPanelView.header(for: rows) == "'새해인사' 후보 3개")
         #expect(SnippetCandidatesPanelView.header(for: []) == "")
     }
 

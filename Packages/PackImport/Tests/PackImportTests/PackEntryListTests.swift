@@ -32,8 +32,8 @@ struct PackEntryListTests {
             SnippetEntry(trigger: "회의시작", title: "회의", body: long)
         ]))
         #expect(list.rows.map(\.trigger) == ["회사장, 장, 회사 주소", "회의시작"], "원문 그대로(정규화하지 않는다)")
-        #expect(list.rows.map(\.result) == ["→ 서울시 어딘가 1번지", PackNoticeCopy.usageResult(body: long)])
-        #expect(list.rows[1].result == "→ 안녕하세요. 오늘 회의를 시작하겠습니다. 자료는 메일로…")
+        #expect(list.rows.map(\.result) == ["-> 서울시 어딘가 1번지", PackNoticeCopy.usageResult(body: long)])
+        #expect(list.rows[1].result == "-> 안녕하세요. 오늘 회의를 시작하겠습니다. 자료는 메일로...")
     }
 
     @Test("★ 번호형 — 대표 틀(첫 `#틀` 원문)에 번호를 넣은 단축어, 별칭 틀은 쓰지 않는다. 결과는 그 항목 본문(제목 아님)")
@@ -44,7 +44,7 @@ struct PackEntryListTests {
             PackTemplateItem(n: 1300, title: "", body: "천삼백째 본문")
         ], formats: ["사자성어 {n}번", "고사성어{n}번"]))
         #expect(list.rows.map(\.trigger) == ["사자성어 1번", "사자성어 12번", "사자성어 1300번"])
-        #expect(list.rows.map(\.result) == ["→ 첫 본문", "→ 열두째 본문 둘째 줄", "→ 천삼백째 본문"])
+        #expect(list.rows.map(\.result) == ["-> 첫 본문", "-> 열두째 본문 둘째 줄", "-> 천삼백째 본문"])
     }
 
     @Test("순서 — 팩 순서 그대로(문구형 = 항목 순서, 번호형 = 저장본 순서 = 번호 오름차순), id는 0부터 자리")

@@ -171,7 +171,7 @@ struct PackListReorderTests {
         #expect(notice.reason == .packRested)
         #expect(!notice.isRejection)
         #expect(notice.packIDs == [b])
-        #expect(notice.message == "대신 「나」가 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
+        #expect(notice.message == "대신 '나'가 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
         #expect(notice.actions.isEmpty, "갈 곳 없는 「팩 우선순위 바꾸기」 버튼은 없다 — 되돌리려면 다시 끈다")
         #expect(s.store.order == proposed)
     }
@@ -199,6 +199,6 @@ struct PackListReorderTests {
         let notice = try #require(settled.notice)
         #expect(notice.reason == .packsRested)
         #expect(notice.packIDs == [a, b])
-        #expect(notice.message == "대신 「가」 외 1개 팩이 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 팩 목록에서 확인해 주세요.")
+        #expect(notice.message == "대신 '가' 외 1개 팩이 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 팩 목록에서 확인해 주세요.")
     }
 }

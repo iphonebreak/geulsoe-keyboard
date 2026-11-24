@@ -34,9 +34,9 @@ private func exhaustive(_ reason: SkipReason) {
 private let failureTable: [(PackImportFailure, String)] = [
     (.fileTooLarge, "파일이 너무 커요. 항목을 나눠 여러 팩으로 만들어 주세요."),
     (.emptyFile, "파일에 내용이 없어요. 머리글을 쓰고 그 아래에 항목을 넣어 주세요."),
-    (.unsupportedEncoding, "이 파일의 글자 방식은 지원하지 않아요. 「CSV UTF-8」로 저장해 주세요."),
+    (.unsupportedEncoding, "이 파일의 글자 방식은 지원하지 않아요. 'CSV UTF-8'로 저장해 주세요."),
     (.invalidUTF8AfterBOM, "UTF-8이라고 표시된 파일인데 깨진 글자가 있어요. 파일이 손상됐을 수 있어요."),
-    (.invalidUTF16, "UTF-16이라고 표시된 파일인데 깨진 글자가 있어요. 파일이 손상됐을 수 있어요. 「CSV UTF-8」로 다시 저장해 주세요."),
+    (.invalidUTF16, "UTF-16이라고 표시된 파일인데 깨진 글자가 있어요. 파일이 손상됐을 수 있어요. 'CSV UTF-8'로 다시 저장해 주세요."),
     (.encodingDoesNotMatchBOM, "파일이 알리는 글자 방식과 달라요. 파일에 맞는 방식을 골라 주세요."),
     (.undecodable(.utf8), "고른 글자 방식으로는 읽을 수 없어요. 다른 방식을 골라 보세요."),
     (.undecodable(.cp949), "고른 글자 방식으로는 읽을 수 없어요. 다른 방식을 골라 보세요."),
@@ -45,24 +45,24 @@ private let failureTable: [(PackImportFailure, String)] = [
      "12번째 항목(40번째 줄) 근처에서 닫는 따옴표 뒤에 글자가 더 있어요. 칸 안의 따옴표는 두 번(\"\") 써 주세요."),
     (.tooManyLines, "항목이 너무 많아요. 여러 팩으로 나눠 주세요."),
     (.tooManyRecords, "항목이 너무 많아요. 여러 팩으로 나눠 주세요."),
-    (.headerNotRecognized, "머리글을 찾지 못했어요. 머리글 위에는 정보 줄(#…)과 빈 줄만 둘 수 있어요."),
+    (.headerNotRecognized, "머리글을 찾지 못했어요. 머리글 위에는 정보 줄(#...)과 빈 줄만 둘 수 있어요."),
     (.columnCountMismatch(record: 12, line: 40), "칸 수가 머리글과 달라요. 12번째 항목(40번째 줄) 근처의 쉼표나 따옴표를 확인해 주세요."),
     (.duplicateHeader, "같은 이름의 열이 두 번 있어요. 하나만 남겨 주세요."),
-    (.duplicateHeaderAlias, "같은 뜻의 열이 두 개 있어요(예: 「본문」과 「body」). 하나만 남겨 주세요."),
-    (.mixedModeHeader, "「번호」와 「단축어」 열을 함께 쓸 수 없어요. 팩 하나는 한 종류예요."),
-    (.missingRequiredColumn, "꼭 필요한 열이 없어요. 「본문」 열과 「번호」나 「단축어」 열을 넣어 주세요."),
+    (.duplicateHeaderAlias, "같은 뜻의 열이 두 개 있어요(예: '본문'과 'body'). 하나만 남겨 주세요."),
+    (.mixedModeHeader, "'번호'와 '단축어' 열을 함께 쓸 수 없어요. 팩 하나는 한 종류예요."),
+    (.missingRequiredColumn, "꼭 필요한 열이 없어요. '본문' 열과 '번호'나 '단축어' 열을 넣어 주세요."),
     (.tooManyColumns, "칸이 너무 많아요. 필요한 칸만 남겨 주세요."),
-    (.metaAfterHeader(record: 12, line: 40), "「#이름」 같은 정보 줄은 머리글 위에 있어야 해요. 정렬하다 아래로 내려갔는지 확인해 주세요."),
-    (.duplicateMeta(record: 12, line: 40), "같은 정보 줄(#이름·#틀·#출처)이 두 번 있어요. 하나만 남겨 주세요."),
-    (.duplicateSourceMeta(record: 12, line: 40), "「#출처」와 「#권리」는 같은 정보 줄이에요. 하나만 남겨 주세요."),
-    (.unknownMeta(record: 12, line: 40), "모르는 정보 줄(#…)이 있어요. 정보 줄은 「#이름」·「#틀」·「#출처」만 쓸 수 있어요."),
-    (.unsupportedEscapeMeta(record: 12, line: 40), "「#escape」 줄은 아직 쓸 수 없어요. 그 줄을 지우고 다시 가져와 주세요."),
-    (.metaValueCount(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~8개예요."),
-    (.metaTooManyCells(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. 「#이름」·「#출처」는 값 하나, 「#틀」은 1~8개예요."),
-    (.templateInPhrasesMode, "단축어 열이 있는 파일에는 「#틀」 줄을 쓸 수 없어요."),
+    (.metaAfterHeader(record: 12, line: 40), "'#이름' 같은 정보 줄은 머리글 위에 있어야 해요. 정렬하다 아래로 내려갔는지 확인해 주세요."),
+    (.duplicateMeta(record: 12, line: 40), "같은 정보 줄(#이름, #틀, #출처)이 두 번 있어요. 하나만 남겨 주세요."),
+    (.duplicateSourceMeta(record: 12, line: 40), "'#출처'와 '#권리'는 같은 정보 줄이에요. 하나만 남겨 주세요."),
+    (.unknownMeta(record: 12, line: 40), "모르는 정보 줄(#...)이 있어요. 정보 줄은 '#이름', '#틀', '#출처'만 쓸 수 있어요."),
+    (.unsupportedEscapeMeta(record: 12, line: 40), "'#escape' 줄은 아직 쓸 수 없어요. 그 줄을 지우고 다시 가져와 주세요."),
+    (.metaValueCount(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. '#이름', '#출처'는 값 하나, '#틀'은 1~8개예요."),
+    (.metaTooManyCells(record: 12, line: 40), "정보 줄의 칸 수가 맞지 않아요. '#이름', '#출처'는 값 하나, '#틀'은 1~8개예요."),
+    (.templateInPhrasesMode, "단축어 열이 있는 파일에는 '#틀' 줄을 쓸 수 없어요."),
     // 1-e ③ — 엑셀만 내는 머리글·정보 줄 사유(문구에 xlsx 말이 없어 두 판 공유). 엑셀 컨테이너·XML 사유(`.workbook`)는 `workbookOnlyCopy`
     (.mergedHeaderOrMeta(record: 12, line: 40), "머리글이나 정보 줄에 병합한 칸이 있어요. 병합을 풀어 주세요."),
-    (.nonTextHeaderCell(record: 12, line: 40), "머리글이나 정보 줄에 수식·날짜처럼 글이 아닌 칸이 있어요. 그 칸을 글로 바꿔 주세요.")
+    (.nonTextHeaderCell(record: 12, line: 40), "머리글이나 정보 줄에 수식, 날짜처럼 글이 아닌 칸이 있어요. 그 칸을 글로 바꿔 주세요.")
 ]
 
 /// 시안 4-F(CSV판) + 계획서 4-4절 「건너뛴 행」 표 — (사유, 고치는 법)
@@ -78,10 +78,10 @@ private let skipTable: [(SkipReason, String, String)] = [
     (.titleTooLong, "제목이 너무 길어요", "제목은 60자까지예요"),
     (.bodyTooLong, "본문이 너무 길어요", "본문은 한 칸에 3,000자까지예요"),
     // 1-e ③ — 6-4 사유 5종(엑셀만 낸다, 문구에 xlsx 말이 없다)
-    (.formula, "수식이에요", "「값만 붙여넣기」로 바꿔 주세요"),
-    (.dateFormat, "날짜 서식이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
-    (.booleanOrError, "TRUE·FALSE나 오류 값이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
-    (.numberCell, "숫자로 저장된 칸이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
+    (.formula, "수식이에요", "'값만 붙여넣기'로 바꿔 주세요"),
+    (.dateFormat, "날짜 서식이에요", "그 열 서식을 '텍스트'로 바꿔 주세요"),
+    (.booleanOrError, "TRUE/FALSE나 오류 값이에요", "그 열 서식을 '텍스트'로 바꿔 주세요"),
+    (.numberCell, "숫자로 저장된 칸이에요", "그 열 서식을 '텍스트'로 바꿔 주세요"),
     (.merged, "병합한 칸이 있어요", "병합을 풀어 주세요")
 ]
 
@@ -114,7 +114,7 @@ struct PackImportCopyMappingTests {
         #expect(PackImportCopy.failureMessage(.structural(.emptyFile), source: .paste)
                 == "붙여 넣은 글에 내용이 없어요. 머리글을 쓰고 그 아래에 항목을 넣어 주세요.")
         #expect(PackImportCopy.failureMessage(.structural(.templateInPhrasesMode), source: .paste)
-                == "단축어 열이 있는 표에는 「#틀」 줄을 쓸 수 없어요.")
+                == "단축어 열이 있는 표에는 '#틀' 줄을 쓸 수 없어요.")
         #expect(PackImportCopy.failureMessage(.structural(.headerNotRecognized), source: .paste)
                 == PackImportCopy.failureMessage(.structural(.headerNotRecognized), source: .file))
     }
@@ -135,7 +135,7 @@ struct PackImportCopyMappingTests {
         for (failure, _) in failureTable {
             #expect(PackImportCopy.showsHeaderExample(.structural(failure)) == header.contains(failure), "\(failure)")
         }
-        #expect(PackImportCopy.headerExamples == ["번호 · 제목 · 본문", "단축어 · 제목 · 본문"])
+        #expect(PackImportCopy.headerExamples == ["번호, 제목, 본문", "단축어, 제목, 본문"])
         #expect(PackImportCopy.failureFooter(.structural(.headerNotRecognized), source: .file)
                 == "파일 내용은 보여 주지 않아요. 한 행이라도 구조가 틀리면 다른 행도 믿을 수 없어 통째로 받지 않아요.")
         #expect(PackImportCopy.failureFooter(.structural(.quote(CSVQuoteError(kind: .unterminated, record: 12, line: 40))), source: .paste)
@@ -154,7 +154,7 @@ struct PackImportCopyMappingTests {
             #expect(PackImportCopy.skipFix(reason) == fix, "\(reason)")
         }
         #expect(PackImportCopy.skipTitle(SkippedRecord(record: 12, line: 40, reason: .invalidNumber))
-                == "12번째 항목(40번째 줄) — 번호가 1~9999가 아니에요")
+                == "12번째 항목(40번째 줄): 번호가 1~9999가 아니에요")
     }
 
     @Test("4-H 건너뛴 이유 — 같은 문구는 묶고(번호 형식·범위), 많은 것부터, 같으면 먼저 나온 것부터")
@@ -193,7 +193,7 @@ struct PackImportCopyMappingTests {
     @Test("★ R29 4-B·4-C 글자 확인 — 표 머리 「불러온 글자」·「불러온 개수」·방식 이름")
     func encodingLines() {
         let both = review(selected: .utf8, utf8Failed: 0, cp949Failed: 0)
-        #expect(PackImportCopy.samplesHeader(both) == "불러온 글자 — UTF-8")
+        #expect(PackImportCopy.samplesHeader(both) == "불러온 글자: UTF-8")
         #expect(PackImportCopy.alternativeHeader(both) == "한국어(CP949)로 고르면")
         #expect(PackImportCopy.samplesHeader(review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)) == "불러온 글자")
         #expect(PackImportCopy.countsHeader == "불러온 개수")
@@ -227,8 +227,8 @@ struct PackImportCopyMappingTests {
     @Test("★ 실기 피드백 2(2026-10-08) — 머리글 자리를 「첫 줄」로 말하지 않는다: 3-B 1절 제목 · 붙여넣기 풋터")
     func headerPlacementLines() {
         #expect(PackImportCopy.guideHeaderSection == "머리글")
-        #expect(PackImportCopy.pasteFooter == "머리글(번호·제목·본문 또는 단축어·제목·본문)이 있어야 해요. 머리글 위에는 정보 줄(#…)과 빈 줄만 둘 수 있어요. "
-                + "엑셀·구글 시트에서 칸을 골라 복사하면 그대로 붙어요.")
+        #expect(PackImportCopy.pasteFooter == "머리글('번호, 제목, 본문'이나 '단축어, 제목, 본문')이 있어야 해요. 머리글 위에는 정보 줄(#...)과 빈 줄만 둘 수 있어요. "
+                + "엑셀이나 구글 시트에서 칸을 골라 복사하면 그대로 붙어요.")
     }
 
     @Test("★ 실기 피드백 2 — 문구가 말하는 규칙 = 판정: 머리글 위의 정보 줄·빈 줄은 붙여넣기·파일 모두 받고, 다른 줄이 있으면 머리글을 찾지 못한다")
@@ -247,13 +247,13 @@ struct PackImportCopyMappingTests {
     @Test("★ R27 — 만드는 법 시트 그림·정보 줄 안내의 키는 `#출처`")
     func guideUsesSourceKey() {
         #expect(PackImportCopy.guideSheet[2] == ["#출처", "제작자 자체 작성", ""])
-        #expect(PackImportCopy.guideMeta == ["머리글 위에 #이름 · #틀 · #출처 줄을 두면 가져올 때 미리 채워져요.",
+        #expect(PackImportCopy.guideMeta == ["머리글 위에 #이름, #틀, #출처 줄을 두면 가져올 때 미리 채워져요.",
                                              "정렬하다 아래로 내려가지 않게 해 주세요."])
     }
 
     @Test("★ 4-B·4-C CSV 실물 반영(계획서 11절 F-1·F-2) — CP949 안내 줄은 **한국어(CP949)로 읽은 경우에만**, 풋터 둘째 문장")
     func cp949CautionOnlyWhenReadAsCP949() throws {
-        let caution = "한국어(CP949)로 저장한 파일은 일부 기호(예: —)가 저장할 때 이미 바뀌었을 수 있어요. 엑셀에서 「CSV UTF-8」로 다시 저장하면 바뀌지 않아요."
+        let caution = "한국어(CP949)로 저장한 파일은 일부 기호(예: —)가 저장할 때 이미 바뀌었을 수 있어요. 엑셀에서 'CSV UTF-8'로 다시 저장하면 바뀌지 않아요."
         #expect(PackImportCopy.cp949Caution(review(selected: .cp949, utf8Failed: 37, cp949Failed: 0)) == caution)
         #expect(PackImportCopy.cp949Caution(review(selected: .cp949, utf8Failed: 0, cp949Failed: 0)) == caution)   // 4-C 둘 다 읽힘
         #expect(PackImportCopy.cp949Caution(review(selected: .utf8, utf8Failed: 0, cp949Failed: 0)) == nil)
@@ -272,7 +272,7 @@ struct PackImportCopyMappingTests {
         #expect(PackEncodingReview.probe(Data([0xEF, 0xBB, 0xBF]) + Data(csv.utf8), choice: .automatic) == nil)
 
         #expect(PackImportCopy.encodingFooter == "글자가 깨져 보이면 위에서 다른 쪽을 골라 보세요. 고르면 파일을 처음부터 다시 읽어요.\n"
-                + "엑셀에서는 「CSV UTF-8」로 저장하면 이 화면이 안 나와요. Numbers·구글 시트의 CSV는 이 화면이 늘 떠요 — 표본이 맞게 보이면 「다음」을 누르세요.")
+                + "엑셀에서는 'CSV UTF-8'로 저장하면 이 화면이 안 나와요. Numbers, 구글 시트의 CSV는 이 화면이 늘 떠요. 표본이 맞게 보이면 '다음'을 누르세요.")
     }
 
     @Test("4-E 미리보기 줄 — 파일에 적힌 틀(외 n개)·모르는 열·처음 n개·같은 번호/단축어·정리·따옴표")
@@ -282,8 +282,8 @@ struct PackImportCopyMappingTests {
         #expect(PackImportCopy.fileTemplate([]) == nil)
         #expect(PackImportCopy.ignoredColumns(37) == "모르는 열 37개는 가져오지 않아요.")
         #expect(PackImportCopy.firstRowsHeader(count: 37) == "처음 37개")
-        #expect(PackImportCopy.duplicates(37, mode: .numbered) == "같은 번호 37개 — 뒤에 있는 것을 써요")
-        #expect(PackImportCopy.duplicates(37, mode: .phrases) == "같은 단축어 37개 — 뒤에 있는 것을 써요")
+        #expect(PackImportCopy.duplicates(37, mode: .numbered) == "같은 번호 37개: 뒤에 있는 것을 써요")
+        #expect(PackImportCopy.duplicates(37, mode: .phrases) == "같은 단축어 37개: 뒤에 있는 것을 써요")
         #expect(PackImportCopy.skippedHeader(count: 37) == "건너뛴 행 37개")
         #expect(PackImportCopy.importOnly(37) == "그래도 37개만 가져오기")
         #expect(PackImportCopy.partialConfirmTitle(37) == "37개만 가져올까요?")
@@ -294,8 +294,8 @@ struct PackImportCopyMappingTests {
 
     @Test("3-E 붙여넣기 요약 — 줄 수 · 칸 나누기")
     func pasteSummary() {
-        #expect(PackImportCopy.pasteSummary(lines: 42, delimiter: .tab) == "42줄 · 칸 나누기: 탭")
-        #expect(PackImportCopy.pasteSummary(lines: 42, delimiter: .comma) == "42줄 · 칸 나누기: 쉼표")
+        #expect(PackImportCopy.pasteSummary(lines: 42, delimiter: .tab) == "42줄, 칸 나누기: 탭")
+        #expect(PackImportCopy.pasteSummary(lines: 42, delimiter: .comma) == "42줄, 칸 나누기: 쉼표")
         #expect(PackImportCopy.pasteSummary(lines: 42, delimiter: nil) == "42줄")
     }
 
@@ -313,13 +313,13 @@ struct PackImportCopyMappingTests {
                                           status: .restingOverLimit)]
         let lines = PackImportCopy.overlapLines(overlap, summary: { summaries[$0] })
         #expect(lines == [
-            .init(message: "내 채움글과 같은 단축어 2개 — 목록에서 위에 있는 쪽이 먼저 떠요",
-                  details: ["주소, 새해인사 — 새 팩은 맨 아래에 붙어서 지금은 「내 채움글」이 떠요. 이 팩 문구를 먼저 띄우려면 「외부 채움글」 목록에서 길게 눌러 위로 올려요."],
+            .init(message: "내 채움글과 같은 단축어 2개: 목록에서 위에 있는 쪽이 먼저 떠요",
+                  details: ["주소, 새해인사: 새 팩은 맨 아래에 붙어서 지금은 '내 채움글'이 떠요. 이 팩 문구를 먼저 띄우려면 '외부 채움글' 목록에서 길게 눌러 위로 올려요."],
                   isWarning: true),
-            .init(message: "다른 팩과 같은 단축어 3개 — 위에 있는 팩이 먼저 떠요",
-                  details: ["추석인사 — 「인사말 예시」 팩(꺼짐)", "회의실 — 「우리 회사 상용구」 팩", "추석인사, 인사 — 「상용 영어」 팩(쉬는 중)"],
+            .init(message: "다른 팩과 같은 단축어 3개: 위에 있는 팩이 먼저 떠요",
+                  details: ["추석인사: '인사말 예시' 팩(꺼짐)", "회의실: '우리 회사 상용구' 팩", "추석인사, 인사: '상용 영어' 팩(쉬는 중)"],
                   isWarning: true),
-            .init(message: "내장 팩과 같은 단축어 1개 — 이 팩이 먼저 떠요", details: ["새해인사 — 내장 팩보다 앞서요"], isWarning: false)
+            .init(message: "내장 팩과 같은 단축어 1개: 이 팩이 먼저 떠요", details: ["새해인사: 내장 팩보다 앞서요"], isWarning: false)
         ])
         #expect(PackImportCopy.overlapLines(PackDraftOverlap(userSnippets: nil, packs: [], builtIn: nil), summary: { _ in nil }).isEmpty)
     }
@@ -330,7 +330,7 @@ struct PackImportCopyMappingTests {
         let lines = PackImportCopy.overlapLines(
             PackDraftOverlap(userSnippets: nil, packs: [], builtIn: .init(source: .builtIn, triggers: triggers, showsBeforeDraft: false)),
             summary: { _ in nil })
-        #expect(lines.first?.details == ["가, 나, 다, 라, 마 외 2개 — 내장 팩보다 앞서요"])
+        #expect(lines.first?.details == ["가, 나, 다, 라, 마 외 2개: 내장 팩보다 앞서요"])
     }
 }
 
@@ -464,7 +464,7 @@ var workbookOnlyCopy: [String] {
 /// 한도가 아니다). 두 판을 돌게 된 뒤(검증 G2) 허용했다 — 사장님 결정 2026-10-08. 예시를 통째로 두어 다른 자리의 `1/2`는 걸린다.
 /// 「시트 37」·「인사 (37)」은 4-D 목록 이름의 **표시 위치**(목록 자리·구별 번호 — 「12번째」와 같은 종류)다.
 /// 「사자성어 12번」(3-A 머리 설명 둘째 줄)은 그 줄을 지우면서 뺐다(사장님 실기 2026-10-08) — 다시 나오면 검사에 걸린다
-private let stage4AllowedNumbers = ["UTF-8", "UTF-16", "CP949", "007", "1-2", "1/2 → 1월 2일", "12번째", "40번째", "37개", "37행",
+private let stage4AllowedNumbers = ["UTF-8", "UTF-16", "CP949", "007", "1-2", "1/2 -> 1월 2일", "12번째", "40번째", "37개", "37행",
                                     "37줄", "41개", "57%", "10개까지", "40자까지", "60자까지", "3,000자까지", "1~9999", "1~8개",
                                     "시트 37", "인사 (37)"]
 

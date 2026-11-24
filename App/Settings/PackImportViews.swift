@@ -318,7 +318,7 @@ private struct GuideSentences: View {
         VStack(alignment: .leading, spacing: spacing) {
             ForEach(Array(sentences.enumerated()), id: \.offset) { _, sentence in
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(verbatim: "·")
+                    Text(verbatim: "-")
                         .accessibilityHidden(true)
                     Text(sentence)
                         .fixedSize(horizontal: false, vertical: true)

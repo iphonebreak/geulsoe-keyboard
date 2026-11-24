@@ -15,7 +15,7 @@ public enum PackLockedCopy {
     public static let metaFooter = "이 정보는 잠기지 않은 채 파일에 적혀 있어요. 비밀번호로 연 뒤에야 바뀌지 않았는지 확인돼요."
     public static let passwordLabel = "비밀번호"
     public static let open = "열기"
-    public static let opening = "푸는 중…"
+    public static let opening = "푸는 중..."
     /// 상시 도움말(12-7)
     public static let help = "비밀번호를 잊으면 열 수 없어요. 앞뒤 공백도 비밀번호에 포함돼요."
 
@@ -24,7 +24,7 @@ public enum PackLockedCopy {
     /// 가져온 팩은 잠금이 풀린 채 저장된다(한계 고지)
     public static let storedUnlocked = "이 팩은 잠금이 풀린 채 이 기기에 저장돼요."
     /// 봉투 표시 메타와 안쪽 `#이름`·`#출처`가 다르다 — 안쪽 값을 쓴다
-    public static let metaDiffers = "잠금 파일에 적힌 이름·출처가 안쪽 내용과 달라요. 안쪽 내용을 써요."
+    public static let metaDiffers = "잠금 파일에 적힌 이름, 출처가 안쪽 내용과 달라요. 안쪽 내용을 써요."
 
     // MARK: 실패 (12-7 M1~M6)
 

@@ -50,7 +50,7 @@ struct PackCopySetTests {
     func csvLines() {
         PackCopySet.$previewing.withValue(.csv) {
             #expect(PackNoticeCopy.emptyListFooter
-                    == "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
+                    == "CSV 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어, 상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
             #expect(PackImportCopy.heroTitle == "CSV 파일 가져오기")
             // 둘째 줄(번호형·문구형 둘 다 돼요)을 뺐다 — 판별 문구 한 줄만(사장님 실기 2026-10-08). 「첫 줄에」도 뺐다(실기 피드백 2 —
             // 정보 줄·빈 줄이 머리글 위에 와도 된다)
@@ -63,17 +63,17 @@ struct PackCopySetTests {
             #expect(PackImportCopy.guideCellsSection == "모양이 바뀌기 쉬운 칸")
             // 칸마다 문장 하나에 한 줄(R30) — 글자는 나누기 전과 같다
             #expect(PackImportCopy.guideCells == [
-                ["숫자·날짜처럼 보이는 글(예: 007, 1-2) → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요.",
+                ["숫자, 날짜처럼 보이는 글(예: 007, 1-2) -> 열 서식을 먼저 '텍스트'로 바꾼 뒤 입력해 주세요.",
                  "그렇지 않으면 CSV에 바뀐 모양으로 저장돼요."],
-                ["= + - @로 시작하는 글 → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요.",
+                ["= + - @로 시작하는 글 -> 열 서식을 먼저 '텍스트'로 바꾼 뒤 입력해 주세요.",
                  "앞에 작은따옴표(')를 붙이면 붙여넣을 때 글자로 남을 수 있어요."]
             ])
             #expect(PackImportCopy.guideCellsFooter == "가져오기 미리보기에서 처음 몇 개를 확인해 주세요.")
             #expect(PackImportCopy.guideSave == [
-                "파일 ▸ 다른 이름으로 저장 ▸ 「CSV UTF-8」이 든 항목(예: CSV UTF-8(쉼표로 분리))을 골라요.",
-                "「쉼표로 구분된 값」처럼 UTF-8이 없는 항목도 가져올 수 있지만 일부 기호가 바뀔 수 있어요.",
-                "쉼표·세미콜론·탭 모두 알아서 읽어요.",
-                "파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「CSV 파일 가져오기」를 눌러요."
+                "파일 > 다른 이름으로 저장 > 'CSV UTF-8'이 든 항목(예: CSV UTF-8(쉼표로 분리))을 골라요.",
+                "'쉼표로 구분된 값'처럼 UTF-8이 없는 항목도 가져올 수 있지만 일부 기호가 바뀔 수 있어요.",
+                "쉼표, 세미콜론, 탭 모두 알아서 읽어요.",
+                "파일 앱, AirDrop, 메일로 이 기기에 옮긴 뒤 'CSV 파일 가져오기'를 눌러요."
             ])
             #expect(PackSample.files(.numbered).map(\.format) == [.csv])
             #expect(PackSample.files(.phrases).map(\.format) == [.csv])
@@ -84,27 +84,27 @@ struct PackCopySetTests {
     func xlsxLines() {
         PackCopySet.$previewing.withValue(.xlsx) {
             #expect(PackNoticeCopy.emptyListFooter
-                    == "엑셀 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
+                    == "엑셀 파일로 만든 채움글 묶음(팩)을 가져와요. 사자성어, 상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요.")
             #expect(PackImportCopy.heroTitle == "엑셀 파일 그대로 가져오기")
             #expect(PackImportCopy.heroMessage == "머리글이 있는 엑셀 파일(.xlsx)을 골라요.")   // 둘째 줄 뺌 · 「첫 줄에」 뺌(2026-10-08)
             #expect(PackImportCopy.pickFile == "엑셀 파일 고르기")
             #expect(PackImportCopy.guideTitle == "엑셀로 팩 만드는 법")
-            #expect(PackImportCopy.otherFileRow == PackCopySet.Row(title: "CSV 파일 가져오기", detail: "구글 시트·Numbers·메모장에서 만든 CSV도 돼요"))
+            #expect(PackImportCopy.otherFileRow == PackCopySet.Row(title: "CSV 파일 가져오기", detail: "구글 시트, Numbers, 메모장에서 만든 CSV도 돼요"))
             #expect(PackImportCopy.startFooter
-                    == "받지 않는 파일: Numbers 파일(.numbers), 옛 엑셀(.xls), 매크로가 든 엑셀(.xlsm·.xlsb), 비밀번호가 걸린 엑셀, .json — "
-                    + "엑셀에서 「Excel 통합 문서(.xlsx)」나 「CSV UTF-8」로 다시 저장해 주세요.")   // 뒤 개인정보 한 줄은 뺐다(2026-10-07)
+                    == "받지 않는 파일: Numbers 파일(.numbers), 옛 엑셀(.xls), 매크로가 든 엑셀(.xlsm, .xlsb), 비밀번호가 걸린 엑셀, .json. "
+                    + "엑셀에서 'Excel 통합 문서(.xlsx)'나 'CSV UTF-8'로 다시 저장해 주세요.")   // 뒤 개인정보 한 줄은 뺐다(2026-10-07)
             #expect(PackImportCopy.guideCellsSection == "이런 칸은 건너뛰어요")
             #expect(PackImportCopy.guideCells == [
-                ["수식 → 「값만 붙여넣기」로 바꿔 주세요"],
-                ["날짜로 바뀐 칸(1/2 → 1월 2일) → 그 열 서식을 「텍스트」로"],
-                ["병합한 칸 → 병합을 풀어 주세요.", "숨긴 시트는 목록에 안 나와요"],
-                ["= + - @로 시작하는 글 → 열 서식을 먼저 「텍스트」로 바꾼 뒤 입력해 주세요.",
+                ["수식 -> '값만 붙여넣기'로 바꿔 주세요"],
+                ["날짜로 바뀐 칸(1/2 -> 1월 2일) -> 그 열 서식을 '텍스트'로"],
+                ["병합한 칸 -> 병합을 풀어 주세요.", "숨긴 시트는 목록에 안 나와요"],
+                ["= + - @로 시작하는 글 -> 열 서식을 먼저 '텍스트'로 바꾼 뒤 입력해 주세요.",
                  "앞에 작은따옴표(')를 붙이면 붙여넣을 때 글자로 남을 수 있어요."]
             ])
             #expect(PackImportCopy.guideCellsFooter
-                    == "엑셀에서 만들었다면 xlsx로 저장해서 가져오면 숫자·날짜로 바뀐 칸을 알려 드려요. CSV로 저장하면 바뀐 값이 그대로 들어올 수 있어요.")
-            #expect(PackImportCopy.guideSave == ["파일 ▸ 다른 이름으로 저장 ▸ Excel 통합 문서(.xlsx).",
-                                                 "파일 앱·AirDrop·메일로 이 기기에 옮긴 뒤 「엑셀 파일 고르기」를 눌러요."])
+                    == "엑셀에서 만들었다면 xlsx로 저장해서 가져오면 숫자, 날짜로 바뀐 칸을 알려 드려요. CSV로 저장하면 바뀐 값이 그대로 들어올 수 있어요.")
+            #expect(PackImportCopy.guideSave == ["파일 > 다른 이름으로 저장 > Excel 통합 문서(.xlsx).",
+                                                 "파일 앱, AirDrop, 메일로 이 기기에 옮긴 뒤 '엑셀 파일 고르기'를 눌러요."])
             #expect(PackSample.files(.numbered).map(\.format) == [.xlsx, .csv])   // 시안 3-A 알약 순서 [엑셀][CSV]
             #expect(PackSample.files(.phrases).map(\.displayName) == ["문구형 샘플.xlsx", "문구형 샘플.csv"])
         }
@@ -156,7 +156,7 @@ struct PackGuideSentenceTests {
             for sentence in cells.flatMap({ $0 }) {
                 #expect(!sentence.isEmpty && sentence == sentence.trimmingCharacters(in: .whitespacesAndNewlines), "\(sentence)")
                 #expect(!sentence.contains(". ") && !sentence.contains("\n"), "한 줄에 문장이 둘: \(sentence)")
-                #expect(!sentence.hasPrefix("·"), "머리점은 화면이 붙인다 — 글자에 넣지 않는다(VoiceOver가 읽지 않게): \(sentence)")
+                #expect(!sentence.hasPrefix("-"), "머리점은 화면이 붙인다 — 글자에 넣지 않는다(VoiceOver가 읽지 않게): \(sentence)")
             }
         }
     }

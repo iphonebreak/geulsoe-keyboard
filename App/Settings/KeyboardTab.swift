@@ -66,7 +66,7 @@ struct KeyboardTab: View {
             // 숫자·기호 자판 모양 (v1.2.0 ⑥, PDR `number-symbol-keypad.md`). 기본은 쿼티형이라 기존 사용자는 그대로다.
             // 밑의 두 줄 설명은 **지웠다**(사장님 결정 2026-09-28, 폰 세션 4-1) — 키패드형의 「길게 누르면 이전」은
             // 자판 위 페이지 키 힌트(◀)가 알린다.
-            Picker("숫자·기호 자판", selection: $settings.symbolKeyboardStyle) {
+            Picker("숫자, 기호 자판", selection: $settings.symbolKeyboardStyle) {
                 ForEach(SymbolKeyboardStyle.allCases, id: \.self) { style in
                     Text(style.displayName).tag(style)
                 }
@@ -106,7 +106,7 @@ struct KeyboardTab: View {
         } header: {
             Text("자판")
         } footer: {
-            Text("숫자 줄과 길게 눌러 기호 입력은 두벌식·단모음·영어 자판에만 적용돼요.")
+            Text("숫자 줄과 길게 눌러 기호 입력은 두벌식, 단모음, 영어 자판에만 적용돼요.")
         }
     }
 
