@@ -147,12 +147,22 @@ final class KeyboardViewController: UIInputViewController {
     /// ("x버튼 누르면 그 이후로 안뜨도록")로 뒤집었고, 두 문서도 함께 고쳤다.
     ///
     /// **경계는 「같은 클립보드」다.** 새로 복사하면 `changeCount`가 바뀌므로 칩이 다시 뜬다 —
-    /// 복사했는데 안 뜨는 쪽이 훨씬 나쁜 버그다. 프로세스가 죽으면(호스트 종료·메모리 압박)
-    /// 초기화되는데, 그때는 클립보드도 대개 바뀌어 있어 실제 차이가 없다.
+    /// 복사했는데 안 뜨는 쪽이 훨씬 나쁜 버그다.
     ///
-    /// **저장하지 않는다.** 값은 정수(`changeCount`)라 사용자 입력 텍스트가 아니다
-    /// (`.claude/rules/security.md` 1순위 규칙과 충돌하지 않는다). 세션 메모리만 쓴다.
-    private static var consumedPasteboardChangeCount: Int?
+    /// ## ★ 키보드 전용 저장소에 남긴다 (2026-11-25 사장님 보고)
+    ///
+    /// 예전에는 메모리에만 두고 「프로세스가 죽으면 클립보드도 대개 바뀌어 있어 실제 차이가 없다」고 보았다.
+    /// **틀렸다** — ✕로 내린 뒤 나중에 키보드를 다시 열면 같은 클립보드의 칩이 또 떴다(프로세스만 내려갔다).
+    /// 그래서 값이 바뀔 때마다 `pasteboardConsumptionStore`(전용 컨테이너, 전체 접근 무관)에 쓰고, 프로세스가
+    /// 새로 뜨면 거기서 읽는다. 지금 클립보드와 다른 기록은 프로브가 버린다(`PasteboardProbe.retainedConsumption`).
+    /// 담는 값은 정수(`changeCount`) 하나라 사용자 입력 텍스트가 아니다(`.claude/rules/security.md` 1순위 규칙과 충돌하지 않는다).
+    private static var consumedPasteboardChangeCount: Int? = pasteboardConsumptionStore.load() {
+        didSet {
+            guard consumedPasteboardChangeCount != oldValue else { return }
+            pasteboardConsumptionStore.save(consumedPasteboardChangeCount)
+        }
+    }
+    private static let pasteboardConsumptionStore: PasteboardConsumptionStore = KeyboardOwnPasteboardConsumptionStore()
     /// 클립보드 기록 — 키보드가 쓰는 App Group 데이터 (FA 필요, PDR clipboard-history).
     /// 메모리에 들고 있지 않고 필요할 때 읽는다 — 설정 앱이 끄기/지우기로 비운 것을 놓치지 않게.
     private let clipboardHistoryRepository: ClipboardHistoryRepository = AppGroupClipboardHistoryRepository()
@@ -1357,6 +1367,9 @@ final class KeyboardViewController: UIInputViewController {
         let pasteboard = UIPasteboard.general
         let changeCount = pasteboard.changeCount   // 정수 — 내용을 가져오지 않는다
         seenPasteboardChangeCount = changeCount
+        // 저장해 둔 소비 기록은 지금 클립보드와 같을 때만 남긴다 — 새로 복사했거나 재부팅했으면 버린다(2026-11-25)
+        Self.consumedPasteboardChangeCount = PasteboardProbe.retainedConsumption(
+            Self.consumedPasteboardChangeCount, changeCount: changeCount)
         // 스위치 셋(인증번호·텍스트 제안, 기록) 중 필요한 것이 있을 때만 읽는다 — 칩으로 어느 쪽이 뜰지는
         // `PasteSuggestion.make`가 정한다(인증번호 우선, 그 다음 일반 텍스트).
         let plan = PasteboardProbe.plan(

@@ -39,6 +39,16 @@ public enum PasteboardProbe {
             needsHistory: historyEnabled && changeCount != recordedChangeCount)
     }
 
+    /// ✕·탭으로 소비한 클립보드 기록을 지금 클립보드에 맞춘다 — 같으면 남기고, 다르면 버린다.
+    ///
+    /// 소비 기록은 키보드 전용 저장소에 남는다(2026-11-25 — 메모리에만 두었을 때는 키보드 프로세스가 내려가면
+    /// ✕로 내린 칩이 같은 클립보드인데 다시 떴다). 남기는 대신 **낡은 기록**을 버려야 한다: 재부팅 뒤 `changeCount`가
+    /// 다시 세어지면 나중에 우연히 같은 값의 새 복사를 막는다. 한 부팅 안에서 `changeCount`는 늘기만 하므로
+    /// 지금 값과 다른 기록의 클립보드는 다시 오지 않는다 — 버려도 되살아나는 칩이 없다.
+    public static func retainedConsumption(_ consumed: Int?, changeCount: Int) -> Int? {
+        consumed == changeCount ? consumed : nil
+    }
+
     /// **게이트 → `hasStrings` → `string`** 순서로만 읽는다.
     ///
     /// - 게이트(`plan.wantsContent`)가 닫히면 두 클로저 모두 부르지 않는다 — 클립보드를 아예 건드리지 않는다.

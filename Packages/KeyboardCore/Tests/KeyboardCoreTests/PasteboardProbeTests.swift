@@ -108,3 +108,43 @@ struct PasteboardProbeTests {
         #expect(!p.retries(afterReading: "x"))
     }
 }
+
+/// ✕·탭으로 소비한 클립보드 기록을 지금 클립보드에 맞춘다 — 기록이 저장소에 남게 되면서(2026-11-25) 생긴 규칙.
+///
+/// 사장님 보고(2026-11-25): 복사됨 칩을 ✕로 내렸는데 나중에 키보드를 다시 열면 같은 칩이 또 떴다. 소비 기록이
+/// 메모리에만 있어 키보드 프로세스가 내려가면 사라졌다. 기록을 저장하게 되면 반대로 **낡은 기록**이 문제다 —
+/// 재부팅 뒤 `changeCount`가 처음부터 다시 세어지면 우연히 같은 값의 새 복사를 막을 수 있다.
+/// 그래서 지금 값과 다르면 버린다. 한 부팅 안에서 `changeCount`는 늘기만 하므로 버린 값의 클립보드는 다시 오지 않는다.
+@Suite("클립보드 소비 기록 — 지금 클립보드와 같을 때만 남긴다")
+struct PasteboardConsumptionTests {
+
+    @Test("★ 같은 클립보드면 기록을 남긴다 — 다시 열어도 ✕로 내린 칩이 뜨지 않는다")
+    func keepsWhenSameClipboard() {
+        #expect(PasteboardProbe.retainedConsumption(17193, changeCount: 17193) == 17193)
+        let plan = PasteboardProbe.plan(codeSuggestionsEnabled: true, pasteSuggestionsEnabled: true, historyEnabled: false,
+                                        changeCount: 17193,
+                                        consumedChangeCount: PasteboardProbe.retainedConsumption(17193, changeCount: 17193),
+                                        recordedChangeCount: nil)
+        #expect(!plan.needsSuggestion)
+    }
+
+    @Test("새로 복사했으면(값이 다르면) 기록을 버린다 — 새 클립보드의 칩은 뜬다")
+    func dropsWhenClipboardChanged() {
+        #expect(PasteboardProbe.retainedConsumption(17193, changeCount: 17194) == nil)
+        let plan = PasteboardProbe.plan(codeSuggestionsEnabled: false, pasteSuggestionsEnabled: true, historyEnabled: false,
+                                        changeCount: 17194,
+                                        consumedChangeCount: PasteboardProbe.retainedConsumption(17193, changeCount: 17194),
+                                        recordedChangeCount: nil)
+        #expect(plan.needsSuggestion)
+    }
+
+    @Test("재부팅으로 값이 작아져도 버린다 — 나중에 우연히 같은 값에 닿아도 새 복사를 막지 않는다")
+    func dropsAfterCounterReset() {
+        #expect(PasteboardProbe.retainedConsumption(17193, changeCount: 3) == nil)
+    }
+
+    @Test("기록이 없으면 없는 그대로")
+    func nilStaysNil() {
+        #expect(PasteboardProbe.retainedConsumption(nil, changeCount: 5) == nil)
+    }
+}
