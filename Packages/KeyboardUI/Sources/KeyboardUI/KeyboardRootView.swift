@@ -274,6 +274,8 @@ public struct KeyboardRootView: View {
                 .frame(maxWidth: areaMaxWidth)
             }
         }
+        // 패널 ScrollView 위쪽의 그림자 같은 흐림을 없앤다 — 툴바·패널 전부에 한 번에 건다(`ScrollEdgeEffectSuppression`)
+        .modifier(ScrollEdgeEffectSuppression())
     }
 
     // 툴바 구현은 SuggestionToolbar (별도 View) — 후보 프로퍼티 읽기 격리
