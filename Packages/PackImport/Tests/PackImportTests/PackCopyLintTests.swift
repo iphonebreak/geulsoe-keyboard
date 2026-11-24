@@ -36,9 +36,13 @@ enum PackCopyLint {
     static let bannedWords = ["트리거", "잠시 뒤"]
 
     /// 금칙 문자 — AI 글투 특수 문자(사장님 지시 2026-11-24). 화면 문구는 키보드로 칠 수 있는 문자로 쓴다
-    /// (「」『』 → '', “” → "", · → 「, 」 또는 「/」, — → 「 - 」·「:」·괄호, … → ..., → → ->, ▸ › → >)
-    static let bannedCharacters = ["「", "」", "『", "』", "“", "”", "‘", "’", "·", "・", "—", "–", "…", "→", "←", "↔", "⇒",
-                                   "•", "※", "★", "☆", "✓", "✔", "×", "▶", "◀", "▸", "›", "⌫", "⏎", "⇧", "〜", "～"]
+    /// (「」『』 → '', “” → "", · → 「, 」 또는 「/」, — → 「 - 」·「:」·괄호, … → ..., ▸ › → >)
+    /// `→ ★ ✓` 셋은 허용한다(사장님 결정 2026-11-24) — 목록에 다시 넣지 않는다(`allowedSymbolsStayAllowed`)
+    static let bannedCharacters = ["「", "」", "『", "』", "“", "”", "‘", "’", "·", "・", "—", "–", "…", "←", "↔", "⇒",
+                                   "•", "※", "☆", "✔", "×", "▶", "◀", "▸", "›", "⌫", "⏎", "⇧", "〜", "～"]
+
+    /// 금칙 문자에서 뺀 기호 — 화면 문구에 써도 된다
+    static let allowedSymbols = ["→", "★", "✓"]
 
     /// 금칙 문자 예외 — **정확히 이 문자열만**. 엑셀이 한국어(CP949)로 저장할 때 실제로 바꾸는 기호를 예로 보이는 안내라
     /// 그 기호(`—`)가 곧 내용이다(`verify-csv-real-mac.md`). 「' '」 같은 나머지 글자는 규칙대로 바꿨다
@@ -485,6 +489,14 @@ struct PackCopyLintTests {
         }
         let source = #"Text("「가져오기」를 눌러요"); Text("쉬는 중 · \(reason)")"#
         #expect(SwiftStringLiterals(source).literals.allSatisfy { !PackCopyLint.bannedWords(in: $0).isEmpty }, "앱 리터럴에도 걸린다")
+    }
+
+    @Test("허용 기호 → ★ ✓는 금칙 문자가 아니다(사장님 결정 2026-11-24)")
+    func allowedSymbolsStayAllowed() {
+        for symbol in PackCopyLint.allowedSymbols {
+            #expect(!PackCopyLint.bannedCharacters.contains(symbol), "\(symbol)")
+            #expect(PackCopyLint.bannedWords(in: "가져오기 \(symbol) 다음").isEmpty, "\(symbol)")
+        }
     }
 
     @Test("금칙 문자 예외는 그 문자열 하나뿐이고 낡지 않았다 — 실제로 화면에 나가고, 금칙 문자를 품고 있어 예외가 아니면 걸린다")

@@ -127,7 +127,7 @@ private struct UnicodeLicenseView: View {
         sha256=1d7007de84c0431f892b3f8c87b24835c8f8474a1711a2406592aaf24f5db72d
         common/annotationsDerived/ko.xml
         sha256=c624e7369d0b283c9f7085360157b7f5f701260b36e4e5ff3f9552ce196dbbb8
-        Conversion: keywords and tts names inverted into a word -> emoji index; Hangul keys of \
+        Conversion: keywords and tts names inverted into a word → emoji index; Hangul keys of \
         2-12 syllables and single code points with default emoji presentation per Unicode 15.0 kept; \
         rewritten as a binary format for lookup.
         """

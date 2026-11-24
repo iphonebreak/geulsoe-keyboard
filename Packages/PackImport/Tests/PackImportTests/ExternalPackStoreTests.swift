@@ -1856,7 +1856,7 @@ struct PackImpactStoreTests {
         let off = try h.importedID(h.store.importPack(numbered("사자성어 예시 팩", count: 12), source: .csv, enabled: false))
         let list = try #require(h.store.packEntries(off))
         #expect(list.rows.map(\.trigger) == (1...12).map { "사자성어 \($0)번" })
-        #expect(list.rows.map(\.result) == (1...12).map { "-> 예시 본문 \($0)" })
+        #expect(list.rows.map(\.result) == (1...12).map { "→ 예시 본문 \($0)" })
         #expect(list.rows.count == h.store.packDetail(off)?.summary.itemCount, "「전체 보기 (n개)」의 n과 줄 수가 같다")
         #expect(h.store.packDetail(off)?.summary.status == .off)
 

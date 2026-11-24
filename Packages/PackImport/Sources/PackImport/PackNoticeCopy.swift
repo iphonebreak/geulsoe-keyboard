@@ -317,17 +317,17 @@ public enum PackNoticeCopy {
     public static let usageFooter = "단축어를 커서 끝까지 치면 툴바에 칩이 떠요. 칩을 누르면 단축어가 전문으로 바뀌어요."
 
     /// 5-A 「이렇게 칩이 떠요」 — 칩 제목
-    public static func usageResult(_ title: String) -> String { "-> \(title)" }
+    public static func usageResult(_ title: String) -> String { "→ \(title)" }
 
     /// 팩 상세 「사용법」·완료 화면 「이렇게 써 보세요」 — 그 단축어를 쳐서 칩을 누르면 **들어가는 문구**(본문, 사장님 실기 2026-10-07).
     /// 여러 줄이면 **줄을 빈칸 하나로 이어** 한 줄로, 길면 자르고 끝에 「…」 — 한 줄을 넘지 않게(화면도 한 줄로 자른다).
     /// 첫 줄만 보이면 「안녕하세요.」처럼 어느 문구인지 모를 때가 많아 잇는다(코디네이터, 사장님 실기 2026-10-07 뒤)
     public static func usageResult(body: String) -> String {
         let lines = body.split(whereSeparator: \.isNewline).map(trimmedSpaces).filter { !$0.isEmpty }
-        guard !lines.isEmpty else { return "->" }
+        guard !lines.isEmpty else { return "→" }
         let joined = lines.joined(separator: " ")
-        if joined.count > usageResultLength { return "-> \(trimmedSpaces(joined.prefix(usageResultLength)))..." }
-        return "-> \(joined)"
+        if joined.count > usageResultLength { return "→ \(trimmedSpaces(joined.prefix(usageResultLength)))..." }
+        return "→ \(joined)"
     }
 
     /// 앞뒤 공백을 뗀다(Foundation 없이)

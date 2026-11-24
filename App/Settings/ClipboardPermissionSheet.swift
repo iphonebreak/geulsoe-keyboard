@@ -65,7 +65,7 @@ struct ClipboardPermissionSheet: View {
                     step(number: 2,
                          title: "뜨는 확인 창에서 '허용'을 누르세요",
                          body: "스위치는 켜진 것처럼 보여도, 여기서 '허용 안 함'을 누르면 도로 꺼져요.",
-                         paths: [(version: nil, value: "전체 접근을 허용하겠습니까? -> [허용]")])
+                         paths: [(version: nil, value: "전체 접근을 허용하겠습니까? → [허용]")])
                     step(number: 3,
                          title: "'다른 앱에서 붙여넣기'를 '허용'으로",
                          body: "이 행은 처음엔 없어요. 키보드를 한 번 쓰면 뜨는 확인 창에서 "

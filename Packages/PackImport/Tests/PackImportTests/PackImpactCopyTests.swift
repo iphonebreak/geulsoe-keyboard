@@ -77,19 +77,19 @@ struct PackImpactCopyTests {
         }
         #expect(PackNoticeCopy.usageHeader == "사용법")
         #expect(PackNoticeCopy.usageFooter == "단축어를 커서 끝까지 치면 툴바에 칩이 떠요. 칩을 누르면 단축어가 전문으로 바뀌어요.")
-        #expect(PackNoticeCopy.usageResult("예시 제목 둘") == "-> 예시 제목 둘")   // 5-A 「이렇게 칩이 떠요」 — 칩 제목
+        #expect(PackNoticeCopy.usageResult("예시 제목 둘") == "→ 예시 제목 둘")   // 5-A 「이렇게 칩이 떠요」 — 칩 제목
         // 사용법·「이렇게 써 보세요」 결과는 칩 제목이 아니라 들어가는 문구(본문) — 여러 줄이면 첫 줄 + 「…」, 길면 자르고 「…」(사장님 실기 2026-10-07)
-        #expect(PackNoticeCopy.usageResult(body: "예시 본문 한 줄") == "-> 예시 본문 한 줄")
-        #expect(PackNoticeCopy.usageResult(body: "안녕하세요.\n오늘 회의를 시작하겠습니다.") == "-> 안녕하세요. 오늘 회의를 시작하겠습니다.", "여러 줄은 빈칸으로 잇는다")
-        #expect(PackNoticeCopy.usageResult(body: "안녕하세요.\n오늘 회의를 시작하겠습니다.\n자료는 메일로 보내 드렸습니다.") == "-> 안녕하세요. 오늘 회의를 시작하겠습니다. 자료는 메일로...", "이은 뒤 길면 30자에서 자른다")
-        #expect(PackNoticeCopy.usageResult(body: "\n  첫 줄 \r\n\n") == "-> 첫 줄", "빈 줄·앞뒤 공백은 줄로 치지 않는다")
+        #expect(PackNoticeCopy.usageResult(body: "예시 본문 한 줄") == "→ 예시 본문 한 줄")
+        #expect(PackNoticeCopy.usageResult(body: "안녕하세요.\n오늘 회의를 시작하겠습니다.") == "→ 안녕하세요. 오늘 회의를 시작하겠습니다.", "여러 줄은 빈칸으로 잇는다")
+        #expect(PackNoticeCopy.usageResult(body: "안녕하세요.\n오늘 회의를 시작하겠습니다.\n자료는 메일로 보내 드렸습니다.") == "→ 안녕하세요. 오늘 회의를 시작하겠습니다. 자료는 메일로...", "이은 뒤 길면 30자에서 자른다")
+        #expect(PackNoticeCopy.usageResult(body: "\n  첫 줄 \r\n\n") == "→ 첫 줄", "빈 줄·앞뒤 공백은 줄로 치지 않는다")
         let thirty = String(repeating: "가", count: PackNoticeCopy.usageResultLength)
-        #expect(PackNoticeCopy.usageResult(body: thirty) == "-> " + thirty, "딱 맞으면 자르지 않는다")
-        #expect(PackNoticeCopy.usageResult(body: thirty + "나") == "-> " + thirty + "...")
-        #expect(PackNoticeCopy.usageResult(body: String(thirty.dropLast()) + " 나다") == "-> " + String(thirty.dropLast()) + "...", "자른 끝의 공백은 뗀다")
+        #expect(PackNoticeCopy.usageResult(body: thirty) == "→ " + thirty, "딱 맞으면 자르지 않는다")
+        #expect(PackNoticeCopy.usageResult(body: thirty + "나") == "→ " + thirty + "...")
+        #expect(PackNoticeCopy.usageResult(body: String(thirty.dropLast()) + " 나다") == "→ " + String(thirty.dropLast()) + "...", "자른 끝의 공백은 뗀다")
         // 경계는 상수가 아니라 글자로 고정한다 — 위 줄들은 길이를 상수에서 내 상수를 바꾸면 함께 따라간다(검증 N03). 30·31번째 모두 공백이 아니다
-        #expect(PackNoticeCopy.usageResult(body: "123456789가123456789나123456789다") == "-> 123456789가123456789나123456789다", "30자는 자르지 않는다")
-        #expect(PackNoticeCopy.usageResult(body: "123456789가123456789나123456789다라마") == "-> 123456789가123456789나123456789다...", "31자부터 30자로 자른다")
+        #expect(PackNoticeCopy.usageResult(body: "123456789가123456789나123456789다") == "→ 123456789가123456789나123456789다", "30자는 자르지 않는다")
+        #expect(PackNoticeCopy.usageResult(body: "123456789가123456789나123456789다라마") == "→ 123456789가123456789나123456789다...", "31자부터 30자로 자른다")
         #expect(PackNoticeCopy.deletePackButton == "팩 삭제")
     }
 
