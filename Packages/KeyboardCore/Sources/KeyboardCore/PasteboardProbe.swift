@@ -1,3 +1,6 @@
+import Foundation
+import TadakDomain
+
 /// 키보드 등장 시 클립보드 프로브 — **내용(`string`)을 읽을지** (PDR verification-code-paste · clipboard-history).
 ///
 /// 조립 지점(`KeyboardViewController.probePasteboard`)에 판정이 있으면 `swift test`가 닿지 않아 여기로 뺐다.
@@ -39,14 +42,29 @@ public enum PasteboardProbe {
             needsHistory: historyEnabled && changeCount != recordedChangeCount)
     }
 
-    /// ✕·탭으로 소비한 클립보드 기록을 지금 클립보드에 맞춘다 — 같으면 남기고, 다르면 버린다.
+    /// 등장 때 저장해 둔 소비 기록을 지금 번호에 맞춘다 — **번호가 줄었을 때만** 번호를 버린다.
     ///
-    /// 소비 기록은 키보드 전용 저장소에 남는다(2026-11-25 — 메모리에만 두었을 때는 키보드 프로세스가 내려가면
-    /// ✕로 내린 칩이 같은 클립보드인데 다시 떴다). 남기는 대신 **낡은 기록**을 버려야 한다: 재부팅 뒤 `changeCount`가
-    /// 다시 세어지면 나중에 우연히 같은 값의 새 복사를 막는다. 한 부팅 안에서 `changeCount`는 늘기만 하므로
-    /// 지금 값과 다른 기록의 클립보드는 다시 오지 않는다 — 버려도 되살아나는 칩이 없다.
-    public static func retainedConsumption(_ consumed: Int?, changeCount: Int) -> Int? {
-        consumed == changeCount ? consumed : nil
+    /// - 번호가 같으면 그대로 — `plan`이 읽지 않는다(칩도 맥 알림도 없다).
+    /// - 번호가 늘었어도 그대로 — 새 복사인지, 유니버설 클립보드가 **같은 글을 새 번호로** 다시 보낸 것인지는
+    ///   읽은 뒤 지문으로 가린다(`resentConsumption`, 2026-11-25 실측). 예전에는 여기서 기록을 버려 다시 온 글의 칩이 또 떴다.
+    /// - 번호가 줄었으면 재부팅이다(한 부팅 안에서 `changeCount`는 늘기만 한다) — 번호만 버리고 지문은 남긴다.
+    ///   다시 세어진 번호가 우연히 기록과 같아지면 새 복사를 읽지도 않고 막기 때문이다. 지문도 없으면 기록을 버린다.
+    public static func reconciled(_ consumption: PasteboardConsumption?, changeCount: Int) -> PasteboardConsumption? {
+        guard let consumption else { return nil }
+        guard let consumed = consumption.changeCount, changeCount < consumed else { return consumption }
+        guard let fingerprint = consumption.fingerprint else { return nil }
+        return PasteboardConsumption(changeCount: nil, fingerprint: fingerprint)
+    }
+
+    /// 읽은 클립보드가 **이미 소비한 글이 새 번호로 다시 온 것**인가 — 맞으면 번호를 지금 값으로 옮긴 기록, 아니면 nil.
+    ///
+    /// 맞으면 조립 지점은 칩을 띄우지 않고 이 기록을 저장한다 — 다음 등장은 번호가 같아 읽지도 않는다.
+    /// 다르면 새 복사다(칩을 띄운다). 그때도 옛 기록은 남긴다 — 맥이 그 글을 나중에 또 보낼 수 있다.
+    public static func resentConsumption(
+        _ consumption: PasteboardConsumption?, changeCount: Int, fingerprint: Data
+    ) -> PasteboardConsumption? {
+        guard let stored = consumption?.fingerprint, stored == fingerprint else { return nil }
+        return PasteboardConsumption(changeCount: changeCount, fingerprint: fingerprint)
     }
 
     /// **게이트 → `hasStrings` → `string`** 순서로만 읽는다.

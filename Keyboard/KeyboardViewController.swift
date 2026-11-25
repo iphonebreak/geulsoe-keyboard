@@ -123,15 +123,15 @@ final class KeyboardViewController: UIInputViewController {
     /// 이번 등장의 프로브가 **실제로 본** changeCount — 게이트 통과 여부와 무관하게 적힌다.
     /// `viewDidAppear`에서 값이 달라져 있으면 클립보드가 등장 도중 갱신된 것이라 한 번 더 읽는다.
     private var seenPasteboardChangeCount: Int?
-    /// 프로브한 클립보드의 changeCount — 탭 시 **이 값**을 소비로 기록한다
+    /// 프로브한 클립보드의 changeCount와 지문 — ✕·탭 시 **이 값**을 소비로 기록한다
     /// (탭 시점 값을 쓰면 프로브 후 새로 복사된 내용까지 소비돼 버린다 — 리뷰 반영).
     ///
     /// **불변식: 지금 살아 있는 칩(`pasteSuggestion`)이 있을 때만 값을 갖는다.** 칩을 지우는
     /// 곳은 전부 이 값도 함께 지운다(프로브 진입·`viewWillDisappear`·탭 처리). 칩은 없는데
     /// 이 값만 남아 있으면 늦게 도착한 탭이 **화면에 없던 클립보드를 소비**한다 — 2026-09-15
     /// "복사하고 돌아오면 칩이 안 뜬다"의 직접 원인이었다.
-    private var probedPasteboardChangeCount: Int?
-    /// ✕로 내리거나 탭해서 **소비한** 클립보드 changeCount — 그 클립보드는 다시 제안하지 않는다.
+    private var probedPasteboardConsumption: PasteboardConsumption?
+    /// ✕로 내리거나 탭해서 **소비한** 클립보드(changeCount + 지문) — 그 클립보드는 다시 제안하지 않는다.
     ///
     /// ## ★ 인스턴스가 아니라 타입에 둔다 (2026-09-15 사양 변경)
     ///
@@ -154,15 +154,25 @@ final class KeyboardViewController: UIInputViewController {
     /// 예전에는 메모리에만 두고 「프로세스가 죽으면 클립보드도 대개 바뀌어 있어 실제 차이가 없다」고 보았다.
     /// **틀렸다** — ✕로 내린 뒤 나중에 키보드를 다시 열면 같은 클립보드의 칩이 또 떴다(프로세스만 내려갔다).
     /// 그래서 값이 바뀔 때마다 `pasteboardConsumptionStore`(전용 컨테이너, 전체 접근 무관)에 쓰고, 프로세스가
-    /// 새로 뜨면 거기서 읽는다. 지금 클립보드와 다른 기록은 프로브가 버린다(`PasteboardProbe.retainedConsumption`).
-    /// 담는 값은 정수(`changeCount`) 하나라 사용자 입력 텍스트가 아니다(`.claude/rules/security.md` 1순위 규칙과 충돌하지 않는다).
-    private static var consumedPasteboardChangeCount: Int? = pasteboardConsumptionStore.load() {
+    /// 새로 뜨면 거기서 읽는다.
+    ///
+    /// ## ★ 번호만으로는 못 막는다 — 지문을 함께 둔다 (2026-11-25 맥 기록 실측, 사장님 결정)
+    ///
+    /// 번호만 저장한 뒤에도 같은 칩이 5분 뒤 「맥북에서 붙여넣기함」 알림과 함께 또 떴다. 맥 클립보드 번호를 기록해 보니
+    /// 아이폰 복사가 맥으로 넘어간 지 8초 만에 맥이 예전 항목으로 되돌아갔고(1072 → 1071), 그 항목이 아이폰으로 **새 번호로**
+    /// 다시 넘어왔다. 그래서 번호가 달라도 기록을 버리지 않고(`PasteboardProbe.reconciled` — 재부팅만 예외), 읽은 글의
+    /// 지문(`PasteboardFingerprint`)이 기록과 같으면 칩을 띄우지 않는다(`PasteboardProbe.resentConsumption`).
+    /// 그때도 내용은 읽으므로 맥 알림은 한 번 뜬다 — 다음 등장은 번호를 옮겨 두어 읽지도 않는다.
+    /// 담는 값은 정수(`changeCount`)와 지문(기기 열쇠를 섞은 FNV-1a 16바이트, 암호 API 없음)뿐이다 — 원문·길이는 담지 않는다(`.claude/rules/security.md` 클립보드 절).
+    private static var pasteboardConsumption: PasteboardConsumption? = pasteboardConsumptionStore.load() {
         didSet {
-            guard consumedPasteboardChangeCount != oldValue else { return }
-            pasteboardConsumptionStore.save(consumedPasteboardChangeCount)
+            guard pasteboardConsumption != oldValue else { return }
+            pasteboardConsumptionStore.save(pasteboardConsumption)
         }
     }
     private static let pasteboardConsumptionStore: PasteboardConsumptionStore = KeyboardOwnPasteboardConsumptionStore()
+    /// 지문 열쇠 — 처음 지문을 만들 때 한 번 읽는다(없으면 저장소가 무작위로 만든다)
+    private static let pasteboardFingerprintKey: Data = pasteboardConsumptionStore.fingerprintKey()
     /// 클립보드 기록 — 키보드가 쓰는 App Group 데이터 (FA 필요, PDR clipboard-history).
     /// 메모리에 들고 있지 않고 필요할 때 읽는다 — 설정 앱이 끄기/지우기로 비운 것을 놓치지 않게.
     private let clipboardHistoryRepository: ClipboardHistoryRepository = AppGroupClipboardHistoryRepository()
@@ -173,7 +183,7 @@ final class KeyboardViewController: UIInputViewController {
     private let emojiHistoryRepository: EmojiHistoryRepository = KeyboardOwnEmojiHistoryRepository()
     /// 기록에 넣은 마지막 클립보드 changeCount — 등장마다 읽어도 같은 복사를 두 번 읽지 않는다.
     ///
-    /// **위 `consumedPasteboardChangeCount`와 같은 이유로 타입에 둔다** (2026-09-15).
+    /// **위 `pasteboardConsumption`와 같은 이유로 타입에 둔다** (2026-09-15).
     /// 인스턴스 변수였을 때는 이 가드도 등장 경계를 못 넘어서, 사용자가 클립보드 기록에서
     /// ✕로 지운 항목이 **키보드를 다시 열 때마다 되살아났다** — PDR clipboard-history가
     /// "✕로 지운 현재 클립보드가 재오픈마다 되살아나지 않게"라고 못박은 가드가 사실상 죽어 있었다.
@@ -596,7 +606,7 @@ final class KeyboardViewController: UIInputViewController {
         releaseHostForNextAppearance()      // 수정 C — stolen 재부착을 등장 밖으로 옮긴다
         // 클립보드 파생 값의 체류 최소화 — 다음 등장에서 프로브·패널 열기가 다시 채운다 (리뷰 반영)
         pasteSuggestion = nil
-        probedPasteboardChangeCount = nil   // 칩과 수명을 같이한다 (위 불변식) — 늦게 온 탭이
+        probedPasteboardConsumption = nil   // 칩과 수명을 같이한다 (위 불변식) — 늦게 온 탭이
                                             // 사라진 칩의 클립보드를 소비하지 못하게 한다
         viewState?.pasteSuggestion = nil
         if viewState?.clipboardEntries.isEmpty == false { viewState?.clipboardEntries = [] }
@@ -1143,7 +1153,7 @@ final class KeyboardViewController: UIInputViewController {
     ///
     /// ## ★ 인스턴스가 아니라 타입에 둔다 — 되돌리지 마라 (2026-09-21)
     ///
-    /// 이 파일 위쪽 `consumedPasteboardChangeCount` 주석이 실기 계측 근거와 함께 적어 둔 그대로다:
+    /// 이 파일 위쪽 `pasteboardConsumption` 주석이 실기 계측 근거와 함께 적어 둔 그대로다:
     /// **키보드 등장마다 이 VC가 새로 만들어지고 이전 것은 해제된다**
     /// (`docs/release/flicker-evidence/device-frameprobe-2026-09-11.csv`).
     /// 인스턴스 변수면 ✕ 억제가 **그 등장 한 번만 살아서**, 키보드를 내렸다 올리면 방금 내린
@@ -1207,7 +1217,7 @@ final class KeyboardViewController: UIInputViewController {
         if viewState.pasteSuggestion != nil {
             // 이 클립보드를 소비 처리한다 — **다음 등장에도 다시 뜨지 않는다**(타입 변수).
             // 새로 복사하면 changeCount가 달라져 다시 뜬다 (사용자 요구 2026-09-15).
-            Self.consumedPasteboardChangeCount = probedPasteboardChangeCount
+            Self.pasteboardConsumption = probedPasteboardConsumption
             pasteSuggestion = nil
         }
         // 배지도 함께 내린다 — 후보 행을 통째로 내리는 버튼인데 배지만 남으면
@@ -1360,16 +1370,17 @@ final class KeyboardViewController: UIInputViewController {
     private func probePasteboard(isRetry: Bool = false) {
         defer { updateSuggestionBar() }
         pasteSuggestion = nil
-        probedPasteboardChangeCount = nil     // 칩과 함께 지운다 (위 불변식)
+        probedPasteboardConsumption = nil     // 칩과 함께 지운다 (위 불변식)
         // 재시도는 **등장이 아니다** — 그 사이 사용자가 키를 눌렀으면 억제를 유지한다
         if !isRetry { pasteChipSuppressedByTyping = false }   // 등장마다 다시 띄운다
         guard hasFullAccess, textDocumentProxy.isSecureTextEntry != true else { return }
         let pasteboard = UIPasteboard.general
         let changeCount = pasteboard.changeCount   // 정수 — 내용을 가져오지 않는다
         seenPasteboardChangeCount = changeCount
-        // 저장해 둔 소비 기록은 지금 클립보드와 같을 때만 남긴다 — 새로 복사했거나 재부팅했으면 버린다(2026-11-25)
-        Self.consumedPasteboardChangeCount = PasteboardProbe.retainedConsumption(
-            Self.consumedPasteboardChangeCount, changeCount: changeCount)
+        // 저장해 둔 소비 기록은 번호가 달라도 남긴다 — 같은 글이 새 번호로 다시 올 수 있다(아래 지문 비교).
+        // 번호가 줄었으면(재부팅) 번호만 버린다(2026-11-25)
+        Self.pasteboardConsumption = PasteboardProbe.reconciled(
+            Self.pasteboardConsumption, changeCount: changeCount)
         // 스위치 셋(인증번호·텍스트 제안, 기록) 중 필요한 것이 있을 때만 읽는다 — 칩으로 어느 쪽이 뜰지는
         // `PasteSuggestion.make`가 정한다(인증번호 우선, 그 다음 일반 텍스트).
         let plan = PasteboardProbe.plan(
@@ -1377,7 +1388,7 @@ final class KeyboardViewController: UIInputViewController {
             pasteSuggestionsEnabled: settings.pasteSuggestionEnabled,
             historyEnabled: settings.clipboardHistoryEnabled,
             changeCount: changeCount,
-            consumedChangeCount: Self.consumedPasteboardChangeCount,
+            consumedChangeCount: Self.pasteboardConsumption?.changeCount,
             recordedChangeCount: Self.recordedPasteboardChangeCount)
         // 알려진 한계: 다른 기기에서 복사 직후(Universal Clipboard)에는 이 동기 읽기가
         // 전송 완료까지 지연될 수 있다 — PDR 개정 섹션·실기 체크리스트 항목.
@@ -1400,11 +1411,19 @@ final class KeyboardViewController: UIInputViewController {
         if plan.retries(afterReading: probed) { scheduleProbeRetry() }
         guard let text = probed else { return }
         if plan.needsSuggestion {
-            pasteSuggestion = PasteSuggestion.make(
-                from: text,
-                allowsCode: settings.verificationCodeSuggestionsEnabled,
-                allowsText: settings.pasteSuggestionEnabled)
-            probedPasteboardChangeCount = changeCount
+            let fingerprint = PasteboardFingerprint.make(text, key: Self.pasteboardFingerprintKey)
+            if let resent = PasteboardProbe.resentConsumption(
+                Self.pasteboardConsumption, changeCount: changeCount, fingerprint: fingerprint) {
+                // ✕·탭으로 이미 소비한 글이 새 번호로 다시 왔다(유니버설 클립보드, 2026-11-25 실측) — 칩을 띄우지 않고
+                // 번호만 옮긴다. 다음 등장은 번호가 같아 읽지도 않는다(맥 알림도 없다)
+                Self.pasteboardConsumption = resent
+            } else {
+                pasteSuggestion = PasteSuggestion.make(
+                    from: text,
+                    allowsCode: settings.verificationCodeSuggestionsEnabled,
+                    allowsText: settings.pasteSuggestionEnabled)
+                probedPasteboardConsumption = PasteboardConsumption(changeCount: changeCount, fingerprint: fingerprint)
+            }
         }
         if plan.needsHistory {
             recordClipboardHistory(text)
@@ -1459,7 +1478,7 @@ final class KeyboardViewController: UIInputViewController {
     /// 여기만 빠져 있었고, 그래서 "다른 앱에서 복사하고 돌아오면 칩이 영영 안 뜬다"가 났다.
     ///
     /// 경로: 탭 콜백은 `DispatchQueue.main.async`로 한 박자 미뤄진다(조립 지점). 그 사이
-    /// `viewWillDisappear`가 칩(`pasteSuggestion`)만 지우고 `probedPasteboardChangeCount`는
+    /// `viewWillDisappear`가 칩(`pasteSuggestion`)만 지우고 `probedPasteboardConsumption`은
     /// 남겨 두었으므로, 뒤늦게 도착한 탭이 **붙여넣지도 않은 채** 그 클립보드를 소비했다.
     /// 소비 기록이 타입 변수라 그 한 번이 프로세스 수명 내내 모든 앱에서 칩을 막았다 —
     /// **익스텐션 프로세스는 앱을 옮겨도 죽지 않는다**(실측 2026-09-15: 홈 제스처 전후 pid 동일,
@@ -1467,7 +1486,7 @@ final class KeyboardViewController: UIInputViewController {
     private func handlePasteboardCodeTap() {
         guard let paste = pasteSuggestion, viewState?.pasteSuggestion == paste else { return }
         playToolbarHaptic()
-        Self.consumedPasteboardChangeCount = probedPasteboardChangeCount
+        Self.pasteboardConsumption = probedPasteboardConsumption
         let revision = inputController?.documentRevision
         inputController?.insertProvidedText(paste.insertText)
         pasteSuggestion = nil
