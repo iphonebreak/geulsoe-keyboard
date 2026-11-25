@@ -69,6 +69,9 @@ App/GoogleService-Info.plist
 # 영어 추천 사전(words-en.tdw, 추적됨)의 변환기·손질/차단 입력·재현성 시험 — 같은 이유(2026-10-14, B5)
 !/tools/convert_words_en.py
 !/tools/test_convert_words_en.py
+# 잠금 팩(.gspack) 독립 구현·시험 벡터 생성기(PackImport 픽스처 `Fixtures/gspack`, 추적됨) — 같은 이유(2026-11-08, PDR 12-11)
+!/tools/gspack/
+/tools/gspack/__pycache__/
 !/tools/data-en/
 /tools/data-en/*
 !/tools/data-en/blocklist.txt

@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "Combining",
+    "rights": ""
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "j6KLj4RCso3c01I/c127ug==",
+    "nonce": "PerHROerA+Rf2btw"
+  },
+  "ciphertext": "PJbHdpS+yOoPJOE2gImZyKqWDkpwUsXH01l2a+FlIbSUsjCPlBLNrwnH/yM="
+}

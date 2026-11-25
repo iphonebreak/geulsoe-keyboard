@@ -214,7 +214,7 @@ public struct PackEncodingReview: Equatable, Sendable {
     }
 
     static func truncated(_ text: String) -> String {
-        text.count > sampleLength ? String(text.prefix(sampleLength)) + "…" : text
+        text.count > sampleLength ? String(text.prefix(sampleLength)) + "..." : text
     }
 
     /// 비ASCII가 든 줄 가운데 이 방식으로 엄격하게 읽히지 않는 줄 수. LF는 두 방식 모두 다른 글자의 일부가 될 수 없다

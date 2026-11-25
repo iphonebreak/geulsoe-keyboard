@@ -97,7 +97,7 @@ enum InstallIntroCopy {
     /// 카드 폭 240pt 에 네 홉이 들어가는 것도 확인했다.
     ///
     /// 버전 차이는 **본문 문구가 완충으로 받는다**(`OnboardingView` 1번 항목) — 여긴 자리가 좁다.
-    static let pathHeading = "설정 › 앱 › 글쇠 › 키보드"
+    static let pathHeading = "설정 > 앱 > 글쇠 > 키보드"
     static let appName = "글쇠"
     /// 입력창에 이미 쳐져 있는 시연 문구 — **상수다.** 사용자 입력이 들어올 경로는 없다
     /// (`.claude/rules/security.md`). 온보딩은 키보드가 켜지기도 전이라 입력 자체가 존재하지 않는다.

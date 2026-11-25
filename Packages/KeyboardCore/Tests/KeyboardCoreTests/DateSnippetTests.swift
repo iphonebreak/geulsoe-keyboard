@@ -397,36 +397,36 @@ struct DateSnippetRelativeDayTests {
 struct DateSnippetHolidayTests {
 
     @Test("광복절 전날·당일·다음날", arguments: [
-        (14, "· 올해"),
-        (15, "· 오늘"),
-        (16, "· 지남")
+        (14, ", 올해"),
+        (15, ", 오늘"),
+        (16, ", 지남")
     ])
     func thisYearStatus(day: Int, status: String) throws {
         let now = Fixture.date(2026, 8, day)
         let suggestion = try #require(Fixture.parser(now).suggestion(forTail: "올해 광복절 날짜"))
         #expect(suggestion.body == "2026. 8. 15.", "지나도 올해 값 그대로다")
         #expect(suggestion.title.hasSuffix(status))
-        #expect(!suggestion.body.contains("·"), "상태 표식은 본문에 넣지 않는다")
+        #expect(!suggestion.body.contains(","), "상태 표식은 본문에 넣지 않는다")
     }
 
     @Test("당일은 **아침에도** 「오늘」이다 — 지남 판정은 일 단위")
     func sameDayMorningIsToday() throws {
         let suggestion = try #require(Fixture.parser(Fixture.date(2026, 8, 15, 0, 1)).suggestion(forTail: "광복절 날짜"))
-        #expect(suggestion.title.hasSuffix("· 오늘"))
+        #expect(suggestion.title.hasSuffix(", 오늘"))
     }
 
     @Test("「올해」를 안 붙여도 같다")
     func withoutThisYearPrefix() throws {
         let suggestion = try #require(Fixture.parser(Fixture.date(2026, 12, 26)).suggestion(forTail: "성탄절 날짜"))
         #expect(suggestion.body == "2026. 12. 25.")
-        #expect(suggestion.title.hasSuffix("· 지남"))
+        #expect(suggestion.title.hasSuffix(", 지남"))
     }
 
     @Test("내년 광복절 날짜는 시점과 무관하게 내년", arguments: [(8, 14), (8, 16), (1, 1)])
     func nextYear(month: Int, day: Int) throws {
         let suggestion = try #require(Fixture.parser(Fixture.date(2026, month, day)).suggestion(forTail: "내년 광복절 날짜"))
         #expect(suggestion.body == "2027. 8. 15.")
-        #expect(!suggestion.title.contains("지남") && !suggestion.title.contains("· 올해"))
+        #expect(!suggestion.title.contains("지남") && !suggestion.title.contains(", 올해"))
     }
 
     @Test("양력 공휴일 8종", arguments: [
@@ -448,7 +448,7 @@ struct DateSnippetHolidayTests {
     func thisYearAliases(tail: String, trigger: String) throws {
         let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 28)).suggestion(forTail: tail))
         #expect(suggestion.trigger == trigger, "접두까지 지운다")
-        #expect(suggestion.title.hasSuffix("· 지남") || suggestion.title.hasSuffix("· 올해"))
+        #expect(suggestion.title.hasSuffix(", 지남") || suggestion.title.hasSuffix(", 올해"))
     }
 }
 
@@ -476,9 +476,9 @@ struct DateSnippetLunarHolidayTests {
     }
 
     @Test("2026 — 설날 2. 17. · 추석 9. 25.(둘 다 지남)", arguments: [
-        ("설날 날짜", "2026. 2. 17.", "설날 날짜 · 지남"),
-        ("추석 날짜", "2026. 9. 25.", "추석 날짜 · 지남"),
-        ("구정 날짜", "2026. 2. 17.", "구정 날짜 · 지남")
+        ("설날 날짜", "2026. 2. 17.", "설날 날짜, 지남"),
+        ("추석 날짜", "2026. 9. 25.", "추석 날짜, 지남"),
+        ("구정 날짜", "2026. 2. 17.", "구정 날짜, 지남")
     ])
     func year2026(tail: String, body: String, title: String) throws {
         let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, 28)).suggestion(forTail: tail))
@@ -487,9 +487,9 @@ struct DateSnippetLunarHolidayTests {
     }
 
     @Test("추석 전날·당일(아침)·다음날", arguments: [
-        (24, 10, "· 올해"),
-        (25, 0, "· 오늘"),
-        (26, 10, "· 지남")
+        (24, 10, ", 올해"),
+        (25, 0, ", 오늘"),
+        (26, 10, ", 지남")
     ])
     func chuseokStatus(day: Int, hour: Int, status: String) throws {
         let suggestion = try #require(Fixture.parser(Fixture.date(2026, 9, day, hour, 1)).suggestion(forTail: "추석 날짜"))

@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "\uC774\uBAA8\uC9C0 \uD83D\uDE00 \uD329",
+    "rights": "\uCD9C\uCC98 \u2713 \uD83C\uDF89"
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "vPw7muSGiIdyoFLXAKZUQg==",
+    "nonce": "+bP0qQDcC1rCtiNh"
+  },
+  "ciphertext": "dQ6I51Px83Ra1bwBbU0S/YWRwNncorcX/XlmdNmJ9/s05bnjWwb9NpvSpyYTJihcoEdyEaGfZyNOa8RJWqJsi0Fi5/NI37jttCu7klQy/w=="
+}

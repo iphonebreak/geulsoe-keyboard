@@ -224,7 +224,7 @@ public enum SnippetCandidateText {
 
     /// 패널 머리줄(R32 (다)) — 「「새해인사」 후보 3개」. trigger는 사용자가 친 꼬리 원문이다
     public static func panelHeader(trigger: String, count: Int) -> String {
-        "「\(trigger)」 후보 \(count)개"
+        "'\(trigger)' 후보 \(count)개"
     }
 
     /// 출처 글자 — 내장 팩 이름은 설정 앱(`SnippetPackInfo`)과 **같은 상수**(`SnippetPackName`, TadakDomain)다.

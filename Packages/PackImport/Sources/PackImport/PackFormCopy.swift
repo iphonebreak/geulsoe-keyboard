@@ -30,7 +30,7 @@ public enum PackFormCopy {
     /// 입력칸 글자 수 — 「7/40」(시안). 상한은 `PackLimits`
     public static func counter(_ text: String, limit: PackLimits.FieldLimit) -> String { "\(PackNoticeCopy.number(text.count))/\(PackNoticeCopy.number(limit.characters))" }
 
-    public static let templatesHeader = "단축어 틀 — {n}에 번호가 들어가요"
+    public static let templatesHeader = "단축어 틀 ({n}에 번호가 들어가요)"
     public static let templatePlaceholder = "예: 사자성어 {n}번"
     public static let addTemplate = "틀 추가"
     public static let removeTemplate = "틀 지우기"
@@ -65,7 +65,7 @@ public enum PackFormCopy {
     /// 없을 때만 「직접 골라야 켜진다」
     public static func licenseFooter(hasFileLicense: Bool) -> String {
         (hasFileLicense ? "파일에 적힌 출처를 고치지 않고 그대로 골라 뒀어요. 맞지 않으면 다른 것을 골라 주세요. "
-                        : "하나를 직접 골라야 「가져오기」가 켜져요. ")
+                        : "하나를 직접 골라야 '가져오기'가 켜져요. ")
             + "고른 선택지는 증명이 아니에요. 이 내용을 써도 되는지는 가져오는 분이 직접 확인해 주세요."
     }
 
@@ -77,9 +77,8 @@ public enum PackFormCopy {
         case .placeholderCount: "{n}이 꼭 한 번 있어야 해요"
         case .prefixTooShort: "앞 글자가 \(PackNoticeCopy.number(TemplatePatternSpec.minimumPrefixCharacters))자 이상이어야 해요"
         case .prefixEndsWithDigit, .prefixAllDigits: "앞 글자가 숫자로 끝나면 번호와 붙어 읽혀요. 끝에 글자를 넣어 주세요"
-        case .suffixEmpty: "{n} 뒤에 글자가 한 자 이상 있어야 해요"
         case .literalContainsNewline: "틀에는 줄바꿈을 쓸 수 없어요"
-        case .reservedDateSuffix: "「날짜」「시간」「시각」으로 끝나면 날짜 채움글과 겹쳐요"
+        case .reservedDateSuffix: "'날짜', '시간', '시각'으로 끝나면 날짜 채움글과 겹쳐요"
         case .literalTooLong: "틀은 \(PackNoticeCopy.number(PackLimits.templateLiteral.characters))자까지예요. \(String(expandedTriggerRule.dropLast()))"
         case .collidesWithBible: "내장 성경 채움글의 구절 단축어와 겹쳐요"
         }
@@ -109,7 +108,7 @@ public enum PackFormCopy {
     /// 주황 첫 줄 — 위 팩의 같은 틀(10-4) · 정적 단축어 가림(10-3). 통과·빈 칸·빨강은 nil
     public static func reviewTitle(_ status: PackTemplateReview.Status, name: (String) -> String) -> String? {
         switch status {
-        case .outranked(let owner): "「\(name(owner))」도 이 틀을 써요"
+        case .outranked(let owner): "'\(name(owner))'도 이 틀을 써요"
         case .shadowed(let triggers, let owner):
             "\(shadowOwner(owner, name: name))\(quoted(triggers))에 가려져요"
         case .empty, .ok, .invalid: nil
@@ -123,11 +122,11 @@ public enum PackFormCopy {
         case .outranked(let owner):
             let ownerName = name(owner)
             return (replacing ? "목록에서 " : "새 팩은 목록 맨 아래에 붙어서 ")
-                + "위에 있는 「\(ownerName)」\(PackNoticeCopy.subjectParticle(after: ownerName)) 이 틀을 가져요."
+                + "위에 있는 '\(ownerName)'\(PackNoticeCopy.subjectParticle(after: ownerName)) 이 틀을 가져요."
         case .shadowed(let triggers, let owner):
             let trigger = triggers.first ?? ""
             let many = triggers.count > 1
-            return "「…\(trigger)」\(many ? " 등" : "")\(PackNoticeCopy.directionParticle(after: many ? "등" : trigger)) "
+            return "'...\(trigger)'\(many ? " 등" : "")\(PackNoticeCopy.directionParticle(after: many ? "등" : trigger)) "
                 + "끝나는 입력에서는 \(shadowSubject(owner, name: name)) 먼저 떠요."
         case .empty, .ok, .invalid: return nil
         }
@@ -137,7 +136,7 @@ public enum PackFormCopy {
     private static func shadowOwner(_ owner: PackImpact.Source?, name: (String) -> String) -> String {
         switch owner {
         case .userSnippets?: "내 채움글 "
-        case .pack(let id)?: "「\(name(id))」의 단축어 "
+        case .pack(let id)?: "'\(name(id))'의 단축어 "
         case .builtIn?: "내장 팩 단축어 "
         case nil: "단축어 "
         }
@@ -147,7 +146,7 @@ public enum PackFormCopy {
     private static func shadowSubject(_ owner: PackImpact.Source?, name: (String) -> String) -> String {
         switch owner {
         case .userSnippets?: "내 채움글이"
-        case .pack(let id)?: "「\(name(id))」의 단축어가"
+        case .pack(let id)?: "'\(name(id))'의 단축어가"
         case .builtIn?: "내장 팩 단축어가"
         case nil: "그 단축어가"
         }
@@ -155,7 +154,7 @@ public enum PackFormCopy {
 
     /// 「「장」」·「「장」 외 1개」
     private static func quoted(_ triggers: [String]) -> String {
-        let first = "「\(triggers.first ?? "")」"
+        let first = "'\(triggers.first ?? "")'"
         return triggers.count > 1 ? "\(first) 외 \(PackNoticeCopy.number(triggers.count - 1))개" : first
     }
 
@@ -179,7 +178,7 @@ public enum PackFormCopy {
     public static let sameNameTitle = "같은 이름의 팩이 있어요"
 
     public static func sameNameMessage(_ name: String) -> String {
-        "「\(name)」\(PackNoticeCopy.subjectParticle(after: name)) 이미 있어요. 바꾸면 목록 자리와 켬/끔은 그대로고 내용만 새 파일로 바뀌어요."
+        "'\(name)'\(PackNoticeCopy.subjectParticle(after: name)) 이미 있어요. 바꾸면 목록 자리와 켬/끔은 그대로고 내용만 새 파일로 바뀌어요."
     }
 
     public static let replaceButton = "바꾸기"
@@ -199,7 +198,7 @@ public enum PackFormCopy {
     }
 
     /// 「「사자성어 예시 팩」 · 641개」
-    public static func doneSummary(name: String, count: Int) -> String { "「\(name)」 · \(PackNoticeCopy.number(count))개" }
+    public static func doneSummary(name: String, count: Int) -> String { "'\(name)', \(PackNoticeCopy.number(count))개" }
 
     public static func skippedLine(_ count: Int) -> String { "건너뛴 \(PackNoticeCopy.number(count))개는 가져오지 않았어요." }
 

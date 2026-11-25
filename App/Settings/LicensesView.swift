@@ -38,8 +38,8 @@ struct LicensesView: View {
                         .font(.headline)
                     Text("""
                     Hermit Dave의 OpenSubtitles 2018 기반 영어 빈도 목록(고정 커밋 072bbed)에서 파생했습니다. \
-                    이 앱은 원본을 바꿔 썼습니다 — 3~20자 단어만 남기고, 조각·오류형·비단어·부적절한 단어를 빼고, \
-                    축약형(don't 등)과 대문자 원형(Monday·iPhone 등)을 손질하고, 상위 2만 개로 줄였습니다. \
+                    이 앱은 원본을 바꿔 썼습니다. 3~20자 단어만 남기고, 조각, 오류형, 비단어, 부적절한 단어를 빼고, \
+                    축약형(don't 등)과 대문자 원형(Monday, iPhone 등)을 손질하고, 상위 2만 개로 줄였습니다. \
                     파생 사전에는 CC-BY-SA-4.0이 적용됩니다.
                     """)
                     .font(.footnote)
@@ -56,11 +56,11 @@ struct LicensesView: View {
 
             Section("이모지 추천 데이터") {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Unicode CLDR (한국어 이모지 이름·키워드)")
+                    Text("Unicode CLDR (한국어 이모지 이름, 키워드)")
                         .font(.headline)
                     Text("""
-                    추천단어 줄에 함께 보여 주는 이모지는 Unicode CLDR 48.2의 한국어 이모지 이름·키워드로 \
-                    만든 색인에서 고르며, 글쇠가 직접 고른 단어·이모지 짝을 더했습니다. CLDR 데이터는 \
+                    추천단어 줄에 함께 보여 주는 이모지는 Unicode CLDR 48.2의 한국어 이모지 이름, 키워드로 \
+                    만든 색인에서 고르며, 글쇠가 직접 고른 단어와 이모지 짝을 더했습니다. CLDR 데이터는 \
                     Unicode License v3(Unicode-3.0)로 제공됩니다. Copyright © 2004-2026 Unicode, Inc.
                     """)
                     .font(.footnote)
@@ -83,7 +83,7 @@ struct LicensesView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("성경 (개역한글판, 1961)")
                         .font(.headline)
-                    Text("대한성서공회 개역한글판 — 저작권 보호 기간이 만료된 저작물입니다.")
+                    Text("대한성서공회 개역한글판으로, 저작권 보호 기간이 만료된 저작물입니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -91,13 +91,13 @@ struct LicensesView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("국가 상징문")
                         .font(.headline)
-                    Text("애국가(작사자 미상의 공유 저작물), 국기에 대한 맹세·대한민국헌법 전문과 전 조문(저작권법 제7조에 따라 보호받지 않는 공공 저작물, 법제처 국가법령정보센터 원문), 기미독립선언서 서두(1919, 보호 기간 만료)를 수록했습니다.")
+                    Text("애국가(작사자 미상의 공유 저작물), 국기에 대한 맹세, 대한민국헌법 전문과 전 조문(저작권법 제7조에 따라 보호받지 않는 공공 저작물, 법제처 국가법령정보센터 원문), 기미독립선언서 서두(1919, 보호 기간 만료)를 수록했습니다.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 2)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("인사·상용구")
+                    Text("인사와 상용구")
                         .font(.headline)
                     Text("글쇠가 직접 작성한 문구입니다. 자유롭게 고쳐 쓰세요.")
                         .font(.footnote)
@@ -119,7 +119,7 @@ private struct UnicodeLicenseView: View {
 
     /// 무엇에서 왔는지 — 버전·입력 해시·변환 규칙 (`tools/convert_emoji.py`, `emoji-data-import.md` 2·4절)
     private static let provenance = """
-        Unicode CLDR — Korean emoji annotations (data derived)
+        Unicode CLDR - Korean emoji annotations (data derived)
         CLDR version: 48.2 (release-48-2, commit 11299982335beb974c1c63c45265184e759c0f41)
         Source: https://github.com/unicode-org/cldr
         Input files:
@@ -128,7 +128,7 @@ private struct UnicodeLicenseView: View {
         common/annotationsDerived/ko.xml
         sha256=c624e7369d0b283c9f7085360157b7f5f701260b36e4e5ff3f9552ce196dbbb8
         Conversion: keywords and tts names inverted into a word → emoji index; Hangul keys of \
-        2–12 syllables and single code points with default emoji presentation per Unicode 15.0 kept; \
+        2-12 syllables and single code points with default emoji presentation per Unicode 15.0 kept; \
         rewritten as a binary format for lookup.
         """
 

@@ -47,6 +47,11 @@ import TadakDomain
 /// 2. `KeyboardEnableSetupTests` 로 글쇠 등록 + 전체 접근
 /// 3. App Group `group.com.charging.tadak` 의 `keyboard.userSnippets` 에 시험용 문구 주입
 ///    (plist 를 직접 쓰고 **시뮬레이터를 재부팅**해 `cfprefsd` 캐시를 무효화한다)
+/// 준비가 안 돼 시험을 이어 갈 수 없을 때 멈추는 신호
+private enum HarnessStop: Error {
+    case keyboardNotUp
+}
+
 final class SnippetShortcutTypingTests: XCTestCase {
 
     private var host: XCUIApplication!
@@ -197,6 +202,45 @@ final class SnippetShortcutTypingTests: XCTestCase {
         XCTAssertTrue(tapped, "칩을 못 눌렀다 — 삽입 경로를 아예 못 봤다")
         XCTAssertEqual(after, Fixture.homeBody,
                        "뒤 공백이 있는 꼬리에서 본문만 깨끗이 들어가지 않았다")
+    }
+
+    // MARK: - 1.4.0 잠금 파일(.gspack)로 가져온 번호형 팩 (PDR `external-snippet-packs.md` 12-10 ⑥ 4)
+
+    /// 잠금 파일로 가져온 찬송가 팩 두 개(틀 `찬송가{n}장`·`찬송{n}장`·`찬송가{n}`·`찬송{n}` / 은혜찬송가도 같은 넷)가 키보드 칩으로 뜨고 치환되는가.
+    ///
+    /// **사전 조건(하네스 밖):** 앱에서 `.gspack` 두 개를 비밀번호로 열어 가져와 둔다. 아래 기대값(곡 이름·가사 첫머리)은
+    /// 그 팩 내용의 **상수**다(사용자 입력이 아니다 — `.claude/rules/security.md`). 사이에 공백을 쳐서 단어 경계(1.3.0)를 지킨다 —
+    /// 사파리 주소창은 호스트 ✕로 지우면 꼬리가 다시 서지 않는다(이 파일 머리 표).
+    func testLockedHymnPacksFire() throws {
+        try prepare()
+        clearAll()
+        let cases: [(typed: String, title: String, bodyStart: String)] = [
+            ("찬송가232장", "아름다운 본향", "1.아름다운 본향 천국 바라보며"),
+            ("은혜찬송가232장", "목마른 사슴", "1. 목마른 사슴 시냇물을"),
+            ("찬송405장", "나 같은 죄인 살리신", "1.나 같은 죄인 살리신 주"),
+            ("은혜 1장", "소망없이 세상에서", "1. 소망 없이 세상에서"),
+            // 「장」 없이 — 빈 접미 틀(`찬송가{n}` 등, PDR 10-1 개정 2026-11-08). 팩 v2(틀 4개씩)를 가져온 뒤에만 맞는다
+            ("찬송가 133", "어저께나 오늘이나", "1.어저께나 오늘이나"),
+            ("은혜찬송가 232", "목마른 사슴", "1. 목마른 사슴 시냇물을"),
+            ("찬송 405", "나 같은 죄인 살리신", "1.나 같은 죄인 살리신 주"),
+            ("은혜 1", "소망없이 세상에서", "1. 소망 없이 세상에서")
+        ]
+        for (index, item) in cases.enumerated() {
+            if index > 0 { typeCharacter(" ") }
+            typeOnKeyboard(item.typed)
+            Thread.sleep(forTimeInterval: 0.8)
+            let label = chipLabel()
+            notes.append("★ G\(index + 1) \(q(item.typed)) → 칩 \(q(label))")
+            shot("G\(index + 1)-칩")
+            XCTAssertTrue(label.contains(item.title), "\(q(item.typed))에 칩이 안 떴다 — 칩 라벨 \(q(label))")
+            let tapped = tapChip()
+            Thread.sleep(forTimeInterval: 1.2)
+            let value = fieldValue()
+            notes.append("★ G\(index + 1) 탭 \(tapped) → 본문포함=\(value.contains(item.bodyStart)) / 단축어잔재=\(value.hasSuffix(item.typed))")
+            shot("G\(index + 1)-탭-후")
+            XCTAssertTrue(value.contains(item.bodyStart), "\(q(item.typed)) 칩 탭 뒤 가사가 들어가지 않았다")
+            XCTAssertFalse(value.hasSuffix(item.typed), "\(q(item.typed)) 단축어가 지워지지 않았다")
+        }
     }
 
     // MARK: - D. 지울 길이 = 꼬리 원문
@@ -765,30 +809,91 @@ final class SnippetShortcutTypingTests: XCTestCase {
         dismissAllContinues()
         dismissAllContinues()
         bringUpGeulsoe()
-        XCTAssertTrue(keyboard.waitForExistence(timeout: 10), "글쇠 익스텐션이 뜨지 않았다")
+        let deadline = Date().addingTimeInterval(10)
+        while !geulsoeIsUp, Date() < deadline { Thread.sleep(forTimeInterval: 0.5) }
+        // 안 떴으면 여기서 멈춘다 — 이어 가면 입력란 비우기가 지우기 키를 끝없이 찾는다(실기 2026-11-08, 10분 넘게 멈춤)
+        guard geulsoeIsUp else {
+            XCTFail("글쇠 익스텐션이 뜨지 않았다")
+            throw HarnessStop.keyboardNotUp
+        }
         // 자판이 한글 모드인지 확인 — 기호 페이지가 남아 있으면 첫 글자가 엉뚱하게 들어간다
         layer = .hangul
         returnToHangulIfNeeded()
     }
 
     /// 글쇠를 올린다 — **지구본은 길게**(탭은 다음 자판으로 순환할 뿐이다).
+    ///
+    /// 지구본은 **접근성 이름으로 먼저** 찾고(`다음 키보드`), 못 찾을 때만 좌표로 누른다.
+    /// 좌표(0.105, 0.955)는 시뮬레이터 SE에서 잰 자리인데, **실기 SE2(iOS 17.0.3) 시스템 자판은 받아쓰기 키 때문에 지구본이 둘째 칸이라
+    /// 그 좌표가 「123」 키였다** — 글쇠가 끝내 안 올라와 시험이 지우기 키를 10분 넘게 찾다 멈췄다(2026-11-08 실측).
     private func bringUpGeulsoe() {
-        if keyboard.exists { notes.append("글쇠가 이미 올라와 있다"); return }
+        if geulsoeIsUp { notes.append("글쇠가 이미 올라와 있다"); return }
         for attempt in 1...4 {
-            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.105, dy: 0.955))
-                .press(forDuration: 0.9)
-            Thread.sleep(forTimeInterval: 1.2)
-            for app in [springboard, host] {
-                guard let app else { continue }
-                let item = app.staticTexts["글쇠"].firstMatch
-                if item.waitForExistence(timeout: 2), item.isHittable { item.tap(); break }
+            if let globe = globeKey() {
+                globe.press(forDuration: 0.9)
+            } else {
+                notes.append("지구본을 이름으로 못 찾아 좌표로 누른다 (\(attempt)회차)")
+                springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.105, dy: 0.955))
+                    .press(forDuration: 0.9)
             }
+            Thread.sleep(forTimeInterval: 1.2)
+            tapGeulsoeInPicker(attempt: attempt)
             Thread.sleep(forTimeInterval: 2.0)
             let allow = springboard.buttons["붙여넣기 허용"].firstMatch
             if allow.waitForExistence(timeout: 3) { allow.tap() }
-            if keyboard.exists { notes.append("글쇠 올라옴 (\(attempt)회차)"); return }
+            if geulsoeIsUp { notes.append("글쇠 올라옴 (\(attempt)회차)"); return }
         }
         notes.append("★ 글쇠를 올리지 못했다")
+    }
+
+    /// 지구본을 길게 눌러 연 자판 목록에서 글쇠 줄을 누른다.
+    ///
+    /// 시뮬레이터는 이름이 정확히 `글쇠`인 글자 요소였다. **실기 SE2(iOS 17.0.3)에서는 목록이 사파리 안 `[cell] "글쇠, 한국어"`인데,
+    /// 이 시험 러너의 질의로는 목록 전체가 안 보였다.** 원격 요소 계층 읽기 실패(`kAXErrorInvalidUIElement`)가 같이 찍혔다.
+    /// 같은 순간 agent-device 스냅숏에는 보였다(2026-11-08). 그래서 이름(정확히 → 「글쇠」로 시작하는 줄) → **좌표** 순으로 누른다.
+    /// 좌표 (0.331, 0.802)는 SE2 실기에서 잰 줄 가운데 (124, 535)pt다(목록: 키보드 설정·한국어·English·이모티콘·글쇠 순).
+    /// 자판 목록이 다르면 어긋난다 — 그때는 노트에 남은 회차 기록과 녹화를 본다.
+    /// 스프링보드는 정확한 이름만 본다 — 상태 막대의 「◀ 글쇠」 같은 되돌아가기를 누르지 않게.
+    private func tapGeulsoeInPicker(attempt: Int) {
+        for app in [springboard, host] {
+            guard let app else { continue }
+            let item = app.staticTexts["글쇠"].firstMatch
+            if item.waitForExistence(timeout: 2), item.isHittable { item.tap(); return }
+        }
+        if let host {
+            let startsWithName = NSPredicate(format: "label BEGINSWITH %@", "글쇠")
+            let row = host.cells.matching(startsWithName).firstMatch
+            if row.waitForExistence(timeout: 1) {
+                notes.append("자판 목록 글쇠 줄을 이름으로 탭 (\(attempt)회차)")
+                row.tap()
+                return
+            }
+        }
+        notes.append("자판 목록 글쇠 줄을 좌표로 탭 (\(attempt)회차)")
+        springboard.coordinate(withNormalizedOffset: Self.pickerGeulsoeRow).tap()
+    }
+
+    /// SE2 실기에서 잰 자판 목록 글쇠 줄 가운데 — `tapGeulsoeInPicker`의 마지막 수단
+    private static let pickerGeulsoeRow = CGVector(dx: 0.331, dy: 0.802)
+
+    /// 글쇠가 **화면에** 떠 있는가. 익스텐션 프로세스가 남아 있기만 해도 `keyboard.exists`는 참이다 —
+    /// 실기 SE2에서 시스템 자판으로 넘긴 뒤에도 프로세스가 남아 「이미 올라와 있다」로 잘못 보고, 이어 질의가
+    /// `kAXErrorServerNotFound`로 실패했다(2026-11-08). 그래서 시스템 자판의 지구본이 **안 보일 때만** 참으로 본다
+    private var geulsoeIsUp: Bool {
+        guard keyboard.exists, let host else { return false }
+        return !["다음 키보드", "Next keyboard"].contains { host.buttons[$0].firstMatch.exists }
+    }
+
+    /// 시스템 자판의 지구본 — 호스트 쪽 요소로 보인다(실기 사파리 접근성 트리 `[button] "다음 키보드"`)
+    private func globeKey() -> XCUIElement? {
+        for label in ["다음 키보드", "Next keyboard"] {
+            for app in [host, springboard] {
+                guard let app else { continue }
+                let button = app.buttons[label].firstMatch
+                if button.waitForExistence(timeout: 1), button.isHittable { return button }
+            }
+        }
+        return nil
     }
 
     private func focusAddressField() {
@@ -957,7 +1062,9 @@ final class SnippetShortcutTypingTests: XCTestCase {
     /// 자모 하나 → 키 시퀀스. 겹자모는 두 번 누른다(두벌식 규칙).
     private static func jamoStrokes(_ jamo: String) -> [(label: String, shifted: Bool)] {
         if let parts = compound[jamo] { return parts.flatMap(jamoStrokes) }
-        if let base = shifted[jamo] { return [(base, true)] }
+        // 시프트를 켜면 그 키의 라벨(=접근성 이름)이 `shiftedLabel`로 바뀐다 — 시프트 뒤에는 **바뀐 라벨**(자모 자신)로 찾는다.
+        // 예전에는 바탕 라벨(ㅔ)로 찾아 「키를 못 찾았다」가 났다(1.4.0 은혜찬송가 시험에서 처음 드러남 — 그 전 시험 문구에 쌍자모가 없었다)
+        if shifted[jamo] != nil { return [(jamo, true)] }
         return [(jamo, false)]
     }
 
@@ -997,8 +1104,10 @@ final class SnippetShortcutTypingTests: XCTestCase {
         return Self.placeholders.contains(raw) ? "" : raw
     }
 
+    /// iOS 판마다 띄어쓰기가 다르다 — 시뮬레이터 iOS 18.6 「웹사이트」, 실기 SE2 iOS 17.0.3 「웹 사이트」(2026-11-08).
+    /// 하나만 있으면 빈 입력란을 「안 비었다」로 보고 지우기를 90번 누른다
     private static let placeholders: Set<String> = [
-        "검색 또는 웹사이트 이름 입력", "Search or enter website name"
+        "검색 또는 웹사이트 이름 입력", "검색 또는 웹 사이트 이름 입력", "Search or enter website name"
     ]
 
     /// 채움글 칩 — 접근성 라벨이 `채움글 … 붙여넣기` 로 시작한다.

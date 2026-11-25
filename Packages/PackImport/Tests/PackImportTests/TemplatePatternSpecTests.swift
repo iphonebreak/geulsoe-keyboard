@@ -12,13 +12,17 @@ struct TemplatePatternSpecTests {
         ("사자성어 {n}번", "사자성어", "번"),
         ("사자 성어 {n} 번", "사자성어", "번"),
         ("상용 영어{n}번 문장", "상용영어", "번문장"),
-        ("회차{n}장", "회차", "장")
+        ("회차{n}장", "회차", "장"),
+        // 빈 접미 허용(2026-11-08 사장님 결정 — 「찬송가 133」처럼 「장」 없이). 번호가 입력 끝이다
+        ("찬송가{n}", "찬송가", ""),
+        ("찬송가 {n}  ", "찬송가", ""),
+        ("은혜{n}", "은혜", "")
     ])
     func valid(testCase: (raw: String, prefix: String, suffix: String)) throws {
         #expect(try TemplatePatternSpec.parse(testCase.raw).get() == TemplatePattern(prefix: testCase.prefix, suffix: testCase.suffix))
     }
 
-    @Test("거부 표 — `{n}` 개수·접두 2자 미만·접두 없음·접두 끝 숫자·숫자 단독·접미 없음·literal 개행·날짜 예약 끝말·40자 초과 (AC-21·AC-23)",
+    @Test("거부 표 — `{n}` 개수·접두 2자 미만·접두 없음·접두 끝 숫자·숫자 단독·literal 개행·날짜 예약 끝말·40자 초과 (AC-21·AC-23)",
           arguments: [
             ("사자성어", TemplatePatternSpec.Failure.placeholderCount),
             ("{n}사자{n}번", .placeholderCount),
@@ -27,8 +31,6 @@ struct TemplatePatternSpecTests {
             (" 가 {n}번", .prefixTooShort),
             ("회차2{n}번", .prefixEndsWithDigit),
             ("12{n}번", .prefixAllDigits),
-            ("사자성어{n}", .suffixEmpty),
-            ("사자성어{n}  ", .suffixEmpty),
             ("사자\n성어{n}번", .literalContainsNewline),
             ("사자성어{n}번\n", .literalContainsNewline),
             ("회차{n}시간", .reservedDateSuffix),
@@ -90,9 +92,18 @@ struct TemplateBibleCollisionTests {
 
     @Test("성경과 무관한 틀은 1~9,999 어디서도 충돌하지 않는다")
     func noCollision() throws {
-        for raw in ["사자성어 {n}번", "상용 영어 {n}번", "회차{n}장"] {
+        for raw in ["사자성어 {n}번", "상용 영어 {n}번", "회차{n}장", "찬송가{n}", "은혜{n}"] {
             let pattern = try TemplatePatternSpec.parse(raw).get()
             #expect(TemplatePatternSpec.firstBibleCollision(pattern, raw: raw) == nil)
+        }
+    }
+
+    /// `창세기{n}`은 충돌하지 않는다 — 성경 파서가 「창세기 1」만으로는 구절로 읽지 않는다(장·절·`:` 필요). 그래서 구절 꼴로 끝나는 틀로 본다
+    @Test("빈 접미 틀도 성경 검사를 받는다 — `창 1:{n}`은 n=1에서 「창 1:1」로 읽혀 충돌(2026-11-08 개정)")
+    func emptySuffixStillChecked() throws {
+        for raw in ["창 1:{n}", "창1:{n}"] {
+            let pattern = try TemplatePatternSpec.parse(raw).get()
+            #expect(TemplatePatternSpec.firstBibleCollision(pattern, raw: raw) == 1)
         }
     }
 }

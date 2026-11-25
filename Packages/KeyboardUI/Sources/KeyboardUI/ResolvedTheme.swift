@@ -76,3 +76,19 @@ public struct KeyCapSurface: ViewModifier {
             .shadow(color: .black.opacity(0.28), radius: 0, x: 0, y: 1)
     }
 }
+
+/// iOS 26부터 ScrollView 가장자리에 자동으로 붙는 흐림 효과(scroll edge effect)를 끈다 — 하위 모든 ScrollView에 걸린다.
+///
+/// 패널(이모지·클립보드·후보·성경 찾기)의 ScrollView는 툴바 **아래에** 놓일 뿐 막대가 내용을 덮지 않는데도,
+/// 실기(15 Pro, iOS 27.2.1)에서 맨 위로 올린 상태에서도 첫 줄 윗부분이 그림자처럼 흐렸다(사장님 지적 2026-11-24).
+/// 덮는 막대가 없으니 「밑에 내용이 더 있다」는 표시가 필요 없다. OS 버전 분기는 이 테마 계층에만 둔다(CLAUDE.md).
+struct ScrollEdgeEffectSuppression: ViewModifier {
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, macOS 26.0, *) {
+            content.scrollEdgeEffectHidden(true, for: .all)
+        } else {
+            content
+        }
+    }
+}

@@ -209,3 +209,50 @@ struct PackTemplateOwnershipTests {
         #expect(matcher.ownership.allSatisfy { $0.status == .owned })
     }
 }
+
+/// 빈 접미 틀(`찬송가{n}`) — 2026-11-08 사장님 결정으로 10-1 「접미 1자 이상」을 풀었다(「찬송가 133」처럼 「장」 없이).
+/// 매처 코드는 그대로다 — 빈 접미는 「꼬리 끝이 숫자열」로 맞는다. 이 동작을 여기서 고정한다.
+@Suite("템플릿 매칭 — 빈 접미 (10-1 개정 2026-11-08)")
+struct PackTemplateEmptySuffixTests {
+
+    private static func template(_ specs: [(String, String)], items: [Int]) -> PackTemplate {
+        PackTemplate(patterns: specs.map { TemplatePattern(prefix: $0.0, suffix: $0.1) }, titleFormat: "찬송가 {n}장",
+                     items: items.map { PackTemplateItem(n: $0, title: "제목 \($0)", body: "본문 \($0)") })
+    }
+
+    private let matcher = PackTemplateMatcher(sources: [
+        .init(id: "H", template: template([("찬송가", "장"), ("찬송", "장"), ("찬송가", ""), ("찬송", "")], items: [1, 13, 133, 232])),
+        .init(id: "G", template: template([("은혜찬송가", "장"), ("은혜", "장"), ("은혜찬송가", ""), ("은혜", "")], items: [1, 133]))
+    ])
+
+    @Test("「장」 없이 — 번호로 끝나면 맞고, 지울 구간은 원문 그대로", arguments: [
+        ("찬송가 133", "H", 133, "찬송가 133"),
+        ("오늘은 찬송가133", "H", 133, "찬송가133"),
+        ("찬송 232", "H", 232, "찬송 232"),
+        ("은혜찬송가 133", "G", 133, "은혜찬송가 133"),
+        ("은혜 1", "G", 1, "은혜 1")
+    ])
+    func matchesWithoutSuffix(testCase: (tail: String, source: String, n: Int, trigger: String)) throws {
+        let match = try #require(matcher.match(tail: testCase.tail))
+        #expect(match.sourceID == testCase.source && match.n == testCase.n && match.trigger == testCase.trigger)
+    }
+
+    @Test("「장」을 붙이면 literal이 긴 `{n}장` 틀이 이긴다 — 같은 번호")
+    func suffixedStillWins() throws {
+        let match = try #require(matcher.match(tail: "찬송가 133장"))
+        #expect(match.n == 133 && match.trigger == "찬송가 133장")
+    }
+
+    @Test("치는 도중에도 맞는다 — 「찬송가 13」에서 13 칩, 3을 더 치면 133 (알려진 부작용)")
+    func firesWhileTypingNumber() {
+        #expect(matcher.match(tail: "찬송가 13")?.n == 13)
+        #expect(matcher.match(tail: "찬송가 133")?.n == 133)
+    }
+
+    @Test("번호 뒤에 다른 글자가 오면 안 맞는다 · 없는 번호는 칩 없음(후퇴 금지) · 단어 경계", arguments: [
+        "찬송가 133개", "찬송가 1335", "찬송가 2", "새찬송가 133", "찬송가 0133"
+    ])
+    func rejected(tail: String) {
+        #expect(matcher.match(tail: tail) == nil)
+    }
+}

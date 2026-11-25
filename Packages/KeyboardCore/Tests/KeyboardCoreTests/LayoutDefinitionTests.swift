@@ -271,6 +271,130 @@ struct LayoutDefinitionTests {
         }
     }
 
+    // MARK: - 한영 키에 지구본 합치기 (1.4.0 — 사장님 요청 2026-11-11, PDR `language-globe-key.md`)
+
+    private static let letterLayouts: [(InputMode, HangulLayout)] =
+        [(.hangul, .dubeolsik), (.hangul, .danmoeum), (.hangul, .cheonjiin), (.english, .dubeolsik)]
+
+    private func merged(_ mode: InputMode, _ hangul: HangulLayout, numberRow: Bool = false,
+                        punctuation: PunctuationKeySpec = .standard) -> LayoutDefinition {
+        LayoutDefinition.layout(for: mode, hangulLayout: hangul, numberRow: numberRow, inputModeSwitchKey: true,
+                                punctuation: punctuation, mergesGlobeIntoLanguageKey: true)
+    }
+
+    @Test("지구본이 필요해도 한영에 합치면 — 문자 자판은 지구본 없는 배열과 같고, 한영 키 하나만 키보드 목록을 연다")
+    func mergedLetterLayoutsMatchGloblessLayout() throws {
+        for (mode, hangul) in Self.letterLayouts {
+            let layout = merged(mode, hangul)
+            let globeless = LayoutDefinition.layout(for: mode, hangulLayout: hangul, inputModeSwitchKey: false)
+            #expect(layout.rows.map { $0.map(\.id) } == globeless.rows.map { $0.map(\.id) }, "\(mode) \(hangul)")
+            #expect(layout.rows.map { $0.map(\.width) } == globeless.rows.map { $0.map(\.width) }, "폭도 같다")
+            let keys = layout.rows.flatMap { $0 }
+            #expect(!keys.contains { $0.id == "globe" })
+            let opening = keys.filter(\.opensInputModeList)
+            #expect(opening.map(\.id) == ["language"], "\(mode) \(hangul) — 목록을 여는 키는 한영 하나")
+            #expect(try #require(opening.first).event == .toggleLanguage, "짧게 누르면 그대로 한영 전환")
+        }
+    }
+
+    @Test("한영에 합쳐도 숫자 줄·입력란 문장부호는 그대로 붙는다")
+    func mergedKeepsOtherTransforms() throws {
+        let layout = merged(.english, .dubeolsik, numberRow: true, punctuation: .email)
+        #expect(layout.rows.count == 5)
+        let bottom = try #require(layout.rows.last)
+        #expect(bottom.map(\.id) == ["symbols", "language", "space", "punct", "return"])
+        #expect(bottom[3].label == "@")
+        #expect(bottom[1].opensInputModeList)
+    }
+
+    private static let symbolModes: [InputMode] =
+        [.symbols, .symbolsAlternate] + (0..<4).map { InputMode.keypadPad(page: $0) }
+
+    @Test("기호 자판(쿼티형 두 페이지·키패드형 4페이지)도 지구본 자리가 한영 키가 된다 — 폭 그대로, 라벨은 바꿀 언어(사장님 SE2 2026-11-11)")
+    func mergeTurnsSymbolGlobeIntoLanguageKey() throws {
+        for mode in Self.symbolModes {
+            for (letterMode, label) in [(InputMode.hangul, "ABC"), (.english, "한글")] {
+                let layout = LayoutDefinition.layout(for: mode, hangulLayout: .dubeolsik, inputModeSwitchKey: true,
+                                                     letterMode: letterMode, mergesGlobeIntoLanguageKey: true)
+                let plain = LayoutDefinition.layout(for: mode, hangulLayout: .dubeolsik, inputModeSwitchKey: true,
+                                                    letterMode: letterMode)
+                let bottom = try #require(layout.rows.last)
+                let plainBottom = try #require(plain.rows.last)
+                let globeIndex = try #require(plainBottom.firstIndex { $0.id == "globe" })
+                #expect(Array(layout.rows.dropLast()) == Array(plain.rows.dropLast()), "\(mode) — 위 행은 그대로")
+                #expect(bottom.map(\.width) == plainBottom.map(\.width), "\(mode) — 폭 그대로")
+                #expect(!bottom.contains { $0.id == "globe" })
+                let language = bottom[globeIndex]
+                #expect(language.id == "language")
+                #expect(language.event == .toggleLanguage)
+                #expect(language.opensInputModeList)
+                #expect(language.label == label, "\(mode) \(letterMode)")
+                #expect(layout.alignsColumns == plain.alignsColumns)
+            }
+        }
+    }
+
+    @Test("한영에 합친 기호 자판의 문자 복귀 키는 돌아갈 언어를 보인다 — 「ABC」 둘이 나란히 서지 않게")
+    func mergedSymbolsLetterReturnShowsReturnLanguage() throws {
+        for mode in [InputMode.symbols, .symbolsAlternate] {
+            for (letterMode, label) in [(InputMode.hangul, "가"), (.english, "ABC")] {
+                let layout = LayoutDefinition.layout(for: mode, hangulLayout: .dubeolsik, inputModeSwitchKey: true,
+                                                     letterMode: letterMode, mergesGlobeIntoLanguageKey: true)
+                let back = try #require(layout.rows.last?.first)
+                #expect(back.event == .symbols)
+                #expect(back.label == label, "\(mode) \(letterMode)")
+            }
+        }
+        // 합치지 않으면 쿼티형 기호의 「ABC」는 그대로(지구본 없는 기기·기존 동작)
+        for inputModeSwitchKey in [true, false] {
+            let plain = LayoutDefinition.layout(for: .symbols, hangulLayout: .dubeolsik,
+                                                inputModeSwitchKey: inputModeSwitchKey, letterMode: .hangul)
+            #expect(plain.rows.last?.first?.label == "ABC")
+        }
+    }
+
+    @Test("숫자 패드(숫자 전용 입력란)는 합치라고 해도 지구본을 그대로 둔다 — 언어가 없는 화면, 다른 키보드로 갈 길")
+    func mergeKeepsNumberPadGlobe() {
+        for kind in [NumberPadKind.plain, .decimal, .phone] {
+            let layout = merged(.numberPad(kind), .dubeolsik)
+            #expect(layout == LayoutDefinition.layout(for: .numberPad(kind), hangulLayout: .dubeolsik,
+                                                      inputModeSwitchKey: true), "\(kind)")
+            #expect(layout.rows.flatMap { $0 }.contains { $0.id == "globe" }, "\(kind)")
+            #expect(layout.rows.flatMap { $0 }.allSatisfy { !$0.opensInputModeList })
+        }
+    }
+
+    @Test("지구본이 필요 없는 기기에서는 기호 자판도 합치기 인자가 아무것도 바꾸지 않는다")
+    func mergeIsNoOpForSymbolsWithoutInputModeSwitchKey() {
+        for mode in Self.symbolModes {
+            let layout = LayoutDefinition.layout(for: mode, hangulLayout: .dubeolsik, inputModeSwitchKey: false,
+                                                 mergesGlobeIntoLanguageKey: true)
+            #expect(layout == LayoutDefinition.layout(for: mode, hangulLayout: .dubeolsik, inputModeSwitchKey: false))
+        }
+    }
+
+    @Test("지구본이 필요 없는 기기(Face ID 아이폰)에서는 합치기 인자가 아무것도 바꾸지 않는다")
+    func mergeIsNoOpWithoutInputModeSwitchKey() {
+        for (mode, hangul) in Self.letterLayouts {
+            let layout = LayoutDefinition.layout(for: mode, hangulLayout: hangul, inputModeSwitchKey: false,
+                                                 mergesGlobeIntoLanguageKey: true)
+            #expect(layout == LayoutDefinition.layout(for: mode, hangulLayout: hangul, inputModeSwitchKey: false))
+            #expect(layout.rows.flatMap { $0 }.allSatisfy { !$0.opensInputModeList })
+        }
+    }
+
+    @Test("기본 배열에서는 어느 키도 키보드 목록을 열지 않는다 — 복사 함수도 값을 지킨다")
+    func defaultLayoutsNeverOpenInputModeList() {
+        for (mode, hangul) in Self.letterLayouts {
+            let layout = LayoutDefinition.layout(for: mode, hangulLayout: hangul)
+            #expect(layout.rows.flatMap { $0 }.allSatisfy { !$0.opensInputModeList })
+        }
+        let language = LayoutDefinition.Key(id: "language", label: "ABC", event: .toggleLanguage, opensInputModeList: true)
+        #expect(language.resized(width: 2).opensInputModeList)
+        #expect(language.relabeled(label: "가", symbol: nil).opensInputModeList)
+        #expect(language.withAlternate(nil).opensInputModeList)
+    }
+
     @Test("지구본이 필요하면(기본) 배열은 그대로다")
     func withGlobeIsUnchanged() {
         let plain = LayoutDefinition.layout(for: .hangul, hangulLayout: .dubeolsik)

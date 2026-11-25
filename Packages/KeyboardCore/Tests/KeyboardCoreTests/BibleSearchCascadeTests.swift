@@ -331,6 +331,30 @@ struct BibleSearchCascadeTests {
         #expect(BibleSearchCascade(searcher: RecordingSearcher([:])).search(tail: "어제 회식했다") == nil)
     }
 
+    // MARK: - 끝 공백 (사장님 결정 2026-11-10 — 띄어쓰기 치면 배지 숨김)
+
+    /// 실기 신고: 「엘리사 」에서 배지는 뜨는데 누르면 아무 일이 없었다. 찾은 말(「엘리사」)이 꼬리(「엘리사 」) 끝과
+    /// 달라 패널이 열리자마자 꼬리 어긋남 가드에 닫혔다. 끝이 공백·개행이면 **스캔하지 않고 nil** — 배지가 뜨지 않는다
+    @Test("★ 꼬리가 공백·개행으로 끝나면 스캔하지 않는다 — 배지 없음",
+          arguments: ["엘리사 ", "엘리사  ", "엘리사\n", "엘리사\t", "엘리사\u{3000}", "태초에 하나님이 "])
+    func trailingWhitespaceHidesBadge(tail: String) {
+        let searcher = RecordingSearcher(["엘리사": [genesisOneOne], "태초에 하나님이": [genesisOneOne]],
+                                          loose: ["엘리사": [genesisOneOne], "태초에 하나님이": [genesisOneOne]])
+        let result = BibleSearchCascade(searcher: searcher).search(tail: tail)
+
+        #expect(result == nil)
+        #expect(searcher.queries.isEmpty)
+    }
+
+    @Test("공백 없이 끝나면 그대로 찾는다 — 낱말 사이 공백은 상관없다", arguments: ["엘리사", "선지자 엘리사"])
+    func noTrailingWhitespaceStillSearches(tail: String) {
+        let searcher = RecordingSearcher(["엘리사": [genesisOneOne]])
+        let result = BibleSearchCascade(searcher: searcher).search(tail: tail)
+
+        #expect(result?.typedText == "엘리사")
+        #expect(tail.hasSuffix(result?.typedText ?? "×"))   // 패널 가드·구절 삽입의 꼬리 정합이 성립한다
+    }
+
     @Test("붙여 친 경우는 낱말 하나로 떨어진다")
     func noSpacesFallsBackToSingleToken() {
         let searcher = RecordingSearcher([:])

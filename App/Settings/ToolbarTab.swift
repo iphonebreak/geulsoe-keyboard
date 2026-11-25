@@ -266,7 +266,7 @@ struct ToolbarTab: View {
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Label("글쇠 설정 열기", systemImage: "arrow.up.forward.app")
-                    Text("설정 앱을 열어요. 「글쇠」가 바로 안 보이면 「앱」에서 찾으세요.")
+                    Text("설정 앱을 열어요. '글쇠'가 바로 안 보이면 '앱'에서 찾으세요.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -287,7 +287,7 @@ struct ToolbarTab: View {
             // **둘 다 반드시 남긴다.** 앞 문장은 "권한을 안 켜면 앱을 못 쓴다"는 오해를 막는
             // 안심 문장이고, 뒷 문장은 **개인정보 처리방침이 이용자 권리로 명시한 것**이라
             // 안내 없이 지우면 방침과 화면이 어긋난다 (반론자 R-3).
-            Text("전체 접근 없이도 한글 입력·채움글·추천단어는 그대로 동작해요.\n"
+            Text("전체 접근 없이도 한글 입력, 채움글, 추천단어는 그대로 동작해요.\n"
                  + "클립보드 기록을 끄면 저장분이 바로 삭제돼요.")
         }
     }

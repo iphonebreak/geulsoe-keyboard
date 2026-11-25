@@ -13,6 +13,8 @@
   Linked = false: 계정·로그인이 없고 `setUserID`를 부르지 않는다(telemetry-gate 검사 C가 막는다). Tracking = false: 광고·IDFA 계열 미링크
     (`tools/archive-compliance-check.sh` 4절). SDK 번들 매니페스트(Firebase_*·GoogleDataTransport_*·GoogleUtilities_*.bundle)는 자기
     required-reason을 스스로 선언하므로 아래 UserDefaults 사유는 키보드 자기 코드의 것만이다.
+  SystemBootTime 35F9.1(1.4.0 `921a57b`) — 한영 키 빠른 두 번 탭 판정(`InputModeListGate`, 0.3초 창)이 `ProcessInfo.systemUptime`을 쓴다.
+    앱 안 사건 사이 경과 시간만 재고 그 값은 기기 밖으로 보내지 않는다. 2026-11-25 출시 준비 중 선언 누락을 찾아 넣었다(사장님 결정).
   (가) 종료 흔적은 이 선언과 무관하다 — 키보드는 그것을 기기 밖으로 보내지 않는다(전송은 설정 앱 매니페스트 몫, PDR 6-5).
   이 목록을 바꾸면 `tools/archive-compliance-check.sh`의 EXPECTED_EXT_COLLECTED와 `ci_scripts/ci_post_clone.sh` 6-2(3)도 같이 바꾼다.
 -->
@@ -71,6 +73,14 @@
 			<array>
 				<string>1C8F.1</string>
 				<string>CA92.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategorySystemBootTime</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>35F9.1</string>
 			</array>
 		</dict>
 	</array>

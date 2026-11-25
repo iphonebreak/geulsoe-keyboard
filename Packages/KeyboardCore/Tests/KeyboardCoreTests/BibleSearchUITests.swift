@@ -26,7 +26,7 @@ struct BibleVersePreviewTests {
         #expect(window.contains("사랑"))
         // 머리부터 잘랐다면 「여호와께서 모세에게…」로 시작한다
         #expect(!window.hasPrefix("여호와께서"))
-        #expect(window.hasPrefix("…"))
+        #expect(window.hasPrefix("..."))
     }
 
     @Test("검색어 앞 4자를 함께 보여 준다")
@@ -40,13 +40,13 @@ struct BibleVersePreviewTests {
     func earlyMatchStartsAtHead() {
         let window = BibleVersePreview.window(of: early, matching: "사랑")
         #expect(window.hasPrefix("사랑은 오래"))
-        #expect(!window.hasPrefix("…"))
+        #expect(!window.hasPrefix("..."))
     }
 
     @Test("잘린 쪽에만 줄임표가 붙는다")
     func ellipsisOnlyWhereTrimmed() {
         let window = BibleVersePreview.window(of: early, matching: "사랑")
-        #expect(window.hasSuffix("…"))
+        #expect(window.hasSuffix("..."))
     }
 
     @Test("본문에 검색어가 없으면 머리부터 자른다")
@@ -59,7 +59,7 @@ struct BibleVersePreviewTests {
     func respectsWindowLength() {
         let window = BibleVersePreview.window(of: late, matching: "사랑")
         // 양끝 줄임표 둘을 빼고 본문은 창 길이만큼
-        #expect(window.replacingOccurrences(of: "…", with: "").count == BibleVersePreview.windowLength)
+        #expect(window.replacingOccurrences(of: "...", with: "").count == BibleVersePreview.windowLength)
     }
 }
 

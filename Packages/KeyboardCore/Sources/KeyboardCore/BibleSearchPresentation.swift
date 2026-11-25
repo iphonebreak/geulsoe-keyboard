@@ -151,8 +151,8 @@ public enum BibleVersePreview {
         let end = min(characters.count, start + windowLength)
 
         var window = String(characters[start..<end])
-        if start > 0 { window = "…" + window }
-        if end < characters.count { window += "…" }
+        if start > 0 { window = "..." + window }
+        if end < characters.count { window += "..." }
         return window
     }
 

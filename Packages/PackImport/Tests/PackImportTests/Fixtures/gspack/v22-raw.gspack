@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "이모지 😀 팩",
+    "rights": "출처 ✓ 🎉"
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "vPw7muSGiIdyoFLXAKZUQg==",
+    "nonce": "+bP0qQDcC1rCtiNh"
+  },
+  "ciphertext": "dQ6I51Px83Ra1bwBbU0S/YWRwNncorcX/XlmdNmJ9/s05bnjWwb9NpvSpyYTJihcoEdyEaGfZyNOa8RJWqJsi0Fi5/NI37jttCu7klQy/w=="
+}

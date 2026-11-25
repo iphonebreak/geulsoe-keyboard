@@ -181,7 +181,7 @@ public struct DateSnippetParser: Sendable {
     private func holidayResult(_ holiday: Date, title: String, nextYear: Bool, now: Date) -> (Date, String) {
         guard !nextYear else { return (holiday, title) }
         let status = calendar.isDate(now, inSameDayAs: holiday) ? "오늘" : (now > holiday ? "지남" : "올해")
-        return (holiday, "\(title) · \(status)")
+        return (holiday, "\(title), \(status)")
     }
 
     private func day(_ year: Int, _ month: Int, _ day: Int) -> Date? {

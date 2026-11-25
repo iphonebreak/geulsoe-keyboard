@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "찬송가 샘플",
+    "rights": ""
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 600000,
+    "salt": "EBESExQVFhcYGRobHB0eHw==",
+    "nonce": "oKGio6Slpqeoqaqr"
+  },
+  "ciphertext": "GS8ROstM9CdUmOuCaB6mlUthEGIgXKgpbqAKqBe3uO3BTXLl6L7tLJLEPLYM1wzdQl9hBgUcp2ygHWcL0s1geK9lJA=="
+}

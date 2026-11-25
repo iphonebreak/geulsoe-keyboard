@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "Inner",
+    "rights": ""
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "cygyx3HjkdVFNrJ4iAWwMw==",
+    "nonce": "+l/4cpRldm3Ngj+S"
+  },
+  "ciphertext": "Ld+hhiw41DrHUdEJiP6UXjg9ePyX"
+}

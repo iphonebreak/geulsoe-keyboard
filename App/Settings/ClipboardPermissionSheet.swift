@@ -56,21 +56,21 @@ struct ClipboardPermissionSheet: View {
                     header
                     step(number: 1,
                          title: "전체 접근을 켜세요",
-                         body: "클립보드 기록·복사한 인증번호 제안·복사한 텍스트 제안에 필요해요.\n"
-                             + "「글쇠」를 켜면 바로 아래 「전체 접근 허용」이 나타나요.",
+                         body: "클립보드 기록, 복사한 인증번호 제안, 복사한 텍스트 제안에 필요해요.\n"
+                             + "'글쇠'를 켜면 바로 아래 '전체 접근 허용'이 나타나요.",
                          paths: [
                             (version: "iOS 18 이상", value: "설정 > 앱 > 글쇠 > 키보드"),
                             (version: "iOS 17", value: "설정 > 일반 > 키보드 > 키보드 > 글쇠")
                          ])
                     step(number: 2,
-                         title: "뜨는 확인 창에서 「허용」을 누르세요",
-                         body: "스위치는 켜진 것처럼 보여도, 여기서 「허용 안 함」을 누르면 도로 꺼져요.",
+                         title: "뜨는 확인 창에서 '허용'을 누르세요",
+                         body: "스위치는 켜진 것처럼 보여도, 여기서 '허용 안 함'을 누르면 도로 꺼져요.",
                          paths: [(version: nil, value: "전체 접근을 허용하겠습니까? → [허용]")])
                     step(number: 3,
-                         title: "「다른 앱에서 붙여넣기」를 「허용」으로",
+                         title: "'다른 앱에서 붙여넣기'를 '허용'으로",
                          body: "이 행은 처음엔 없어요. 키보드를 한 번 쓰면 뜨는 확인 창에서 "
-                             + "「붙여넣기 허용」을 누르면 생겨요.\n"
-                             + "값이 \"묻기\"라 매번 물어요 — \"허용\"으로 바꾸세요.",
+                             + "'붙여넣기 허용'을 누르면 생겨요.\n"
+                             + "값이 \"묻기\"라 매번 물어요. \"허용\"으로 바꾸세요.",
                          paths: [(version: nil, value: "설정 > 앱 > 글쇠 > 다른 앱에서 붙여넣기")])
                     settingsButtonNote
                 }
@@ -93,7 +93,7 @@ struct ClipboardPermissionSheet: View {
     /// 「두 가지」가 아니라 **「2가지」**다 (사용자 지시 2026-09-15). `Label` 이라 보이는 글과
     /// VoiceOver 가 읽는 글이 **같은 문자열 하나**에서 나온다 — 따로 맞출 자리가 없다.
     private var header: some View {
-        Label("2가지 설정을 바꿔요 — 순서가 있어요", systemImage: "lock.open")
+        Label("2가지 설정을 순서대로 바꿔요", systemImage: "lock.open")
             .font(.headline)
     }
 
@@ -170,7 +170,7 @@ struct ClipboardPermissionSheet: View {
     /// 스크롤 내용 끝에 두면 기본 크기에서는 버튼 바로 위라 연결이 그대로 보이고,
     /// 큰 글자에서는 다른 본문과 함께 스크롤된다.
     private var settingsButtonNote: some View {
-        Text("「글쇠」가 바로 안 보이면 「앱」에서 찾으세요.")
+        Text("'글쇠'가 바로 안 보이면 '앱'에서 찾으세요.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .center)
