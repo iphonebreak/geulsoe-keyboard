@@ -42,6 +42,9 @@ public struct KeyboardRootView: View {
     private let onSnippetCandidatesOpen: ((SnippetSuggestion) -> Void)?
     private let onSnippetCandidateTap: ((SnippetCandidate) -> Void)?
     private let onSnippetCandidatesClose: (() -> Void)?
+    private let onBackspaceHoldBegan: ((UInt64) -> Bool)?
+    private let onBackspaceHoldEnded: ((UInt64) -> Void)?
+    private let onBackspaceTick: ((UInt64, BackspaceRepeatPhase) -> Void)?
     private let inputModeSwitchButton: AnyView?
 
     /// **상자를 전부 채우고 내용은 하단 정렬한다** (14차 H1, 기본 `false` = 기존 동작).
@@ -86,7 +89,10 @@ public struct KeyboardRootView: View {
     ///   - onSnippetCandidatesClose: 후보 패널 「돌아가기」 — 패널만 닫는다.
     ///   - onCursorMove: 커서 이동 도구(◀ -1 / ▶ +1).
     ///   - onEmojiTap: 이모지 그리드에서 이모지를 골랐을 때.
-    ///   - onKeyPress: 자판 키 터치다운(백스페이스 반복 포함) — 클릭음·진동 재생 시점.
+    ///   - onKeyPress: 자판 키 터치다운(⌫ 글자 반복 포함) — 클릭음·진동 재생 시점. ⌫ 닻·단어 박자의 피드백은 조립 지점이 결과를 보고 낸다.
+    ///   - onBackspaceHoldBegan: ⌫ 터치다운(동기) — 누름 세대를 받고 단어 단계 허용 여부를 돌려준다(PDR `backspace-word-acceleration.md`).
+    ///   - onBackspaceHoldEnded: ⌫ 누름 끝(동기) — 손 뗌·터치 잃음·사라짐.
+    ///   - onBackspaceTick: ⌫ 반복 박자(글자·닻·단어). nil이면 현행 글자 반복만.
     ///   - fillsContainer: 상자를 전부 채우고 내용을 **하단 정렬**한다 (14차 H1). 기본 `false` = 기존 동작.
     ///   - transparentAbove: 배경을 **내용 뒤에만** 칠하고 그 위는 투명하게 둔다 (16차). 기본 `false` = 기존 동작.
     public init(
@@ -111,6 +117,9 @@ public struct KeyboardRootView: View {
         onSnippetCandidatesOpen: ((SnippetSuggestion) -> Void)? = nil,
         onSnippetCandidateTap: ((SnippetCandidate) -> Void)? = nil,
         onSnippetCandidatesClose: (() -> Void)? = nil,
+        onBackspaceHoldBegan: ((UInt64) -> Bool)? = nil,
+        onBackspaceHoldEnded: ((UInt64) -> Void)? = nil,
+        onBackspaceTick: ((UInt64, BackspaceRepeatPhase) -> Void)? = nil,
         fillsContainer: Bool = false,
         transparentAbove: Bool = false
     ) {
@@ -135,6 +144,9 @@ public struct KeyboardRootView: View {
         self.onSnippetCandidatesOpen = onSnippetCandidatesOpen
         self.onSnippetCandidateTap = onSnippetCandidateTap
         self.onSnippetCandidatesClose = onSnippetCandidatesClose
+        self.onBackspaceHoldBegan = onBackspaceHoldBegan
+        self.onBackspaceHoldEnded = onBackspaceHoldEnded
+        self.onBackspaceTick = onBackspaceTick
         self.fillsContainer = fillsContainer
         self.transparentAbove = transparentAbove
     }
@@ -246,7 +258,10 @@ public struct KeyboardRootView: View {
                     inputModeSwitchButton: inputModeSwitchButton,
                     onEvent: onEvent,
                     onKeyPress: onKeyPress,
-                    onCursorDrag: onCursorDrag  // 스페이스 길게 누른 뒤 드래그 — 트랙패드 커서 이동
+                    onCursorDrag: onCursorDrag,  // 스페이스 길게 누른 뒤 드래그 — 트랙패드 커서 이동
+                    onBackspaceHoldBegan: onBackspaceHoldBegan,
+                    onBackspaceHoldEnded: onBackspaceHoldEnded,
+                    onBackspaceTick: onBackspaceTick
                 )
                 .frame(height: state.keyboardHeight)
                 .padding(.horizontal, 3)
@@ -763,6 +778,10 @@ struct KeyboardLayoutView: View {
     var onKeyPress: (() -> Void)? = nil
     /// 스페이스 트랙패드 모드의 문자 단위 커서 이동 (nil이면 기능 없음)
     var onCursorDrag: ((Int) -> Void)? = nil
+    /// ⌫ 길게 누르기 단어 단계 — ⌫ 키캡에만 넘긴다(nil이면 현행 글자 반복만)
+    var onBackspaceHoldBegan: ((UInt64) -> Bool)? = nil
+    var onBackspaceHoldEnded: ((UInt64) -> Void)? = nil
+    var onBackspaceTick: ((UInt64, BackspaceRepeatPhase) -> Void)? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -816,7 +835,10 @@ struct KeyboardLayoutView: View {
                 showsPreview: state.showsKeyPreview,
                 onEvent: onEvent,
                 onPress: onKeyPress,
-                onCursorDrag: key.event == .space ? onCursorDrag : nil
+                onCursorDrag: key.event == .space ? onCursorDrag : nil,
+                onBackspaceHoldBegan: key.event == .backspace ? onBackspaceHoldBegan : nil,
+                onBackspaceHoldEnded: key.event == .backspace ? onBackspaceHoldEnded : nil,
+                onBackspaceTick: key.event == .backspace ? onBackspaceTick : nil
             )
         }
     }

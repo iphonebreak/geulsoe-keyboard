@@ -57,13 +57,36 @@ public struct PackSnapshotLoader: Sendable {
 
     private let root: URL
     private let generations: any PackGenerationReading
-    private let userSnippets: @Sendable () -> [SnippetEntry]
+    /// 내 채움글 공급 — 켜진 내장 몫·한도를 받아 **실을 앞부분 + 멈춘 자리의 판정**을 낸다(B1 가′)
+    private let userSnippets: @Sendable (PackStats, PackBudgetLimits) -> UserSnippetSupply
     private let reader: any PackFileReading
     private let limits: PackBudgetLimits
 
+    /// 내 채움글을 배열로 받는다 — 전체를 이미 디코드한 경로(시험·앱 쪽 하네스)
     public init(
         snapshotRoot: URL, generations: any PackGenerationReading, userSnippets: @escaping @Sendable () -> [SnippetEntry],
         reader: any PackFileReading = SystemPackFileReader(), limits: PackBudgetLimits = .candidate
+    ) {
+        self.init(snapshotRoot: snapshotRoot, generations: generations, reader: reader, limits: limits) { builtIn, limits in
+            .full(userSnippets(), builtIn: builtIn, limits: limits)
+        }
+    }
+
+    /// 내 채움글을 **저장된 JSON 그대로** 받는다 — 앞부분만 디코드한다(B1 가′, PDR `keyboard-user-snippet-prefix-decode.md`).
+    /// 데이터가 없으면 0개
+    public init(
+        snapshotRoot: URL, generations: any PackGenerationReading, userSnippetData: @escaping @Sendable () -> Data?,
+        reader: any PackFileReading = SystemPackFileReader(), limits: PackBudgetLimits = .candidate
+    ) {
+        self.init(snapshotRoot: snapshotRoot, generations: generations, reader: reader, limits: limits) { builtIn, limits in
+            guard let data = userSnippetData() else { return .full([], builtIn: builtIn, limits: limits) }
+            return UserSnippetPrefixDecoder.supply(from: data, builtIn: builtIn, limits: limits)
+        }
+    }
+
+    init(
+        snapshotRoot: URL, generations: any PackGenerationReading, reader: any PackFileReading, limits: PackBudgetLimits,
+        userSnippets: @escaping @Sendable (PackStats, PackBudgetLimits) -> UserSnippetSupply
     ) {
         self.root = snapshotRoot
         self.generations = generations
@@ -72,25 +95,35 @@ public struct PackSnapshotLoader: Sendable {
         self.limits = limits
     }
 
-    /// 제품 — App Group의 snapshot·세대·내 채움글
+    /// 제품 — App Group의 snapshot·세대·내 채움글(저장된 JSON에서 앞부분만 디코드)
     public static func live() -> PackSnapshotLoader? {
         guard let group = PackStorageLocations.groupContainer else { return nil }
         let snippets = AppGroupSnippetRepository()
         return PackSnapshotLoader(snapshotRoot: PackStorageLocations.snapshotRoot(groupContainer: group),
-                                  generations: AppGroupPackGenerations(), userSnippets: { snippets.entries() })
+                                  generations: AppGroupPackGenerations(), userSnippetData: { snippets.storedData() })
     }
 
     /// - Parameter builtIn: 켜진 내장 팩 문구(baseline에 먼저 든다)
     public func load(builtIn: [SnippetEntry]) -> Result {
-        var lastUser: [SnippetEntry] = []
+        let builtInStats = PackStats.of(entries: builtIn)
+        // 재시도(R1-9) — 직전 회가 같은 사용자 세대를 **흔들림 없이** 읽었으면 그 결과를 다시 쓴다. 아니면 다시 읽기 **전에** 놓는다 —
+        // 예전에는 직전 회 배열을 쥔 채 다시 디코드해 한 벌(legacy10 +12MB 실측)이 겹쳤다
+        var previous: (generation: Int, supply: UserSnippetSupply)?
         var lastGenerations = (user: 0, packs: 0)
         var lastFailure = DropReason.inconsistentGenerations
         for attempt in 1...Self.maxAttempts {
             let before = (user: generations.userSnippetsGeneration, packs: generations.packsGeneration)
-            let user = userSnippets()
-            let outcome = readSnapshot(generation: before.packs, user: user, builtIn: builtIn)
+            let user: UserSnippetSupply
+            if let previous, previous.generation == before.user {
+                user = previous.supply
+            } else {
+                previous = nil
+                user = userSnippets(builtInStats, limits)
+            }
+            let outcome = readSnapshot(generation: before.packs, user: user, builtInStats: builtInStats)
             let after = (user: generations.userSnippetsGeneration, packs: generations.packsGeneration)
-            lastUser = user
+            previous = (generation: before.user, supply: user)
+            if after.user != before.user { previous?.generation = -1 }   // 읽는 도중 바뀌었다 — 다음 회는 다시 읽는다(마지막 회 대비로 값은 쥔다)
             lastGenerations = after
             guard before == after else {
                 lastFailure = .inconsistentGenerations
@@ -106,7 +139,7 @@ public struct PackSnapshotLoader: Sendable {
                 result.attempts = attempt
                 return result
             case .dropped(let reason, let filesRead):
-                var result = baselineOnly(user: user, builtIn: builtIn, dropped: reason)
+                var result = baselineOnly(user: user, dropped: reason)
                 result.userSnippetsGeneration = before.user
                 result.packsGeneration = before.packs
                 result.attempts = attempt
@@ -114,7 +147,8 @@ public struct PackSnapshotLoader: Sendable {
                 return result
             }
         }
-        var result = baselineOnly(user: lastUser, builtIn: builtIn, dropped: lastFailure)
+        let lastUser = previous?.supply ?? .full([], builtIn: builtInStats, limits: limits)
+        var result = baselineOnly(user: lastUser, dropped: lastFailure)
         result.userSnippetsGeneration = lastGenerations.user
         result.packsGeneration = lastGenerations.packs
         result.attempts = Self.maxAttempts
@@ -129,14 +163,15 @@ public struct PackSnapshotLoader: Sendable {
         case vanished
     }
 
-    private func readSnapshot(generation: Int, user: [SnippetEntry], builtIn: [SnippetEntry]) -> Outcome {
-        let builtInStats = PackStats.of(entries: builtIn)
+    private func readSnapshot(generation: Int, user supply: UserSnippetSupply, builtInStats: PackStats) -> Outcome {
         // 내 채움글은 항목마다 한 번만 인코드해 센다(R23). 넘는 것이 확정되면 그 자리에서 멈춘다 — 인코드 전 원시 바이트 하한으로 거대 항목을
-        // 인코드하지 않고, 넘은 뒤 항목도 인코드하지 않는다(K2). 싣는 개수는 앱 `PackStore`의 정확 통계 함수와 같다(AC-8)
-        let userLoad = ActivePackBudget.userSnippetLoad(user, builtIn: builtInStats, limits: limits)
+        // 인코드하지 않고, 넘은 뒤 항목도 인코드하지 않는다(K2). 싣는 개수는 앱 `PackStore`의 정확 통계 함수와 같다(AC-8).
+        // ★ 판정은 공급이 멈춘 자리의 것을 그대로 쓴다 — 앞부분 배열로 다시 세면 「넘음」이 「맞음」이 된다(B1 불변식 I1)
+        let userLoad = supply.load
+        let user = supply.entries
         // 9-3 — baseline이 넘으면 외부 팩은 읽지도 않는다. 사용자 문구는 저장 순서대로 한도까지
         guard case .fits(let userStats) = userLoad.baseline else {
-            return .loaded(makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(userLoad.loadableCount)), packs: [:],
+            return .loaded(makeResult(order: SnippetSourceSlot.defaultOrder, user: user, packs: [:],
                                       included: [], excluded: [], baselineOverflow: userLoad.overflowDimensions))
         }
         let baseline = userStats + builtInStats
@@ -226,11 +261,10 @@ public struct PackSnapshotLoader: Sendable {
         return .loaded(result)
     }
 
-    private func baselineOnly(user: [SnippetEntry], builtIn: [SnippetEntry], dropped: DropReason) -> Result {
-        let builtInStats = PackStats.of(entries: builtIn)
-        let userLoad = ActivePackBudget.userSnippetLoad(user, builtIn: builtInStats, limits: limits)   // 읽은 경로와 같은 함수(K2)
-        var result = makeResult(order: SnippetSourceSlot.defaultOrder, user: Array(user.prefix(userLoad.loadableCount)), packs: [:],
-                                included: [], excluded: [], baselineOverflow: userLoad.overflowDimensions)
+    private func baselineOnly(user supply: UserSnippetSupply, dropped: DropReason) -> Result {
+        // 읽은 경로와 같은 판정(K2) — 공급이 멈춘 자리의 것
+        var result = makeResult(order: SnippetSourceSlot.defaultOrder, user: supply.entries, packs: [:],
+                                included: [], excluded: [], baselineOverflow: supply.load.overflowDimensions)
         result.dropped = dropped
         return result
     }

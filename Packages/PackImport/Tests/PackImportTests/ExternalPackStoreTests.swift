@@ -451,27 +451,44 @@ struct PackStoreTests {
 
     // MARK: F5 ④ — 결정적 직렬 시험
 
-    @Test("★ 판정과 쓰기 사이에 다른 커밋이 끼어들지 못한다 — 끼어들기 갈고리로 결정적으로 (S09)")
+    /// 판정은 시간이 아니라 **갈고리(동기화 지점)**로만 한다(백로그 16 — 예전 판은 끝의 5초 대기가 부하에서 넘쳐 둘째가 반영되기
+    /// 전에 단언했다). 첫 커밋 갈고리 안에서 둘째 커밋을 띄우고, 둘째가 커밋을 부르기 직전까지 온 것을 신호로 확인한다.
+    /// 직렬이면 둘째는 저장소 큐에서 막혀 **첫 갈고리가 끝난 뒤에야** 제 갈고리에 닿는다 — 둘째 갈고리가 「첫 갈고리 안」을
+    /// 보면 끼어든 것이다. 첫 갈고리의 짧은 기다림(0.3초)은 동시 구현일 때 끼어들 틈을 주는 것뿐이라, 부하로 짧아지거나 길어져도
+    /// 올바른 구현은 언제나 통과한다(틀린 구현을 잡는 감도만 달라진다). 둘째 완료는 시간 제한 없이 기다리고 시험 시간 제한이 막는다
+    @Test("★ 판정과 쓰기 사이에 다른 커밋이 끼어들지 못한다 — 끼어들기 갈고리로 결정적으로 (S09)", .timeLimit(.minutes(1)))
     func commitsDoNotInterleave() {
         let h = Harness(limits: .candidate)
         defer { h.sandbox.cleanup() }
         let store = h.store
         let calls = Counter()
-        let interleaved = InterleaveProbe()
-        // 둘째 커밋이 끝나면 두 번 신호한다 — 갈고리 안의 관찰과 시험 끝의 대기가 각각 하나씩(둘 다 시간 제한, 무한 대기 없음)
+        let firstInHook = InterleaveProbe()       // 첫 커밋의 갈고리 안에 있나
+        let interleaved = InterleaveProbe()       // 둘째 갈고리가 첫 갈고리 안에서 돌았나
+        let secondStarted = DispatchSemaphore(value: 0)
+        let secondReachedHook = DispatchSemaphore(value: 0)
         let secondFinished = DispatchSemaphore(value: 0)
         store.beforeWriteForTesting = {
-            guard calls.next() == 1 else { return }
-            DispatchQueue.global().async {
-                _ = store.saveUserSnippet(entry("둘째"), editing: nil)
-                secondFinished.signal()
-                secondFinished.signal()
+            switch calls.next() {
+            case 1:
+                firstInHook.set(true)
+                DispatchQueue.global().async {
+                    secondStarted.signal()
+                    _ = store.saveUserSnippet(entry("둘째"), editing: nil)
+                    secondFinished.signal()
+                }
+                secondStarted.wait()   // 동기화 지점 — 둘째가 커밋을 부르기 직전이다
+                _ = secondReachedHook.wait(timeout: .now() + 0.3)
+                firstInHook.set(false)
+            case 2:
+                interleaved.set(firstInHook.value)
+                secondReachedHook.signal()
+            default:
+                break
             }
-            // 직렬이면 둘째는 큐에서 기다리므로 여기서 끝날 수 없다(시간 초과). 동시라면 이 사이에 끝난다
-            interleaved.set(secondFinished.wait(timeout: .now() + 0.3) == .success)
         }
         _ = store.saveUserSnippet(entry("첫째"), editing: nil)
-        _ = secondFinished.wait(timeout: .now() + 5)
+        secondFinished.wait()
+        #expect(calls.next() == 3, "갈고리가 커밋마다 한 번씩(두 번) 돌았다")
         #expect(!interleaved.value)
         #expect(h.user.entries() == [entry("첫째"), entry("둘째")])
         #expect(store.revision == 2)

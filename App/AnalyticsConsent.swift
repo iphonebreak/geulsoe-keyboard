@@ -17,8 +17,9 @@ import FirebaseCrashlytics
 /// `FirebaseCrashlyticsCollectionEnabled` 게이트를 넣지 않는 이유가 이것이다 — 두 키는 **초기 상태를
 /// 끔으로 만드는** 키라서, 넣는 순간 기본값 결정이 뒤집힌다. 넣지 않는 것이 결정 사항이다.
 ///
-/// **왜 App Group이 아니라 앱 전용 `UserDefaults`인가.** 키보드 익스텐션에는 Firebase가 아예 없고
-/// (심볼 0건, `docs/release/firebase-on-hardening.md`) 이 값을 읽을 이유가 없다. `KeyboardSettings`에
+/// **왜 App Group이 아니라 앱 전용 `UserDefaults`인가.** 키보드는 이 두 값을 읽을 이유가 없다 — 키보드 쪽에 전달되는 것은
+/// 분석 값을 옮겨 적은 `keyboardExitTraceEnabled`(백로그 14 (가))뿐이고, 1.3.2 키보드 Crashlytics(N4′)는 이 값이 아니라
+/// 자기 스위치 `KeyboardSettings.keyboardCrashReportEnabled`(기본 켜짐 — 2026-10-26, 이전에 여기서 끈 사용자도 켬)만 본다(PDR `keyboard-crashlytics.md` 5-3 — 독립). `KeyboardSettings`에
 /// 넣으면 (1) 익스텐션이 알 필요 없는 필드를 디코드하게 되고 (2) 토글을 만질 때마다 Darwin 알림이
 /// 떠 있는 키보드를 무의미하게 재로드시킨다. `RootView`의 `hasSeenOnboarding`과 같은 판단이다 —
 /// **키보드가 읽을 일이 없는 값은 App Group에 두지 않는다.**

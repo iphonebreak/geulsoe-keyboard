@@ -1,4 +1,5 @@
 import SwiftUI
+import TadakDomain
 
 /// 정보 탭 — 개인정보 처리방침, 오픈소스 및 출처, 지원 및 문의(웹), 설치 안내 다시 보기.
 ///
@@ -6,15 +7,20 @@ import SwiftUI
 /// 필요 없음」, 수집은 유지). 빠뜨린 것이 아니니 복구하지 않는다. 심사 가이드라인 5.1.1(ii)(동의 철회 수단) 반려 위험을
 /// 알고 내린 결정이며, 반려되면 그 커밋을 `git revert`한다. 이전에 끈 선택은 `AnalyticsConsent.applyStoredChoices()`가
 /// 계속 적용한다. 근거 `docs/release/v131-analytics-optout-removal.md`
+///
+/// **키보드 Crashlytics 스위치(1.3.2 백로그 14 (나))는 이 탭이 아니라 개인정보 처리방침 화면의 그 절에 있다**(사용자 결정 2026-10-26 —
+/// 기본 켜짐, 위치 이동). 그 메뉴의 부활이 아니며 앱의 옛 Crashlytics 선택과 독립이다(보안 규칙 N4′ ②). 그래서 이 탭은 `settings`를
+/// 처리방침 화면으로 넘겨 주기만 한다.
 struct InfoTab: View {
 
+    @Binding var settings: KeyboardSettings
     let onReplayOnboarding: () -> Void
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    NavigationLink("개인정보 처리방침") { PrivacyPolicyView() }
+                    NavigationLink("개인정보 처리방침") { PrivacyPolicyView(settings: $settings) }
                     NavigationLink("오픈소스 및 출처") { LicensesView() }
                 }
                 Section {

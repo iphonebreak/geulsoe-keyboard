@@ -18,6 +18,9 @@ final class KeyboardViewController: UIInputViewController {
     private var hostHeightConstraint: NSLayoutConstraint?
     /// F1 — 이번 등장에서 첫 렌더 전에 레이아웃을 강제해야 하는가.
     private var needsFreshHostPresize = false
+    /// 백로그 14 (가) 종료 흔적 — 판정·기록은 KeyboardCore `ExitTraceRecorder`, 여기는 생명주기 지점에서 부르기만 한다(N21)
+    private let exitTrace = ExitTraceHooks.makeRecorder()
+    private let exitTraceMemoryWatcher = ExitTraceMemoryPressureWatcher()
 
     private let settingsRepository: SettingsRepository = AppGroupSettingsRepository()
     private let themeRepository: ThemeRepository = BundledThemeRepository()
@@ -179,6 +182,9 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // 종료 흔적 — 이전 표시 판정 → 새 표시. 설정 로드·입력 뷰 설치보다 **먼저**다(여기서 죽는 경우도 센다, C5)
+        exitTrace.didLoad(idiom: ExitTraceHooks.currentIdiom())
+        exitTraceMemoryWatcher.start(recording: exitTrace)
         // 클릭음 요건: inputView가 UIInputViewAudioFeedback을 채택해야 playInputClick이 난다
         // (Apple 문서). 서브뷰를 얹기 전에 루트 뷰를 교체한다.
         //
@@ -197,6 +203,7 @@ final class KeyboardViewController: UIInputViewController {
         // (`allowsSelfSizing` + `intrinsicContentSize`로 답해 보았으나 852 구간이 그대로여서 되돌렸다 —
         //  실측 없이 동작만 바꾸는 코드는 남기지 않는다. 2026-09-10)
         settings = settingsRepository.load()
+        exitTrace.applySettings(exitTraceEnabled: settings.keyboardExitTraceEnabled)
         let clickable = ClickableInputView(frame: .zero, inputViewStyle: .default)
         clickable.preferredHeight = totalKeyboardHeight   // 창이 없어도 세로 기준값은 지금 알 수 있다
         inputView = clickable
@@ -343,6 +350,10 @@ final class KeyboardViewController: UIInputViewController {
         // 재사용 호스트는 viewWillDisappear에서 떼어 둔 채로 갱신해 중간 상태를 렌더하지 않는다.
         clearSystemContainerBackground()
         reloadSettingsIfChanged()
+        exitTrace.willAppear(fullAccess: hasFullAccess, mode: exitTraceMode, panel: exitTracePanel,
+                             width: view.bounds.width, screenWidth: ExitTraceHooks.screenWidth(of: view))
+        // 키보드 크래시 보고(스위치·기본 켜짐, 백로그 14 (나)) — 판정은 KeyboardCore, SDK 호출은 `KeyboardDiagnostics` 한 파일(N4′)
+        KeyboardDiagnostics.update(optedIn: settings.keyboardCrashReportEnabled, hasFullAccess: hasFullAccess)
         // 이모지 최근 사용 — 저장소에서 다시 읽고, 설정 앱이 껐으면 여기서 비운다(설정이 그대로여도 매번)
         refreshEmojiHistory()
         // 사용자 문구·외부 팩이 설정 앱에서 바뀌었으면 세대가 올라 있다 — 재구성 키가 다를 때만 다시 만든다(AC-9)
@@ -498,6 +509,7 @@ final class KeyboardViewController: UIInputViewController {
             viewState.layout = layout
             if unitsChanged { applyKeyboardHeight() }
         }
+        exitTrace.observe(mode: exitTraceMode, panel: exitTracePanel)
         let shifted = inputController.shift != .off
         if viewState.isShifted != shifted { viewState.isShifted = shifted }
         let capsLocked = inputController.shift == .capsLock
@@ -521,6 +533,8 @@ final class KeyboardViewController: UIInputViewController {
 
     private func applySettingsLive() {
         reloadSettingsIfChanged()
+        exitTrace.settingsReloaded()
+        KeyboardDiagnostics.update(optedIn: settings.keyboardCrashReportEnabled, hasFullAccess: hasFullAccess)  // 끄면 그 자리에서 수집 정지
         rebuildSnippetMatcher()            // 내 채움글·외부 팩 저장도 같은 알림 — 키(세대·채움글 설정)가 같으면 0회(AC-9)
         rebuildSuggestionEngineIfNeeded()  // 학습 초기화 토큰
         updateHeight()
@@ -579,6 +593,30 @@ final class KeyboardViewController: UIInputViewController {
         bibleSearchScheduler?.cancel()
         // U7 후보 패널 — 내려갈 때 닫고 목록(채움글 본문)을 놓는다. 등장(`viewWillAppear`)에서도 한 번 더 닫는다
         closeSnippetCandidatesPanel()
+        // ⌫ 길게 누르기 — 내려간 키보드에 큐로 남은 반복 박자가 지우지 않게 누름을 끝낸다(PDR backspace-word-acceleration 3-4)
+        inputController?.endAllBackspaceHolds()
+        exitTrace.willDisappear()           // 끝에서 지운다 — 퇴장 처리 중 크래시도 센다
+    }
+
+    override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        exitTrace.memoryWarning()
+    }
+
+    deinit {
+        // 퇴장 콜백 없이 해제되면(호스트 크래시 등) 표시에 orphaned를 붙인다(C3). 둘 다 Sendable·락 보호
+        exitTrace.deinitialized()
+        exitTraceMemoryWatcher.cancel()
+    }
+
+    /// 종료 흔적용 자판 종류·패널 — 글자·입력란 종류는 담지 않는다
+    private var exitTraceMode: ExitTraceMode {
+        inputController.map { ExitTraceMode(inputMode: $0.mode, hangulLayout: settings.activeHangulLayout) } ?? .unknown
+    }
+
+    private var exitTracePanel: ExitTracePanel {
+        ExitTracePanel(emoji: viewState?.showsEmojiPanel == true, clipboard: viewState?.showsClipboardPanel == true,
+                       other: viewState?.showsBibleSearchPanel == true || viewState?.showsSnippetCandidatesPanel == true)
     }
 
     override func textDidChange(_ textInput: UITextInput?) {
@@ -613,6 +651,38 @@ final class KeyboardViewController: UIInputViewController {
         refreshLayout()
         suppressesWordSuggestionsAfterCursorMove = false  // 다시 타이핑 — 추천 재개
         releaseEmojiChipSuppressionIfDocumentChanged(since: revision)  // ⇧·한영·123으로는 안 풀린다(D17)
+        updateSuggestionBar(userEdited: true)
+    }
+
+    // MARK: - ⌫ 길게 누르기 단어 단계 (PDR `docs/design-reviews/backspace-word-acceleration.md`)
+
+    /// ⌫ 터치다운(동기) — 누름 세대와 문서 식별자를 둔다. 돌려주는 값 = 이 누름에서 단어 단계를 써도 되나:
+    /// secure면 문맥을 읽지 않고(글자 반복만), VoiceOver·스위치 제어 중에는 끈다(D2), 출시 상수가 꺼져 있으면 끈다(C2W-04).
+    /// 식별자·접근성 값은 여기서만 읽어 값으로 넘긴다
+    private func beginBackspaceHold(_ hold: UInt64) -> Bool {
+        guard let inputController else { return false }
+        inputController.beginBackspaceHold(hold, documentIdentifier: textDocumentProxy.documentIdentifier)
+        return BackspaceWordPhasePolicy.allows(
+            isSecureTextEntry: textDocumentProxy.isSecureTextEntry == true,
+            isVoiceOverRunning: UIAccessibility.isVoiceOverRunning,
+            isSwitchControlRunning: UIAccessibility.isSwitchControlRunning)
+    }
+
+    /// ⌫ 반복 박자 — 끝난 누름의 박자는 버린다(손 뗀 뒤 0건). 글자 박자는 현행 `handle(.backspace)` 그대로,
+    /// 닻·단어 박자는 컨트롤러가 판정하고 **문서가 실제로 바뀐 박자에만** 피드백·화면 갱신을 한다
+    private func handleBackspaceTick(_ hold: UInt64, _ phase: BackspaceRepeatPhase) {
+        guard let inputController, inputController.acceptsBackspaceTick(hold) else { return }
+        guard phase != .character else {
+            handle(.backspace)
+            return
+        }
+        let revision = inputController.documentRevision
+        _ = inputController.handleBackspaceRepeat(hold, phase: phase, documentIdentifier: textDocumentProxy.documentIdentifier)
+        guard inputController.documentRevision != revision else { return }
+        playKeyFeedback()
+        refreshLayout()
+        suppressesWordSuggestionsAfterCursorMove = false
+        releaseEmojiChipSuppressionIfDocumentChanged(since: revision)
         updateSuggestionBar(userEdited: true)
     }
 
@@ -732,6 +802,7 @@ final class KeyboardViewController: UIInputViewController {
     ///   채움글 칩의 ✕도 같은 규칙 — 사용자 편집으로 꼬리가 바뀔 때만 해제(재표시·sync로는 유지).
     private func updateSuggestionBar(userEdited: Bool = false) {
         guard let viewState, let inputController else { return }
+        exitTrace.observe(mode: exitTraceMode, panel: exitTracePanel)   // 패널 열기·닫기 뒤에 불린다 — 바뀐 경우만 기록
         // 비밀번호 필드에서는 매칭·표시·학습 모두 하지 않는다 (보안 규칙)
         let secure = textDocumentProxy.isSecureTextEntry == true
 
@@ -1869,6 +1940,12 @@ final class KeyboardViewController: UIInputViewController {
             onSnippetCandidatesClose: { [weak self] in
                 DispatchQueue.main.async { self?.handleSnippetCandidatesClose() }
             },
+            // ⌫ 길게 누르기 — 시작·끝은 동기(큐에 남은 박자를 막는다), 박자는 다른 키 이벤트처럼 한 박자 미룬다
+            onBackspaceHoldBegan: { [weak self] hold in self?.beginBackspaceHold(hold) ?? false },
+            onBackspaceHoldEnded: { [weak self] hold in self?.inputController?.endBackspaceHold(hold) },
+            onBackspaceTick: { [weak self] hold, phase in
+                DispatchQueue.main.async { self?.handleBackspaceTick(hold, phase) }
+            },
             fillsContainer: Self.fillInputViewWithHost,   // 14차 H1 — 상자 전체 채움 + 하단 정렬
             transparentAbove: Self.transparentAboveContent  // 16차 — 자판 사각형 뒤에만 칠한다
         )
@@ -2019,6 +2096,7 @@ final class KeyboardViewController: UIInputViewController {
 
     private func reloadSettingsIfChanged() {
         let latest = settingsRepository.load()
+        exitTrace.applySettings(exitTraceEnabled: latest.keyboardExitTraceEnabled)
         guard latest != settings, let viewState else {
             settings = latest
             return
@@ -2313,6 +2391,7 @@ final class KeyboardViewController: UIInputViewController {
             hostHeightConstraint.constant = total
         }
         (view as? ClickableInputView)?.preferredHeight = total
+        exitTrace.heightApplied(total, width: view.bounds.width, screenWidth: ExitTraceHooks.screenWidth(of: view))
     }
 }
 

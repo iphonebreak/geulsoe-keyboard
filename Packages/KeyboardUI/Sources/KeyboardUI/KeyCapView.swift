@@ -20,6 +20,13 @@ struct KeyCapView: View {
     /// 진입 전 손가락 이동은 진입을 막지 않는다 — "누른 채 바로 드래그"가 사용자의 기본 동작이다
     /// (실기 피드백 2026-09-04: 12pt 흔들림 취소 규칙이 진입을 번번이 막았다).
     var onCursorDrag: ((Int) -> Void)? = nil
+    /// ⌫ 길게 누르기 단어 단계(PDR `docs/design-reviews/backspace-word-acceleration.md`) — ⌫ 키에만 주입. 터치다운에 **동기로** 불러
+    /// 누름 세대 H를 알리고, 이 누름에서 단어 단계를 써도 되는지(secure·VoiceOver·스위치 제어가 아니면 참)를 돌려받는다
+    var onBackspaceHoldBegan: ((UInt64) -> Bool)? = nil
+    /// ⌫ 누름 끝 — 손 뗌·터치 잃음·사라짐에서 **동기로** 부른다(이미 큐에 들어간 반복 박자를 막는다)
+    var onBackspaceHoldEnded: ((UInt64) -> Void)? = nil
+    /// ⌫ 반복 박자(글자·닻·단어) — 없으면 글자 박자는 현행 `onEvent(.backspace)`이고 단어 단계를 쓰지 않는다
+    var onBackspaceTick: ((UInt64, BackspaceRepeatPhase) -> Void)? = nil
 
     /// 누름 상태 — 눌림·⌫ 반복·대체 입력 무장·트랙패드(`KeyCapPressState`). 시스템 터치 취소 때도 정리된다(아래 `isTouching`)
     @State private var press = KeyCapPressState()
@@ -46,6 +53,8 @@ struct KeyCapView: View {
     private static let cursorStep: CGFloat = 8
     /// 대체 입력이 무장되기까지 누르고 있어야 하는 시간 — 채움글 칩 길게 누르기와 같은 공유 상수(U7, AC-43)
     static let alternateDelay: Duration = KeyboardMetrics.longPressDelay
+    /// 마지막으로 준 ⌫ 누름 세대 — 키캡마다가 아니라 키보드 전체에서 증가한다(자판이 바뀌어도 겹치지 않게)
+    @MainActor private static var lastBackspaceHold: UInt64 = 0
 
     private var label: String {
         isShifted ? key.shiftedLabel : key.label
@@ -107,11 +116,13 @@ struct KeyCapView: View {
             .onChange(of: isTouching) { _, touching in
                 guard !touching else { return }
                 cancelPressTasks()
+                endBackspaceHold()   // 시스템 취소엔 `onEnded`가 없다 — 큐에 들어간 박자보다 먼저, 동기로(반론 CW-02)
                 scheduleTouchLostCleanup()
             }
             // 자판 전환·키보드 내림으로 키가 사라지면 Task를 끊는다 — 예전엔 ⌫ 반복 Task가 프로세스가 끝날 때까지 남을 수 있었다
             .onDisappear {
                 cancelPressTasks()
+                endBackspaceHold()
                 press.reset()
             }
             .accessibilityLabel(accessibilityName)
@@ -234,9 +245,12 @@ struct KeyCapView: View {
                     touchGeneration &+= 1
                     onPress?()
                     if key.event == .backspace {
-                        onEvent(.backspace)
-                        press.startRepeating()
-                        startBackspaceRepeat()
+                        onEvent(.backspace)   // 누를 때 1회는 누름 세대를 보지 않는다 — 짧은 탭이 먹히지 않게
+                        Self.lastBackspaceHold &+= 1
+                        let hold = Self.lastBackspaceHold
+                        press.startRepeating(hold: hold)
+                        let wordPhaseAllowed = onBackspaceHoldBegan?(hold) ?? false
+                        startBackspaceRepeat(hold: hold, wordPhaseAllowed: wordPhaseAllowed)
                     } else if key.event == .space, onCursorDrag != nil {
                         startCursorModeTimer()
                     } else if key.alternate != nil {
@@ -256,6 +270,7 @@ struct KeyCapView: View {
             }
             .onEnded { _ in
                 cancelPressTasks()
+                endBackspaceHold()
                 // 트랙패드였으면 스페이스를 넣지 않고, ⌫는 누를 때 이미 지웠다. 길게 눌러 무장됐으면 대체 입력(","·".com")
                 switch press.release(isBackspace: key.event == .backspace) {
                 case .primary: onEvent(key.event)
@@ -296,16 +311,27 @@ struct KeyCapView: View {
         }
     }
 
-    private func startBackspaceRepeat() {
+    /// ⌫ 반복 — 시간표(`BackspaceRepeatSchedule`)대로 글자 박자(80ms) → 2.30초 닻 → 2.6초부터 0.35초 단어 박자.
+    /// 글자 박자는 현행처럼 여기서 피드백을 내고, 닻·단어 박자는 지웠는지를 아는 VC가 낸다
+    private func startBackspaceRepeat(hold: UInt64, wordPhaseAllowed: Bool) {
         repeatTask = Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            // 루프 조건에 누름 상태도 본다 — Task 취소가 늦어도 손가락이 떠났으면(취소 포함) 더 지우지 않는다
-            while !Task.isCancelled, press.repeatTickAllowed {
-                onPress?()
-                onEvent(.backspace)
-                try? await Task.sleep(for: .milliseconds(80))
+            await BackspaceRepeatDriver.run(clock: ContinuousClock(), wordPhaseAllowed: wordPhaseAllowed,
+                                            tickAllowed: { press.repeatTickAllowed }) { phase in
+                switch phase {
+                case .character:
+                    onPress?()
+                    if let onBackspaceTick { onBackspaceTick(hold, .character) } else { onEvent(.backspace) }
+                case .anchor, .word:
+                    onBackspaceTick?(hold, phase)
+                }
             }
         }
+    }
+
+    /// 이 터치의 ⌫ 누름을 끝낸다 — 동기. 여러 번 불러도 무해(VC는 살아 있는 H와 같을 때만 끝낸다)
+    private func endBackspaceHold() {
+        guard let hold = press.backspaceHold else { return }
+        onBackspaceHoldEnded?(hold)
     }
 
     private func startCursorModeTimer() {

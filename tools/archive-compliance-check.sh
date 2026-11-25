@@ -30,15 +30,74 @@
 #       **아래 기대값과 정확히** 비교한다(기대값은 9838c2e의 파일에서 뽑아 고정했다 — 매니페스트를 바꾸면 여기도 바꾼다).
 #     - 양성 대조(앱 dSYM의 Firebase·키보드 dSYM의 자기 심볼)는 **필수**다 — 0이면 「못 쟀다」.
 #
+# ★ 2026-10-26 개정 (1.3.2 백로그 14 (나), 보안 규칙 N4′ — 사용자 승인 2026-10-23) — **방어선 후퇴, 이유를 남긴다.**
+#   예전 4절은 「키보드에 Firebase 심볼 0」을 요구했다. 키보드 Crashlytics(설정 스위치, 1.3.2 — 기본 켜짐 2026-10-26)가 들어와 그 0이 더는 사실이 아니다.
+#   그래서 「0」을 「**허용 목록만**」으로 바꾼다 — 넓어진 만큼 좁게 묶는다:
+#     - 양성: Crashlytics 심볼이 **있어야** 한다(없으면 (나) 묶음이 빠진 것 — 이 4절·5절 기대값을 함께 되돌린다)
+#     - 금지: Analytics 구현·측정 엔진(`GoogleAppMeasurement`·`APMMeasurement`)·광고 전환(`AdsOnDeviceConversion`)·IDFA(`IdentitySupport`) **0**
+#       (`FIRAnalyticsInterop` 프로토콜·`FIRAnalyticsConfiguration`은 Core/Crashlytics의 연동 틀이라 구현이 아니다 — 허용)
+#     - 허용 목록: 서드파티 Swift 모듈 5종 · ObjC 클래스 접두 그룹(Core·Installations·Crashlytics·Sessions·RemoteConfigInterop·
+#       GoogleDataTransport·GoogleUtilities·Promises) **밖의 것은 전부 실패** — 다른 Firebase 제품이 끌려오면 여기서 멈춘다
+#   매니페스트(5절) 키보드 기대값도 0종 → Crashlytics 몫 3종으로 바꿨다(`Keyboard/PrivacyInfo.xcprivacy` 머리 주석).
+#   SDK 버전(exactVersion 12.19.1)을 올리면 이 허용 목록을 실측으로 다시 맞춘다(디버그 빌드도 `--keyboard-nm` 모드로 잴 수 있다).
+#   근거 `docs/design-reviews/keyboard-crashlytics.md` 5-5 T5, 구현 보고 `docs/release/impl-v132b-keyboard-crashlytics.md`.
+#
 # 확인하는 것:
 #   0) 필수 대상 확정 — 번들 ID · CFBundleExecutable · dSYM(UUID·아키텍처) · 번들 안 모든 Mach-O · 양성 대조
 #   1) 버전 — 존재·형식, 앱과 익스텐션이 같은 값인가 (다르면 업로드 거절)
 #   2) 수출 규정 — 열거한 암호 구현 이름 패턴이 0인가 (ITSAppUsesNonExemptEncryption=false 의 근거 중 하나)
 #   3) 추적 표면 — 광고 전환 SDK·IDFA API 0, 추적 프레임워크 링크 0
-#   4) 익스텐션 순수성 — 키보드에 Firebase 0, 시스템 밖 라이브러리 링크 0 (security.md 1순위 규칙)
+#   4) 익스텐션 순수성 — 키보드의 Firebase는 Crashlytics 계열 허용 목록만(N4′), Analytics·광고·IDFA 0, 시스템 밖 라이브러리 링크 0
 #   5) 프라이버시 매니페스트 — 앱·키보드 모두 존재·파싱·필수 키·required-reason·수집 선언이 기대값과 일치
+#
+# 보조 모드: bash tools/archive-compliance-check.sh --keyboard-nm <nm -a 출력 파일>
+#   4절의 키보드 Firebase 허용 목록 판정만 돌린다(디버그 빌드 `TadakKeyboard.debug.dylib`의 `nm -a`로도 잴 수 있다 — 제출 판정은 아니다).
 set -uo pipefail
 shopt -s nullglob
+
+# ── 4절 키보드 Firebase 판정 — 아카이브(dSYM)와 보조 모드가 같은 함수를 쓴다 ──
+# 키보드에 허용된 서드파티 Swift 모듈(FirebaseCrashlytics 제품의 전이 의존 — 12.19.1 실측 2026-10-26)
+KB_ALLOWED_SWIFT_MODULES="FirebaseCoreInternal FirebaseCrashlyticsSwift FirebaseRemoteConfigInterop FirebaseSessions Promises"
+# 정의된 ObjC 클래스 중 Swift 이름(`_Tt…`)이 아닌 것은 전부 이 접두 그룹 안이어야 한다
+KB_ALLOWED_OBJC='^(FIRCLS|FIRCrashlytics|FIRExceptionModel|FIRStackFrame|FIRApp$|FIROptions|FIRBundleUtil|FIRComponent|FIRConfiguration|FIRAnalyticsConfiguration|FIRFirebaseUserAgent|FIRHeartbeat|FIRLoggerWrapper|FIRTimestamp|FIRInstallations|FIRSession|FIRRemoteConfigConstants|FIRRollout|GDTCOR|GDTCCT|GUL|FBLPromise|(Firebase|GoogleDataTransport|GoogleUtilities|Promises|nanopb|TadakData)_[A-Za-z_]+_SWIFTPM_MODULE_BUNDLER_FINDER$)'
+# 구현이 들어오면 안 되는 것 — 연동 틀(`FIRAnalyticsInterop`·`FIRAnalyticsConfiguration`)은 이 패턴에 걸리지 않는다
+KB_DENY='APMMeasurement|GoogleAppMeasurement|_OBJC_CLASS_\$_FIRAnalytics$|_\$s17FirebaseAnalytics|GoogleAdsOnDeviceConversion|_OBJC_CLASS_\$_(ODC|GAD)|IdentitySupport|ASIdentifierManager|advertisingIdentifier|ATTrackingManager'
+
+# $1 = 키보드 nm -a 출력, $2 = 함수 bad/ok 를 쓰는 쪽. 실패가 하나라도 있으면 1
+keyboard_firebase_check() {
+  local nmf="$1" rc=0 n deny mods extra_mods objc extra_objc
+  n=$(grep -ciE 'FIRCLS|FIRCrashlytics' "$nmf" || true)
+  if [ "$n" -gt 0 ]; then ok "키보드 Crashlytics 심볼 $n 개 — N4′ 묶음이 들어 있다(양성)"
+  else bad "키보드에 Crashlytics 심볼 0 — (나) 묶음이 빠졌다면 4절·5절 기대값을 1.3.1 판(Firebase 0·수집 0종)으로 되돌려라"; rc=1; fi
+  deny=$(grep -E "$KB_DENY" "$nmf" | head -5 || true)
+  if [ -z "$deny" ]; then ok "키보드 Analytics·측정 엔진·광고 전환·IDFA 0건"
+  else bad "키보드에 금지 계열 심볼 — $(printf '%s' "$deny" | awk '{print $NF}' | tr '\n' ' ')"; rc=1; fi
+  # Swift 모듈 — 맹글링 `_$s<길이><이름>`에서 Firebase/Google 계열 이름만 모아 허용 목록과 대조
+  mods=$(perl -ne 'while (/ _\$s(\d+)([A-Za-z_][A-Za-z0-9_]*)/g) { my ($n,$r)=($1,$2); print substr($r,0,$n),"\n" if length($r)>=$n }' "$nmf" \
+         | grep -E '^(Firebase|Google|GAD|FBL|GTM|Promises|nanopb)' | sort -u || true)
+  extra_mods=""
+  for m in $mods; do case " $KB_ALLOWED_SWIFT_MODULES " in *" $m "*) ;; *) extra_mods="$extra_mods $m";; esac; done
+  if [ -z "$extra_mods" ]; then ok "키보드 서드파티 Swift 모듈 — 허용 목록 안($(printf '%s' "$mods" | tr '\n' ' '))"
+  else bad "키보드에 허용 목록 밖 Swift 모듈:$extra_mods"; rc=1; fi
+  objc=$(grep -E ' [SDsdT] _OBJC_CLASS_\$_' "$nmf" | sed -E 's/.*_OBJC_CLASS_\$_//' | grep -v '^_Tt' | sort -u || true)
+  extra_objc=$(printf '%s\n' "$objc" | grep -vE "$KB_ALLOWED_OBJC" | grep . || true)
+  if [ -z "$extra_objc" ]; then ok "키보드 ObjC 클래스 $(printf '%s\n' "$objc" | grep -c . || true) 개 — 모두 Crashlytics 계열 허용 접두 안"
+  else bad "키보드에 허용 목록 밖 ObjC 클래스: $(printf '%s' "$extra_objc" | head -10 | tr '\n' ' ')"; rc=1; fi
+  return $rc
+}
+
+FAIL=0
+say()  { printf '%s\n' "$*"; }
+bad()  { printf '  ✗ %s\n' "$*" >&2; FAIL=1; }
+ok()   { printf '  ✓ %s\n' "$*"; }
+
+if [ "${1:-}" = "--keyboard-nm" ]; then
+  [ -f "${2:-}" ] || { echo "사용법: bash tools/archive-compliance-check.sh --keyboard-nm <nm 출력 파일>" >&2; exit 2; }
+  say "== 4) 키보드 Firebase 허용 목록 (보조 모드 — 제출 판정 아님) =="
+  keyboard_firebase_check "$2"
+  [ "$FAIL" -eq 0 ] && { echo "결과: 통과"; exit 0; }
+  echo "결과: 실패" >&2; exit 1
+fi
 
 ARCHIVE="${1:-}"
 if [ -z "$ARCHIVE" ] || [ ! -d "$ARCHIVE" ]; then
@@ -54,15 +113,12 @@ EXT_EXE_NAME="TadakKeyboard"
 EXPECTED_APP_API='{"NSPrivacyAccessedAPICategoryUserDefaults": ["1C8F.1", "CA92.1"]}'
 EXPECTED_EXT_API='{"NSPrivacyAccessedAPICategoryUserDefaults": ["1C8F.1", "CA92.1"]}'
 EXPECTED_APP_COLLECTED='["NSPrivacyCollectedDataTypeCoarseLocation", "NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypeDeviceID", "NSPrivacyCollectedDataTypeOtherDiagnosticData", "NSPrivacyCollectedDataTypeOtherUsageData", "NSPrivacyCollectedDataTypeProductInteraction"]'
-EXPECTED_EXT_COLLECTED='[]'
+# 키보드 — Crashlytics 몫 3종(N4′, 2026-10-26). 예전 기대값은 '[]'였다
+EXPECTED_EXT_COLLECTED='["NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypeDeviceID", "NSPrivacyCollectedDataTypeOtherDiagnosticData"]'
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/archive-check.XXXXXX") || { echo "임시 디렉터리를 만들지 못했다" >&2; exit 2; }
 trap 'rm -rf "$TMP"' EXIT
 
-FAIL=0
-say()  { printf '%s\n' "$*"; }
-bad()  { printf '  ✗ %s\n' "$*" >&2; FAIL=1; }
-ok()   { printf '  ✓ %s\n' "$*"; }
 # 필수 대상을 확정하지 못하면 뒤 검사는 의미가 없다 — 그 자리에서 실패로 끝낸다
 stop() { bad "$*"; echo; echo "결과: 실패 — 필수 대상을 확정하지 못해 측정할 수 없다" >&2; exit 1; }
 
@@ -228,10 +284,8 @@ for b in "${MACHOS[@]}"; do
 done
 [ -z "$LINKED" ] && ok "otool -L — AdSupport·AppTrackingTransparency 링크 0건(Mach-O ${#MACHOS[@]} 개)" || bad "otool -L — 추적 프레임워크 링크:$LINKED"
 
-say "== 4) 익스텐션 순수성 =="
-FB=$(count "$APPEX_NM" 'firebase|FIRApp|APMMeasurement')
-[ "$FB" -eq 0 ] && ok "키보드에 Firebase 심볼 0건(dSYM, 양성 대조 $PC_EXT 개)" \
-                || bad "키보드에 Firebase 심볼 $FB 건 — security.md 1순위 규칙 위반"
+say "== 4) 익스텐션 순수성 — Firebase는 Crashlytics 계열 허용 목록만 (N4′) =="
+keyboard_firebase_check "$APPEX_NM"
 if ! elo=$(otool -L "$APPEX_BIN" 2>"$TMP/otool-ext.err"); then
   bad "otool -L 실패: 키보드 실행 파일 — $(head -1 "$TMP/otool-ext.err")"
 else

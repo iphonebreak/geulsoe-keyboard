@@ -117,6 +117,10 @@ public final class InputController {
     /// 수명). 그 키가 빈 꼬리를 지우는 ⌫이고 ⌫ 직전 재읽기·직후 읽기가 맞으면 꼬리를 **문서 문맥으로** 다시 세운다 — 문서 근거 sync와 같은
     /// 취급이라 C7(스냅샷은 자동 대문자 전용) 대상이 아니다. 메모리에만 있고 내보내지 않는다(보안 규칙)
     private var newlineEvidence: String?
+    /// ⌫ 길게 누르기 — 살아 있는 누름 세대(손 뗀 뒤 큐에 남은 박자를 막는다, PDR `backspace-word-acceleration.md` 3-4)
+    private var backspaceHolds = BackspaceHoldGate()
+    /// ⌫ 길게 누르기 — 살아 있는 누름의 단어 단계 상태(사슬·불일치 수·꺼짐). 문맥은 메모리에서 비교만 하고 누름이 끝나면 버린다
+    private var backspaceSession: BackspaceHoldSession?
 
     public init(
         output: TextOutput,
@@ -501,6 +505,148 @@ public final class InputController {
         } else {
             committedTail.removeLast()
         }
+    }
+
+    // MARK: - ⌫ 길게 누르기 단어 단계 (PDR `docs/design-reviews/backspace-word-acceleration.md`)
+
+    /// 폴백·조합 박자에서 현행 ⌫를 되풀이하는 횟수 — ⌊350ms / 80ms⌋, 글자 단계와 같은 속도(D4·CW-03)
+    static let backspacesPerRepeatFallback = 4
+
+    /// 살아 있는 누름의 세션(문맥 사본)이 있나 — 누름이 끝나면 버렸는지 시험이 본다(검증 F2). 내용은 내지 않는다
+    var hasBackspaceSession: Bool { backspaceSession != nil }
+
+    /// 조합·천지인 pending·키 로그가 남았나 — 이 동안 단어 박자는 현행 ⌫ 의미를 먼저 쓴다(3-2)
+    var hasBackspaceReplayState: Bool {
+        isComposing || !keystrokeLog.isEmpty
+    }
+
+    /// ⌫ 터치다운 — 누름 세대와 그때의 문서 식별자를 둔다. 식별자는 VC가 읽어 넘긴다(내용은 담지 않는다)
+    public func beginBackspaceHold(_ hold: UInt64, documentIdentifier: UUID?) {
+        backspaceHolds.begin(hold)
+        backspaceSession = BackspaceHoldSession(documentIdentifier: documentIdentifier)
+    }
+
+    /// 누름 끝 — **지금 살아 있는 누름과 같을 때만** 끝낸다(옛 터치의 늦은 끝냄이 새 누름을 끝내지 않는다)
+    public func endBackspaceHold(_ hold: UInt64) {
+        backspaceHolds.end(hold)
+        if backspaceHolds.live == nil { backspaceSession = nil }
+    }
+
+    /// 키보드 퇴장 — 살아 있는 누름을 전부 끝낸다
+    public func endAllBackspaceHolds() {
+        backspaceHolds.endAll()
+        backspaceSession = nil
+    }
+
+    /// 반복 박자를 받아도 되나 — 글자 박자도 이것을 본다(손 뗀 뒤 큐에 남은 박자 0, 폐기 조건 1)
+    public func acceptsBackspaceTick(_ hold: UInt64) -> Bool {
+        backspaceHolds.accepts(hold)
+    }
+
+    /// 반복 박자 하나(PDR 3-1). 터치다운 ⌫는 여기로 오지 않는다 — 짧은 탭이 먹히지 않게 세대를 보지 않는다
+    public func handleBackspaceRepeat(_ hold: UInt64, phase: BackspaceRepeatPhase, documentIdentifier: UUID?) -> BackspaceRepeatOutcome {
+        guard backspaceHolds.accepts(hold), var session = backspaceSession else { return .ignored }   // G0
+        defer { if backspaceHolds.accepts(hold) { backspaceSession = session } }
+        switch phase {
+        case .character:
+            handle(.backspace)
+            return .backspaces(count: 1)
+        case .anchor:
+            return anchorBackspaceRepeat(&session, documentIdentifier: documentIdentifier)
+        case .word:
+            return wordBackspaceRepeat(&session, documentIdentifier: documentIdentifier)
+        }
+    }
+
+    /// 2.30초 닻 — **읽기 전용**. 지우지 않고 사슬만 둔다(A1~A3)
+    private func anchorBackspaceRepeat(_ session: inout BackspaceHoldSession, documentIdentifier: UUID?) -> BackspaceRepeatOutcome {
+        if documentIdentifier != session.documentIdentifier { session.wordPhaseOff = true }
+        guard !session.wordPhaseOff, !output.hasSelectedText, !hasBackspaceReplayState,
+              let context = output.documentContextBeforeInput, !context.isEmpty else {
+            session.freshness.clearChain()
+            return .ignored
+        }
+        session.freshness.anchor(context)
+        return .anchored
+    }
+
+    /// 단어 박자(G1~G10)
+    private func wordBackspaceRepeat(_ session: inout BackspaceHoldSession, documentIdentifier: UUID?) -> BackspaceRepeatOutcome {
+        if documentIdentifier != session.documentIdentifier { session.wordPhaseOff = true }   // G1 — 단어 단계만 끈다(CW-05)
+        if session.wordPhaseOff {                                                            // G3
+            return .backspaces(count: repeatBackspace(Self.backspacesPerRepeatFallback))
+        }
+        if output.hasSelectedText {                                                          // G4
+            session.freshness.clearChain()
+            handle(.backspace)
+            return .backspaces(count: 1)
+        }
+        if hasBackspaceReplayState {                                                         // G5 — 오토마타 계약 불변, 최대 4회
+            session.freshness.clearChain()
+            var count = 0
+            while count < Self.backspacesPerRepeatFallback, hasBackspaceReplayState {
+                handle(.backspace)
+                count += 1
+            }
+            return .backspaces(count: count)
+        }
+        guard let context = output.documentContextBeforeInput, !context.isEmpty else {     // G6
+            session.freshness.clearChain()
+            return .backspaces(count: repeatBackspace(Self.backspacesPerRepeatFallback))
+        }
+        guard session.freshness.hasChain else {                                              // G7 — 지우는 사슬로 다시 잡기
+            return .backspaces(count: rechainBackspace(&session, context: context))
+        }
+        guard session.freshness.isFresh(context) else {                                      // G8 — 불일치는 누름 단위 누적
+            // 단어 단계 바로 뒤 박자가 어긋나면 그 단계가 틀렸을 수 있다 — 한 번에 끈다(검증 반영 A)
+            let afterWordStep = session.freshness.chainFromWordStep
+            if session.freshness.noteMismatch() || afterWordStep {
+                session.wordPhaseOff = true
+                session.freshness.clearChain()
+                return .backspaces(count: repeatBackspace(Self.backspacesPerRepeatFallback))
+            }
+            // 다시 잡기는 지우지 않는 닻(k = 0) — 지우는 사슬이 글자 진행과 우연히 맞아 낡은 문맥을 통과시키지 않게(검증 반영 D)
+            session.freshness.anchor(context)
+            return .anchored
+        }
+        switch BackspaceWordPlan.plan(context: context) {
+        case .fallback:                                                                      // G9
+            return .backspaces(count: rechainBackspace(&session, context: context))
+        case .delete(let count):                                                             // G10
+            deleteWords(count, readContext: context)
+            session.freshness.record(context: context, deleted: count, wordStep: true)
+            return .deletedWords(count: count)
+        }
+    }
+
+    /// 현행 ⌫를 `count`회 — 조합·선택·확정 글자를 지금 규칙 그대로 지운다
+    private func repeatBackspace(_ count: Int) -> Int {
+        for _ in 0..<count { handle(.backspace) }
+        return count
+    }
+
+    /// 아는 문맥에서 확정 글자를 폴백 개수만큼 지우고 그 사슬을 둔다 — 사슬이 없을 때(G7)·긴 단위(G9).
+    /// 불일치 뒤에는 이것이 아니라 지우지 않는 닻을 쓴다(G8, 검증 반영 D)
+    private func rechainBackspace(_ session: inout BackspaceHoldSession, context: String) -> Int {
+        let count = repeatBackspace(min(Self.backspacesPerRepeatFallback, context.count))
+        session.freshness.record(context: context, deleted: count)
+        return count
+    }
+
+    /// 단어 단계 삭제 — 프록시 n회, 꼬리는 **방금 읽은 문서**로 다시 세운다(문서 근거라 C7 대상이 아니다).
+    /// B2 스냅샷은 읽지 않고 `handle` 첫머리처럼 버린다
+    private func deleteWords(_ count: Int, readContext context: String) {
+        lastSpaceTimestamp = nil
+        multiTapState = nil
+        returnSnapshot = nil
+        newlineEvidence = nil
+        capitalizationPrefix = nil
+        suppressesNextWordCommit = false
+        output.deleteBackward(count)
+        (committedTail, committedTailIsTruncated) = Self.tailLine(of: String(context.dropLast(count)), limit: committedTailLimit)
+        // 문서에서 다시 세운 꼬리 끝 단어는 sync와 같이 다음 구분자까지 학습하지 않는다
+        blocksLearningUntilSeparator = !Self.trailingHangulRun(of: committedTail).isEmpty
+        updateAutoCapitalization()
     }
 
     /// 마지막 키 입력 취소 — run 전체를 걷어내고 로그를 재생해 다시 넣는다.

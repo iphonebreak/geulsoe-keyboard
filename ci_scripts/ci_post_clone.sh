@@ -80,6 +80,16 @@ else
     echo "      둘 중 하나가 반드시 있어야 한다 — docs/release/xcode-cloud-setup.md 2절 참조." >&2
     exit 1
 fi
+# 키보드도 **이 파일 하나**를 쓴다(1.3.2 백로그 14 (나), 사장님 결정 2026-10-26 — 키보드용 Firebase 앱·plist를 따로 두지 않는다).
+# `project.yml`이 같은 경로를 키보드 번들 리소스로도 넣으므로 xcodegen(5단계) **전에** 여기 있어야 두 번들에 다 실린다.
+# SDK는 익스텐션이 앱의 옵션을 쓸 때 `BUNDLE_ID`가 **앱 번들 ID와 정확히 같아야** 받아 준다(FirebaseCore `FIRBundleUtil`,
+# 키보드 ID의 마지막 마디를 떼어 비교). 다른 앱의 plist가 들어오면 앱·키보드가 함께 엉뚱한 프로젝트로 가므로 여기서 멈춘다.
+PLIST_BUNDLE_ID=$(/usr/libexec/PlistBuddy -c "Print :BUNDLE_ID" "$PLIST_PATH" 2>/dev/null || true)
+if [ "$PLIST_BUNDLE_ID" != "com.charging.tadak" ]; then
+    echo "실패: GoogleService-Info.plist의 BUNDLE_ID가 com.charging.tadak 이 아니다(앱·키보드 공용 설정)." >&2
+    exit 1
+fi
+echo "GoogleService-Info.plist: BUNDLE_ID 확인(앱·키보드 공용)"
 
 # ---------------------------------------------------------------------------
 # 3. 서명 팀 — Xcode Cloud가 `CI_TEAM_ID`로 알려 준다
@@ -252,15 +262,17 @@ else
     echo "  OK  앱 매니페스트 수집 선언 $APP_TYPES 종"
 fi
 
-#  (3) 키보드 익스텐션 매니페스트는 수집이 **0이어야** 한다.
-#      익스텐션에는 어떤 네트워크 SDK도 링크하지 않는다(.claude/rules/security.md 1순위).
+#  (3) 키보드 익스텐션 매니페스트는 **Crashlytics 몫 3종만** 선언해야 한다(1.3.2 백로그 14 (나), 보안 규칙 N4′ — 그 전에는 0종).
+#      키보드에 허용된 SDK는 FirebaseCrashlytics 하나(스위치·기본 켜짐)뿐이라 그 수집(CrashData·OtherDiagnosticData·DeviceID)만 있어야 한다.
+#      더 많으면 다른 수집이 끼어든 것이고, 적으면 들어온 SDK를 선언하지 않은 것이다. (나)를 revert하면 이 블록도 0종으로 되돌린다.
 EXT_TYPES=$(/usr/libexec/PlistBuddy -c "Print :NSPrivacyCollectedDataTypes" Keyboard/PrivacyInfo.xcprivacy 2>/dev/null \
-            | grep -cE '^[[:space:]]*NSPrivacyCollectedDataType = ' || true)
-if [ "${EXT_TYPES:-0}" -ne 0 ]; then
-    echo "  실패: Keyboard/PrivacyInfo.xcprivacy가 수집을 $EXT_TYPES 종 선언한다. 0이어야 한다." >&2
+            | grep -E '^[[:space:]]*NSPrivacyCollectedDataType = ' | sed -E 's/^[[:space:]]*NSPrivacyCollectedDataType = //' | sort | tr '\n' ' ' || true)
+EXPECTED_EXT_TYPES="NSPrivacyCollectedDataTypeCrashData NSPrivacyCollectedDataTypeDeviceID NSPrivacyCollectedDataTypeOtherDiagnosticData "
+if [ "$EXT_TYPES" != "$EXPECTED_EXT_TYPES" ]; then
+    echo "  실패: Keyboard/PrivacyInfo.xcprivacy 수집 선언이 기대값과 다르다 — 실제 [${EXT_TYPES}] / 기대 [${EXPECTED_EXT_TYPES}]" >&2
     COLLECTION_GATE_FAIL=1
 else
-    echo "  OK  익스텐션 매니페스트 수집 선언 0종"
+    echo "  OK  익스텐션 매니페스트 수집 선언 3종(Crashlytics 몫)"
 fi
 
 if [ "$COLLECTION_GATE_FAIL" = "1" ]; then

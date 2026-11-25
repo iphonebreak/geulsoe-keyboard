@@ -259,23 +259,67 @@ public enum ActivePackBudget {
         _ entries: [SnippetEntry], builtIn: PackStats, limits: PackBudgetLimits,
         entryStats: (SnippetEntry, Int) -> PackStats
     ) -> UserSnippetLoad {
-        var stats = PackStats.emptyArray
-        for (index, entry) in entries.enumerated() {
-            let comma = index > 0 ? 1 : 0
-            let floor = stats + PackStats(needleCount: 0, needleChars: 0, bytes: PackStats.rawUTF8Bytes(of: entry) + comma, items: 1)
-            let floorOverflow = overflowing(builtIn + floor, largestPackBytes: 0, limits: limits)
-            guard floorOverflow.isEmpty else {
-                return UserSnippetLoad(loadableCount: index, baseline: .overflow(floorOverflow))
-            }
-            stats = stats + entryStats(entry, index)
-            let overflow = overflowing(builtIn + stats, largestPackBytes: 0, limits: limits)
-            guard overflow.isEmpty else {
-                return UserSnippetLoad(loadableCount: index, baseline: .overflow(overflow))
-            }
+        var accumulator = UserSnippetLoadAccumulator(builtIn: builtIn, limits: limits)
+        for entry in entries {
+            if let stopped = accumulator.add(entry, entryStats: entryStats) { return stopped }
         }
-        // 항목이 없으면 내장 + 「[]」만으로 넘을 수 있다(있으면 위에서 이미 봤다)
-        let overflow = overflowing(builtIn + stats, largestPackBytes: 0, limits: limits)
-        return UserSnippetLoad(loadableCount: entries.count, baseline: overflow.isEmpty ? .fits(stats) : .overflow(overflow))
+        return accumulator.finish()
+    }
+
+    /// `userSnippetLoad`를 **한 항목씩 먹이는** 형태(B1 가′ — PDR `keyboard-user-snippet-prefix-decode.md`). 키보드는 저장분을 통째로
+    /// 디코드하지 않고 배열 원소를 하나씩 디코드해 여기에 넣는다 — 넘는 것이 확정되면 `add`가 결과를 돌려주고, 그 뒤 원소는 디코드하지 않는다.
+    ///
+    /// ★ 멈춘 자리의 결과를 **그대로** 쓴다(불변식 I1). 실은 앞부분 배열로 `userSnippetLoad`를 다시 돌리면 「넘음」이 「맞음」이 되어
+    /// 9-3(baseline 초과 → 외부 팩 읽지 않음)이 깨진다.
+    public struct UserSnippetLoadAccumulator: Sendable {
+        private let builtIn: PackStats
+        private let limits: PackBudgetLimits
+        private var stats = PackStats.emptyArray
+        /// 지금까지 들어간 항목 수 — 다음 항목의 배열 위치
+        public private(set) var count = 0
+
+        public init(builtIn: PackStats, limits: PackBudgetLimits = .candidate) {
+            self.builtIn = builtIn
+            self.limits = limits
+        }
+
+        /// 디코드 **전** 판정 — `rawUTF8LowerBound`는 다음 항목의 `PackStats.rawUTF8Bytes` **이하**여야 한다(저장 바이트에서 센 하한).
+        /// 넘으면 그 결과(여기서 멈춘다 — 그 항목을 디코드하지 않는다), 아니면 nil. 하한이 넘으면 디코드 뒤의 하한도 넘으므로
+        /// `add`와 같은 자리·같은 개수에서 멈춘다(넘은 항목 목록은 `bytes`가 빠질 수 있는 하한 — 키보드는 비었는지만 본다)
+        public func overflowBeforeDecode(rawUTF8LowerBound: Int) -> UserSnippetLoad? {
+            floorOverflow(rawUTF8Bytes: rawUTF8LowerBound)
+        }
+
+        /// 항목 하나 — 넘으면 결과(멈춘다), 들어가면 nil
+        public mutating func add(_ entry: SnippetEntry) -> UserSnippetLoad? {
+            add(entry, entryStats: PackStats.of(entry:at:))
+        }
+
+        /// 시험용 — `entryStats`(항목 하나의 몫 = 인코드 1회)를 바꿔 끼워 몇 항목을 인코드했는지 센다
+        mutating func add(_ entry: SnippetEntry, entryStats: (SnippetEntry, Int) -> PackStats) -> UserSnippetLoad? {
+            // 1. 인코드 전에 원시 바이트 하한(+ 앞 쉼표, 개수 +1) — 넘으면 인코드하지 않는다
+            if let stopped = floorOverflow(rawUTF8Bytes: PackStats.rawUTF8Bytes(of: entry)) { return stopped }
+            // 2. 인코드한 누적이 넘어도 그 자리에서 끝낸다
+            let next = stats + entryStats(entry, count)
+            let overflow = overflowing(builtIn + next, largestPackBytes: 0, limits: limits)
+            guard overflow.isEmpty else { return UserSnippetLoad(loadableCount: count, baseline: .overflow(overflow)) }
+            stats = next
+            count += 1
+            return nil
+        }
+
+        /// 끝까지 들어갔다 — 항목이 없으면 내장 + 「[]」만으로 넘을 수 있다(있으면 `add`에서 이미 봤다)
+        public func finish() -> UserSnippetLoad {
+            let overflow = overflowing(builtIn + stats, largestPackBytes: 0, limits: limits)
+            return UserSnippetLoad(loadableCount: count, baseline: overflow.isEmpty ? .fits(stats) : .overflow(overflow))
+        }
+
+        private func floorOverflow(rawUTF8Bytes: Int) -> UserSnippetLoad? {
+            let comma = count > 0 ? 1 : 0
+            let floor = stats + PackStats(needleCount: 0, needleChars: 0, bytes: rawUTF8Bytes + comma, items: 1)
+            let overflow = overflowing(builtIn + floor, largestPackBytes: 0, limits: limits)
+            return overflow.isEmpty ? nil : UserSnippetLoad(loadableCount: count, baseline: .overflow(overflow))
+        }
     }
 
     static func overflowing(_ usage: PackStats, largestPackBytes: Int, limits: PackBudgetLimits) -> [PackBudgetDimension] {
