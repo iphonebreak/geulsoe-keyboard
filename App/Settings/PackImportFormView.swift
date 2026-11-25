@@ -253,7 +253,7 @@ struct PackImportFormView: View {
                             Text(PackFormCopy.licenseLabel(choice))
                                 .foregroundStyle(.primary)
                             if choice == .fromFile, let text = form.meta.license {
-                                Text("「\(text)」")
+                                Text("'\(text)'")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             }

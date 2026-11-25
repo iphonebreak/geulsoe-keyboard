@@ -106,9 +106,9 @@ public enum SnippetPackName {
     /// 국가 상징문(`SnippetPack.anthem`)
     public static let anthem = "국가 상징문"
     /// 인사·상용구(`SnippetPack.greetings`)
-    public static let greetings = "인사·상용구"
+    public static let greetings = "인사와 상용구"
     /// 날짜·시간(`SnippetPack.date`)
-    public static let date = "날짜·시간"
+    public static let date = "날짜와 시간"
     /// 성경 — 설정 팩 목록의 이름(판본까지)
     public static let bible = "성경 (개역한글)"
     /// 성경 — 후보 패널 출처 이름표. 좁은 자리라 **일부러** 짧다(설정 이름과 다르다)

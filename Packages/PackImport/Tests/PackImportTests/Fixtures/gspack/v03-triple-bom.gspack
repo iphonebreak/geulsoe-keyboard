@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "BOM 세 번",
+    "rights": ""
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "imKY6mXr4UIwfee297lTiw==",
+    "nonce": "uV2YgQ1lbGDGzXLx"
+  },
+  "ciphertext": "z27KjtyKKcUpAMTUq+HZEPAgDbstRNCNmo7ilq452U9PjDi+8H7/kWT3WdZn1VJJHLpkDSFIpjykiHFV8uk6zAgqj+LsX3eKZJjcnPya0UF7ppSL9gzBgg=="
+}

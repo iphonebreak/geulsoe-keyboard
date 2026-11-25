@@ -22,6 +22,47 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<!-- 잠금 채움글 팩(.gspack) — 「글쇠로 열기」 (v1.4.0, PDR docs/design-reviews/external-snippet-packs.md 12-10 ①).
+	     우리가 정의하는 형식이라 Exported, public.data에만 적합(JSON으로 미리보기되지 않게). .csv/.xlsx는 등록하지 않는다.
+	     LSSupportsOpeningDocumentsInPlace = NO: 원본을 제자리에서 열지 않고 **사본**을 받는다(받은 편지함 — 가져오기가 끝나면 지운다).
+	     문서 형식을 선언하면서 이 키가 없으면 App Store 검증이 ITMS-90737 경고를 낸다. 파일 공유·문서 브라우저 키는 넣지 않는다. -->
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>com.charging.tadak.pack</string>
+			<key>UTTypeDescription</key>
+			<string>글쇠 채움글 팩</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>gspack</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>글쇠 채움글 팩</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.charging.tadak.pack</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
 	<!-- 수출 규정 선언. **법적 선언이다 — 근거 없이 건드리지 마라.**
 
 	     2026-09-11 최초 근거("이 앱은 암호화를 아예 안 쓴다")는 Firebase 도입으로 무너졌다.
@@ -51,7 +92,13 @@
 	       "If your app uses exempt forms of encryption, you might alternatively be required to
 	        submit a year-end self-classification report to the U.S. government."
 	     이라고 덧붙인다. 이건 코드가 아니라 행정·법무 판단이다 — 사장님 확인 대상.
-	     상세: docs/release/firebase-on-hardening.md -->
+	     상세: docs/release/firebase-on-hardening.md
+
+	     2026-11 .gspack(v1.4.0): 앱이 OS 제공 CryptoKit AES.GCM·CommonCrypto CCKeyDerivationPBKDF를
+	       호출한다(복호화만, 자체 암호 구현·서드파티 라이브러리 0, 키보드에는 없음).
+	       근거: docs/design-reviews/external-snippet-packs.md 12-12. 면제 해석이며 BIS 보고 여부는
+	       사장님 확인 대상(12-15 Q1). 호출했다는 이유만으로 true로 뒤집지 않는다. -->
+
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>UISupportedInterfaceOrientations</key>

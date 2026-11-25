@@ -455,7 +455,7 @@ struct PackSampleWorkbookTests {
         let workbook = WorkbookBuilder.workbook(grid: grid)
         let draft = try WorkbookHelper.draft(workbook)
         #expect(draft.skipped == [SkippedRecord(row: broken, reason: .emptyBody)])
-        #expect(draft.skipped.first.map(PackImportCopy.skipTitle)?.hasPrefix("\(broken)번째 행 — ") == true)
+        #expect(draft.skipped.first.map(PackImportCopy.skipTitle)?.hasPrefix("\(broken)번째 행: ") == true)
         // 같은 표의 CSV — 빈 줄이 레코드 하나라 「n번째 항목」의 n이 같다
         #expect(PackVerdictResult.xlsx(workbook) == PackVerdictResult.csv(grid))
     }

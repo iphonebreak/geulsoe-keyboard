@@ -149,6 +149,10 @@ public struct PackDraft: Equatable, Sendable {
     public var delimiterCandidates: [CSVDelimiter]
     /// (xlsx) 통합 문서로 읽었다 — 저장 변환본의 `source`(진단용, 7절)가 이것을 따른다. CSV 파일·붙여넣기는 거짓
     public var readFromWorkbook: Bool
+    /// 잠금 파일(`.gspack`)을 풀어 읽었다 — 저장 변환본의 `source`가 `.gspack`이 된다(PDR 12-8). 그 밖에는 거짓
+    public var readFromLockedPack = false
+    /// 잠금 파일 표시(봉투 `meta`)와 안쪽 CSV의 `#이름`·`#출처`가 다르다 — 미리보기 한 줄(12-8, CSV 값을 쓴다)
+    public var lockedMetaDiffers = false
     /// (xlsx) 읽은 시트의 이름 — **4-D 목록에 보인 그대로**(`PackSheetNames.display` — 정리·「시트 n」·「이름 (k)」). 화면에만 쓴다.
     /// 로그·분석·오류 값에 싣지 않는다(6-4·AC-34). CSV는 nil
     public var sheetName: String?
@@ -179,6 +183,24 @@ public struct PackDraft: Equatable, Sendable {
     public var sanitizedCharacterCount: Int
     /// 따옴표 없는 셀 중간의 `"` 수
     public var strayQuoteCount: Int
+
+    /// 잠금 파일을 푼 초안 — 출처 표시(`.gspack`)와 메타 기본값(12-8): **정본은 안쪽 CSV**의 `#이름`·`#출처`(그리고 최종 폼)이고,
+    /// CSV에 그 값이 없을 때만 봉투 값(복호로 인증됨, 비어 있지 않을 때)을 폼 기본값으로 쓴다. 둘 다 있고 다르면 CSV 값을 쓰고 알린다
+    mutating func adoptLockedPack(_ locked: GSPackMeta) {
+        readFromLockedPack = true
+        var differs = false
+        if let name = meta.name {
+            differs = differs || (!locked.name.isEmpty && name != locked.name)
+        } else if !locked.name.isEmpty {
+            meta.name = locked.name
+        }
+        if let license = meta.license {
+            differs = differs || (!locked.rights.isEmpty && license != locked.rights)
+        } else if !locked.rights.isEmpty {
+            meta.license = locked.rights
+        }
+        lockedMetaDiffers = differs
+    }
 
     public var skippedRatio: Double { dataRecordCount == 0 ? 0 : Double(skipped.count) / Double(dataRecordCount) }
     /// 건너뜀 ≥ 50% — 자동 진행 금지, 사용자가 명시적으로 확인하면 부분 가져오기(R10)

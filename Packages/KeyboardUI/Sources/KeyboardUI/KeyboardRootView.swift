@@ -46,6 +46,8 @@ public struct KeyboardRootView: View {
     private let onBackspaceHoldEnded: ((UInt64) -> Void)?
     private let onBackspaceTick: ((UInt64, BackspaceRepeatPhase) -> Void)?
     private let inputModeSwitchButton: AnyView?
+    /// 한영 키에 지구본을 합친 배열에서 한영 키의 터치를 시스템 키보드 목록으로 넘기는 통로 — iOS 조립 지점만 만든다
+    private let inputModeListHandler: InputModeListHandler?
 
     /// **상자를 전부 채우고 내용은 하단 정렬한다** (14차 H1, 기본 `false` = 기존 동작).
     ///
@@ -98,6 +100,7 @@ public struct KeyboardRootView: View {
     public init(
         state: KeyboardViewState,
         inputModeSwitchButton: AnyView? = nil,
+        inputModeListHandler: InputModeListHandler? = nil,
         onEvent: @escaping (KeyEvent) -> Void,
         onSnippetTap: ((SnippetSuggestion) -> Void)? = nil,
         onWordTap: ((WordSuggestionCandidate) -> Void)? = nil,
@@ -125,6 +128,7 @@ public struct KeyboardRootView: View {
     ) {
         self.state = state
         self.inputModeSwitchButton = inputModeSwitchButton
+        self.inputModeListHandler = inputModeListHandler
         self.onEvent = onEvent
         self.onSnippetTap = onSnippetTap
         self.onWordTap = onWordTap
@@ -261,7 +265,8 @@ public struct KeyboardRootView: View {
                     onCursorDrag: onCursorDrag,  // 스페이스 길게 누른 뒤 드래그 — 트랙패드 커서 이동
                     onBackspaceHoldBegan: onBackspaceHoldBegan,
                     onBackspaceHoldEnded: onBackspaceHoldEnded,
-                    onBackspaceTick: onBackspaceTick
+                    onBackspaceTick: onBackspaceTick,
+                    inputModeList: inputModeListHandler
                 )
                 .frame(height: state.keyboardHeight)
                 .padding(.horizontal, 3)
@@ -269,6 +274,8 @@ public struct KeyboardRootView: View {
                 .frame(maxWidth: areaMaxWidth)
             }
         }
+        // 패널 ScrollView 위쪽의 그림자 같은 흐림을 없앤다 — 툴바·패널 전부에 한 번에 건다(`ScrollEdgeEffectSuppression`)
+        .modifier(ScrollEdgeEffectSuppression())
     }
 
     // 툴바 구현은 SuggestionToolbar (별도 View) — 후보 프로퍼티 읽기 격리
@@ -782,6 +789,8 @@ struct KeyboardLayoutView: View {
     var onBackspaceHoldBegan: ((UInt64) -> Bool)? = nil
     var onBackspaceHoldEnded: ((UInt64) -> Void)? = nil
     var onBackspaceTick: ((UInt64, BackspaceRepeatPhase) -> Void)? = nil
+    /// 시스템 키보드 목록 통로 — 목록을 여는 키(`opensInputModeList`)의 키캡에만 넘긴다
+    var inputModeList: InputModeListHandler? = nil
 
     var body: some View {
         GeometryReader { geometry in
@@ -838,7 +847,8 @@ struct KeyboardLayoutView: View {
                 onCursorDrag: key.event == .space ? onCursorDrag : nil,
                 onBackspaceHoldBegan: key.event == .backspace ? onBackspaceHoldBegan : nil,
                 onBackspaceHoldEnded: key.event == .backspace ? onBackspaceHoldEnded : nil,
-                onBackspaceTick: key.event == .backspace ? onBackspaceTick : nil
+                onBackspaceTick: key.event == .backspace ? onBackspaceTick : nil,
+                inputModeList: key.opensInputModeList ? inputModeList : nil
             )
         }
     }

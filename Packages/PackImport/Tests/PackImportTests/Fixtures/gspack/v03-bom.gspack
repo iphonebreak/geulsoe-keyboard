@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "BOM 팩",
+    "rights": ""
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "lZGL3zvvPiW2UkyE4L7qaQ==",
+    "nonce": "IzlTixqkg4io4FcU"
+  },
+  "ciphertext": "tUjQ+233y8DzQZjB4pnz0faPLgUkVPBhNp1hKmASNh2xYCzQt8z2tsthe9wI57NmOpO5KqFTL5cJ6CnQRCIELmvRzi5JlOG8s3pea345UGuE9w=="
+}

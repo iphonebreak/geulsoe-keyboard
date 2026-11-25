@@ -33,7 +33,7 @@ struct PackEntryListTests {
         ]))
         #expect(list.rows.map(\.trigger) == ["회사장, 장, 회사 주소", "회의시작"], "원문 그대로(정규화하지 않는다)")
         #expect(list.rows.map(\.result) == ["→ 서울시 어딘가 1번지", PackNoticeCopy.usageResult(body: long)])
-        #expect(list.rows[1].result == "→ 안녕하세요. 오늘 회의를 시작하겠습니다. 자료는 메일로…")
+        #expect(list.rows[1].result == "→ 안녕하세요. 오늘 회의를 시작하겠습니다. 자료는 메일로...")
     }
 
     @Test("★ 번호형 — 대표 틀(첫 `#틀` 원문)에 번호를 넣은 단축어, 별칭 틀은 쓰지 않는다. 결과는 그 항목 본문(제목 아님)")

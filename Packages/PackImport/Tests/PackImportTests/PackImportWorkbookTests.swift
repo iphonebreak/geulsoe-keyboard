@@ -807,7 +807,7 @@ struct PackWorkbookSessionTests {
     @Test("★ 파일 고르기 형식 — CSV 전용판은 CSV·TSV·글만, xlsx 중심판은 xlsx(org.openxmlformats.spreadsheetml.sheet)를 앞에 더한다")
     func pickerTypes() throws {
         let csv = PackImportFileTypes.allowed(for: .csv)
-        #expect(csv == [.commaSeparatedText, .tabSeparatedText, .plainText])
+        #expect(csv == [.commaSeparatedText, .tabSeparatedText, .plainText, PackImportFileTypes.lockedPack])   // 잠금 파일은 두 판 공통(1.4.0)
         let xlsx = PackImportFileTypes.allowed(for: .xlsx)
         #expect(Array(xlsx.dropFirst()) == csv)
         let workbook = try #require(xlsx.first)
@@ -937,10 +937,10 @@ struct PackWorkbookSessionTests {
 struct PackWorkbookCopyTests {
 
     @Test("★ 6-4 사유 5종 — 사유 + 고치는 법 한 줄(시안 4-F·PDR 6-4 R19 문구)", arguments: [
-        (SkipReason.formula, "수식이에요", "「값만 붙여넣기」로 바꿔 주세요"),
-        (.dateFormat, "날짜 서식이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
-        (.booleanOrError, "TRUE·FALSE나 오류 값이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
-        (.numberCell, "숫자로 저장된 칸이에요", "그 열 서식을 「텍스트」로 바꿔 주세요"),
+        (SkipReason.formula, "수식이에요", "'값만 붙여넣기'로 바꿔 주세요"),
+        (.dateFormat, "날짜 서식이에요", "그 열 서식을 '텍스트'로 바꿔 주세요"),
+        (.booleanOrError, "TRUE/FALSE나 오류 값이에요", "그 열 서식을 '텍스트'로 바꿔 주세요"),
+        (.numberCell, "숫자로 저장된 칸이에요", "그 열 서식을 '텍스트'로 바꿔 주세요"),
         (.merged, "병합한 칸이 있어요", "병합을 풀어 주세요"),
     ])
     func skipReasons(_ reason: SkipReason, label: String, fix: String) {
@@ -951,8 +951,8 @@ struct PackWorkbookCopyTests {
 
     @Test("★ 엑셀은 「n번째 행」, CSV는 「n번째 항목(m번째 줄)」(시안 4-F) · 머리글보다 넓은 행의 고치는 법은 엑셀 말로")
     func positions() {
-        #expect(PackImportCopy.skipTitle(SkippedRecord(row: 12, reason: .formula)) == "12번째 행 — 수식이에요")
-        #expect(PackImportCopy.skipTitle(SkippedRecord(record: 12, line: 40, reason: .emptyBody)) == "12번째 항목(40번째 줄) — 본문이 비어 있어요")
+        #expect(PackImportCopy.skipTitle(SkippedRecord(row: 12, reason: .formula)) == "12번째 행: 수식이에요")
+        #expect(PackImportCopy.skipTitle(SkippedRecord(record: 12, line: 40, reason: .emptyBody)) == "12번째 항목(40번째 줄): 본문이 비어 있어요")
         #expect(PackImportCopy.skipFix(SkippedRecord(record: 12, line: 40, reason: .columnCount)) == "쉼표가 빠졌거나 더 있어요")
         #expect(PackImportCopy.skipFix(SkippedRecord(row: 12, reason: .columnCount)) == "머리글이 없는 오른쪽 칸을 비워 주세요")
         #expect(PackImportCopy.skipFix(SkippedRecord(row: 12, reason: .emptyBody)) == PackImportCopy.skipFix(.emptyBody))
@@ -964,8 +964,8 @@ struct PackWorkbookCopyTests {
             PackImportCopy.failureMessage(.structural(.workbook(failure)), source: .file)
         }
         #expect(message(.archive(.legacyOrProtectedWorkbook))
-                == "비밀번호가 걸렸거나 옛 형식(.xls)인 엑셀이에요. 비밀번호를 풀고 「Excel 통합 문서(.xlsx)」로 저장해 주세요.")
-        #expect(message(.macroEnabled) == "매크로가 든 파일은 받지 않아요. 「Excel 통합 문서(.xlsx)」로 다시 저장해 주세요.")
+                == "비밀번호가 걸렸거나 옛 형식(.xls)인 엑셀이에요. 비밀번호를 풀고 'Excel 통합 문서(.xlsx)'로 저장해 주세요.")
+        #expect(message(.macroEnabled) == "매크로가 든 파일은 받지 않아요. 'Excel 통합 문서(.xlsx)'로 다시 저장해 주세요.")
         let tooLarge = PackImportCopy.failureMessage(.structural(.fileTooLarge), source: .file)
         for failure: XLSXWorkbookFailure in [.archive(.fileTooLarge), .archive(.partTooLarge), .archive(.totalOutputExceeded),
                                              .archive(.compressionRatioExceeded)] {
@@ -974,7 +974,7 @@ struct PackWorkbookCopyTests {
         let tooMany = PackImportCopy.failureMessage(.structural(.tooManyRecords), source: .file)
         for failure: XLSXWorkbookFailure in [.tooManyRows, .tooManyCells, .tooManySharedStrings] { #expect(message(failure) == tooMany, "\(failure)") }
         #expect(message(.noVisibleSheet) == "보이는 시트가 없어요. 숨긴 시트는 가져오지 않으니 숨기기를 풀어 주세요.")
-        let unreadable = "이 엑셀 파일을 읽을 수 없어요. 엑셀에서 「Excel 통합 문서(.xlsx)」로 다시 저장해 주세요."
+        let unreadable = "이 엑셀 파일을 읽을 수 없어요. 엑셀에서 'Excel 통합 문서(.xlsx)'로 다시 저장해 주세요."
         // 칸 상한(약 131,072B)은 엑셀 셀 최대보다 커서 엑셀이 만들 수 없는 파일이다 — 「읽을 수 없어요」 묶음(승인 메모 ③, 검증 F2)
         for failure: XLSXWorkbookFailure in [.archive(.notZip), .archive(.encrypted), .archive(.crcMismatch), .archive(.zip64), .doctypeOrEntity,
                                              .malformedXML, .notSpreadsheet, .brokenRelationship, .invalidCellReference, .sheetNotFound,
@@ -990,7 +990,7 @@ struct PackWorkbookCopyTests {
         #expect(PackImportCopy.failureMessage(.structural(.mergedHeaderOrMeta(record: 1, line: 1)), source: .file)
                 == "머리글이나 정보 줄에 병합한 칸이 있어요. 병합을 풀어 주세요.")
         #expect(PackImportCopy.failureMessage(.structural(.nonTextHeaderCell(record: 1, line: 1)), source: .file)
-                == "머리글이나 정보 줄에 수식·날짜처럼 글이 아닌 칸이 있어요. 그 칸을 글로 바꿔 주세요.")
+                == "머리글이나 정보 줄에 수식, 날짜처럼 글이 아닌 칸이 있어요. 그 칸을 글로 바꿔 주세요.")
         for failure: PackImportFailure in [.mergedHeaderOrMeta(record: 1, line: 1), .nonTextHeaderCell(record: 1, line: 1)] {
             #expect(PackImportCopy.failureFooter(.structural(failure), source: .file)
                     == "파일 내용은 보여 주지 않아요. 한 행이라도 구조가 틀리면 다른 행도 믿을 수 없어 통째로 받지 않아요.")
@@ -1001,7 +1001,7 @@ struct PackWorkbookCopyTests {
     func sheetCopy() {
         #expect(PackImportCopy.sheetTitle == "시트 고르기")
         #expect(PackImportCopy.sheetHeader == "가져올 시트")
-        #expect(PackImportCopy.sheetFooter == "숨긴 시트는 목록에 없어요. 한 번에 한 시트만 가져와요 — 다른 시트는 다시 가져오면 돼요.")
+        #expect(PackImportCopy.sheetFooter == "숨긴 시트는 목록에 없어요. 한 번에 한 시트만 가져와요. 다른 시트는 다시 가져오면 돼요.")
         #expect(PackImportCopy.sheetRowCount(645) == "약 645행")
         #expect(PackImportCopy.sheetRowCount(0) == "빈 시트")
         #expect(PackImportCopy.sheetRowCount(nil) == nil)

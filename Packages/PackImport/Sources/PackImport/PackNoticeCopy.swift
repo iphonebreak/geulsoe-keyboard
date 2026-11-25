@@ -45,7 +45,7 @@ public enum PackNoticeCopy {
             "켜면 \(subject(firstName, count: count)) 한도 밖으로 밀려요. 외부 채움글 팩을 먼저 끄거나 지운 뒤 켜 주세요."
         case .enableDisplacesPacks:     // C1 — 「팩 우선순위 바꾸기」 버튼 대신 끄는 길을 문장으로(R30)
             "켜면 이 팩보다 아래에 있는 \(subject(firstName, count: count)) 한도 밖으로 밀려요. "
-                + "먼저 다른 팩을 끄거나, 「외부 채움글」 목록에서 팩을 길게 눌러 순서를 바꿔 주세요."
+                + "먼저 다른 팩을 끄거나, '외부 채움글' 목록에서 팩을 길게 눌러 순서를 바꿔 주세요."
         case .enableExceedsLimit:       // C2
             "켜면 한도를 넘어요. 다른 팩을 먼저 꺼 주세요."
         case .enableWhileUserOverLimit:    // C2b (2단계 추가)
@@ -74,7 +74,7 @@ public enum PackNoticeCopy {
         case .packRested:               // G1 (AC-4)
             "대신 \(subject(firstName, count: 1)) 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요."
         case .packsRested:              // G2
-            "대신 「\(firstName)」 외 \(number(count - 1))개 팩이 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 팩 목록에서 확인해 주세요."
+            "대신 '\(firstName)' 외 \(number(count - 1))개 팩이 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 팩 목록에서 확인해 주세요."
         }
     }
 
@@ -84,9 +84,9 @@ public enum PackNoticeCopy {
     public static func statusLine(_ status: PackSummary.Status) -> String? {
         switch status {
         case .on, .off: nil
-        case .restingOverLimit: "쉬는 중 · 한도를 넘어 지금은 안 떠요"
-        case .restingForUserSnippets: "쉬는 중 · 내 채움글을 정리하면 다시 떠요"
-        case .unavailable: "읽을 수 없어요 · 다시 가져오거나 지워 주세요"
+        case .restingOverLimit: "쉬는 중, 한도를 넘어 지금은 안 떠요"
+        case .restingForUserSnippets: "쉬는 중, 내 채움글을 정리하면 다시 떠요"
+        case .unavailable: "읽을 수 없어요. 다시 가져오거나 지워 주세요"
         }
     }
 
@@ -112,8 +112,8 @@ public enum PackNoticeCopy {
     /// 배너 ㉢ — 읽을 수 없는 팩(계획서 4-3절에 배너 문구가 없어 팩 상세 문구로 지었다). 이름 뒤는 「의」라 받침과 무관하다
     public static func unavailablePacksBanner(names: [String]) -> String {
         let first = names.first ?? unnamedPack
-        let subject = names.count > 1 ? "「\(first)」 외 \(number(names.count - 1))개 팩의 파일을 읽을 수 없어서 지금 안 떠요."
-            : "「\(first)」의 파일을 읽을 수 없어서 이 팩은 지금 안 떠요."
+        let subject = names.count > 1 ? "'\(first)' 외 \(number(names.count - 1))개 팩의 파일을 읽을 수 없어서 지금 안 떠요."
+            : "'\(first)'의 파일을 읽을 수 없어서 이 팩은 지금 안 떠요."
         return subject + " 같은 이름으로 파일을 다시 가져오면 바꿀 수 있어요. 지울 수도 있어요."
     }
 
@@ -158,7 +158,7 @@ public enum PackNoticeCopy {
     public static let addPack = "외부 채움글 추가"
     /// 2-B 빈 상태 — 첫 문장은 판이 바꾼다(`PackCopySet`: CSV 전용판 「CSV 파일로…」 / xlsx 중심판 「엑셀 파일로…」, AC-35·R12)
     public static var emptyListFooter: String {
-        PackCopySet.current.lines.listIntro + " 사자성어·상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요."
+        PackCopySet.current.lines.listIntro + " 사자성어, 상용 영어처럼 번호로 부르는 자료도 돼요. 가져온 팩은 이 기기에만 저장돼요."
     }
     /// 목록이 손상된 동안 — 빈 상태(2-B) 문구는 「팩이 없다」로 읽혀 헷갈린다(화면 확인 O-2). 위 배너(㉡)가 복구 길을 준다
     public static let unreadableListFooter = "외부 채움글 목록을 읽을 수 없어요. 위에서 목록을 복구해 주세요."
@@ -172,7 +172,7 @@ public enum PackNoticeCopy {
     /// 순서 목록의 「내 채움글」 줄(U1) — 아래 「내 채움글」 절과 헷갈리지 않게 「(우선순위)」(2026-10-07 「순서」 → 「우선순위」 용어 통일)
     public static let userSlotTitle = "내 채움글 (우선순위)"
     /// 머리글 버튼·풋터가 없어 「길게 눌러 끈다」를 이 줄이 알린다(R30, 코디네이터 결정 2026-10-07)
-    public static let userSlotDetail = "길게 눌러 끌면 우선순위가 바뀌어요 · 문구는 아래 「내 채움글」 절에서"
+    public static let userSlotDetail = "길게 눌러 끌면 우선순위가 바뀌어요. 문구는 아래 '내 채움글' 절에서"
     /// 목록 줄의 VoiceOver 동작 — 길게 눌러 끌기 대신 한 칸씩 옮긴다(R30, 놓는 것과 같은 길로 저장)
     public static let moveUpAction = "위로 옮기기"
     public static let moveDownAction = "아래로 옮기기"
@@ -183,14 +183,14 @@ public enum PackNoticeCopy {
     /// 종류 · 항목 수 — 종류를 모르면 nil(읽을 수 없는 옛 팩)
     public static func packKind(_ summary: PackSummary) -> String? {
         guard let mode = summary.mode else { return nil }
-        return "\(mode == .numbered ? "번호형" : "문구형") · \(number(summary.itemCount))개"
+        return "\(mode == .numbered ? "번호형" : "문구형"), \(number(summary.itemCount))개"
     }
 
     /// 2-C 행 보조줄 — 종류 · 항목 수 · 대표 틀(번호형만)
     public static func packRowDetail(_ summary: PackSummary) -> String? {
         guard let kind = packKind(summary) else { return nil }
         guard summary.mode == .numbered, let format = summary.titleFormat else { return kind }
-        return kind + " · " + format
+        return kind + ", " + format
     }
 
     /// 안내 둘째 줄에 이름을 다 보일 단축어 수 — 넘으면 「외 n개」(가져오기 겹침 안내 4-I)
@@ -239,8 +239,8 @@ public enum PackNoticeCopy {
     public static func templatesHeader(_ premise: StandingPremise?) -> String {
         switch premise {
         case nil: templatesHeader
-        case .ifEnabled?: "\(templatesHeader) — 켜면 이렇게 떠요"
-        case .ifResumed?: "\(templatesHeader) — 다시 뜨면 이렇게 떠요"
+        case .ifEnabled?: "\(templatesHeader) (켜면 이렇게 떠요)"
+        case .ifResumed?: "\(templatesHeader) (다시 뜨면 이렇게 떠요)"
         }
     }
 
@@ -265,16 +265,16 @@ public enum PackNoticeCopy {
         switch status {
         case .owned(let shared):
             guard let first = shared.first else { return "\(condition)이 팩 문구가 떠요" }
-            let others = shared.count > 1 ? "「\(name(first))」 외 \(number(shared.count - 1))개 팩도" : "「\(name(first))」도"
+            let others = shared.count > 1 ? "'\(name(first))' 외 \(number(shared.count - 1))개 팩도" : "'\(name(first))'도"
             return "아래 \(others) 같은 틀이지만 \(condition)위에 있는 이 팩 문구가 떠요"
         case .outranked(let owner):
-            return "같은 틀이라 위에 있는 「\(name(owner))」 문구가 먼저 떠요"
+            return "같은 틀이라 위에 있는 '\(name(owner))' 문구가 먼저 떠요"
         case .shadowed(let triggers):
             // 가림은 **그 끝말로 끝나는 입력에서만**이다 — 「이 틀은 안 떠요」는 범위를 과장했다(화면 확인 S-3, 시안 4-I·5-C 꼴)
             let first = triggers.first ?? ""
             let many = triggers.count > 1
-            let subject = many ? "「\(first)」 외 \(number(triggers.count - 1))개" : "「\(first)」"
-            return "「…\(first)」\(many ? " 등" : "")\(directionParticle(after: many ? "등" : first)) 끝나는 입력에서는 단축어 \(subject) 문구가 먼저 떠요"
+            let subject = many ? "'\(first)' 외 \(number(triggers.count - 1))개" : "'\(first)'"
+            return "'...\(first)'\(many ? " 등" : "")\(directionParticle(after: many ? "등" : first)) 끝나는 입력에서는 단축어 \(subject) 문구가 먼저 떠요"
         }
     }
 
@@ -300,14 +300,14 @@ public enum PackNoticeCopy {
     public static func hiddenTriggersFooter(owners: [PackImpact.Source], name: (String) -> String) -> String {
         let distinct = owners.reduce(into: [PackImpact.Source]()) { if !$0.contains($1) { $0.append($1) } }
         let target = distinct.count == 1 ? "\(rowName(distinct[0], name: name)) 위로" : "더 위로"
-        return "목록에서 위에 있는 쪽이 먼저 떠요. 이 팩 문구를 쓰려면 「외부 채움글」 목록에서 이 팩을 길게 눌러 \(target) 올려 주세요."
+        return "목록에서 위에 있는 쪽이 먼저 떠요. 이 팩 문구를 쓰려면 '외부 채움글' 목록에서 이 팩을 길게 눌러 \(target) 올려 주세요."
     }
 
     /// 목록 줄 이름 — 「내 채움글」·「팩 이름」(U1 컷은 내 채움글에도 괄호를 쓴다)
     private static func rowName(_ source: PackImpact.Source, name: (String) -> String) -> String {
         switch source {
-        case .userSnippets: "「내 채움글」"
-        case .pack(let id): "「\(name(id))」"
+        case .userSnippets: "'내 채움글'"
+        case .pack(let id): "'\(name(id))'"
         case .builtIn: "내장 팩"
         }
     }
@@ -326,7 +326,7 @@ public enum PackNoticeCopy {
         let lines = body.split(whereSeparator: \.isNewline).map(trimmedSpaces).filter { !$0.isEmpty }
         guard !lines.isEmpty else { return "→" }
         let joined = lines.joined(separator: " ")
-        if joined.count > usageResultLength { return "→ \(trimmedSpaces(joined.prefix(usageResultLength)))…" }
+        if joined.count > usageResultLength { return "→ \(trimmedSpaces(joined.prefix(usageResultLength)))..." }
         return "→ \(joined)"
     }
 
@@ -365,7 +365,7 @@ public enum PackNoticeCopy {
 
     public static let cancel = "취소"
 
-    public static func deleteTitle(name: String) -> String { "「\(name)」\(objectParticle(after: name)) 지울까요?" }
+    public static func deleteTitle(name: String) -> String { "'\(name)'\(objectParticle(after: name)) 지울까요?" }
 
     /// 항목 수를 모르면(읽을 수 없는 팩을 복구해 stats가 0) 숫자 없이
     public static func deleteMessage(itemCount: Int) -> String {
@@ -386,7 +386,7 @@ public enum PackNoticeCopy {
 
     /// 주어 — 하나면 「이름」 + 받침에 맞는 이/가, 여럿이면 「「A」 외 n개가」(계획서 4-2절 「이름이 여럿이면」)
     static func subject(_ firstName: String, count: Int) -> String {
-        count > 1 ? "「\(firstName)」 외 \(number(count - 1))개가" : "「\(firstName)」\(subjectParticle(after: firstName))"
+        count > 1 ? "'\(firstName)' 외 \(number(count - 1))개가" : "'\(firstName)'\(subjectParticle(after: firstName))"
     }
 
     /// 이름 뒤 주격 조사 — 마지막 글자(문장부호·이모지는 건너뛴다)가 한글이면 받침으로, 아라비아 숫자면 읽는 소리로

@@ -1,0 +1,16 @@
+{
+  "format": "geulsoe-pack",
+  "version": 1,
+  "inner": "csv-utf8",
+  "meta": {
+    "name": "BOM 두 번",
+    "rights": ""
+  },
+  "encryption": {
+    "scheme": "pbkdf2-sha256+aes-256-gcm",
+    "iterations": 300000,
+    "salt": "+HBkNt08kRcQ/18+mHMojQ==",
+    "nonce": "PnkN7TfyvhbEHXZB"
+  },
+  "ciphertext": "8/K+T3zAh5msbpbjUBgbfgaDgqGRPA4LmqOYsSpXc0VJfo3zigRXyXiVWNROtMgf4ergi6ARyAIE0wK5+Q00MQkz/Rq0oLCKDXzfiSLBIjDVqbYFTg=="
+}

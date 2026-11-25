@@ -1225,7 +1225,7 @@ struct PackStoreClientTests {
         let outcome = await client.saveUserSnippet(entry(String(repeating: "나", count: 50)), editing: nil)
         #expect(outcome.isAccepted)
         #expect(outcome.notice?.reason == .packRested)
-        #expect(outcome.notice?.message == "대신 「회사 상용구」가 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
+        #expect(outcome.notice?.message == "대신 '회사 상용구'가 한도를 넘어 쉬고 있어요. 지운 것은 없어요. 채움글을 줄이면 다시 떠요.")
     }
 
     @Test("★ A2·A3 — 같은 baseline 거부도 저장 전 상태로 갈린다(옛 초과본이면 A3)")

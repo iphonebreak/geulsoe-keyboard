@@ -177,9 +177,9 @@ enum SnippetIntroBibleDemo {
     static let filters = ["전체(517)", "아가(54)", "시편(40)", "요한복음(39)"]
     /// mirror: `BibleSearchRow.reference(includingBook: true)` · `BibleVersePreview.window` (28자 창 + … — `windowLength = 28`)
     static let rows: [(reference: String, preview: String)] = [
-        ("요일 4:10", "사랑은 여기 있으니 우리가 하나님을 사랑한 것이 아…"),
-        ("고전 13:4", "사랑은 오래 참고 사랑은 온유하며 투기하는 자가 되…"),
-        ("고전 13:8", "사랑은 언제까지든지 떨어지지 아니하나 예언도 폐하고…")
+        ("요일 4:10", "사랑은 여기 있으니 우리가 하나님을 사랑한 것이 아..."),
+        ("고전 13:4", "사랑은 오래 참고 사랑은 온유하며 투기하는 자가 되..."),
+        ("고전 13:8", "사랑은 언제까지든지 떨어지지 아니하나 예언도 폐하고...")
     ]
 }
 

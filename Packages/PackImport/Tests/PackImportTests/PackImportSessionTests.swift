@@ -683,7 +683,7 @@ struct PackEncodingReviewTests {
         let review = try #require(started(.file(Data(text.utf8))).review)
         #expect(review.utf8.samples.count == 2)
         #expect(review.utf8.texts[0] == "새해 인사")
-        #expect(review.utf8.texts[1] == String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…")
+        #expect(review.utf8.texts[1] == String(repeating: "긴", count: PackEncodingReview.sampleLength) + "...")
         #expect(review.utf8.samples.allSatisfy { $0?.meta == nil }, "데이터 칸은 정보 줄이 아니다")
     }
 
@@ -756,7 +756,7 @@ struct PackEncodingReviewTests {
         let long = String(repeating: "긴", count: 60)
         let text = "#이름,\(long)\n단축어,본문\n가나,다라\n마바,사아\n"
         let review = try #require(started(.file(Data(text.utf8))).review)
-        #expect(review.utf8.samples == [meta(.name, String(repeating: "긴", count: PackEncodingReview.sampleLength) + "…"), cell("가나")])
+        #expect(review.utf8.samples == [meta(.name, String(repeating: "긴", count: PackEncodingReview.sampleLength) + "..."), cell("가나")])
     }
 
     @Test("R29 — 머리글 뒤의 `#`(본문 칸)는 정보 줄이 아니다 · 모르는 `#` 키는 칸 이름 없이 원문 그대로(파서가 따로 거부한다)")

@@ -234,6 +234,41 @@ struct InputControllerModeTests {
         #expect(controller.mode == .english)
     }
 
+    /// 지구본을 한영에 합친 기호 자판(1.4.0, 사장님 SE2 2026-11-11) — 애플 지구본이 기호 화면에서 하듯 **다른 언어의 문자 자판**으로 간다
+    @Test("기호 자판에서 한영 = 들어오기 전과 다른 언어의 문자 자판으로", arguments: [
+        (InputMode.hangul, InputMode.english), (.english, .hangul)
+    ])
+    func toggleLanguageFromSymbolsGoesToOtherLetterMode(from start: InputMode, to expected: InputMode) {
+        for page in [KeyEvent.symbols, .symbolsAlternate] {
+            let controller = InputController(output: RecordingOutput())
+            if start == .english { controller.handle(.toggleLanguage) }
+            controller.handle(.symbols)
+            if page == .symbolsAlternate { controller.handle(.symbolsAlternate) }
+            #expect(controller.mode.isSymbols)
+            controller.handle(.toggleLanguage)
+            #expect(controller.mode == expected, "\(start) → \(page)")
+            controller.handle(.symbols)   // 다시 기호로 들어갔다 나오면 바뀐 언어로 돌아온다
+            controller.handle(.symbols)
+            #expect(controller.mode == expected)
+        }
+    }
+
+    @Test("키패드형 기호 자판에서도 한영 = 다른 언어의 문자 자판으로, 조합은 확정된다")
+    func toggleLanguageFromKeypadGoesToOtherLetterMode() {
+        let output = RecordingOutput()
+        let controller = InputController(output: output)
+        controller.symbolKeyboardStyle = .keypad
+        controller.handle(.character("ㄱ"))
+        controller.handle(.symbols)
+        controller.handle(.keypadPageNext)
+        #expect(controller.mode == .keypadPad(page: 1))
+        controller.handle(.toggleLanguage)
+        #expect(controller.mode == .english)
+        #expect(output.text == "ㄱ")
+        controller.handle(.toggleLanguage)
+        #expect(controller.mode == .hangul)
+    }
+
     /// 입력란 특성 (PDR field-traits-and-live-settings)
     @Test("숫자 패드 진입은 조합을 확정하고 문자를 바로 커밋하며, 이탈 시 들어오기 전 문자 모드로 돌아간다")
     func numberPadEntersAndRestoresLetterMode() {

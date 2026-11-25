@@ -537,10 +537,10 @@ struct SnippetCandidateGateTests {
         }
         #expect(row(.user) == "채움글 새해 인사, 내 채움글, 붙여넣기")
         #expect(row(.pack(name: "회사 상용구")) == "채움글 새해 인사, 회사 상용구, 붙여넣기")
-        #expect(row(.builtIn(id: SnippetPack.greetings)) == "채움글 새해 인사, 인사·상용구, 붙여넣기")
+        #expect(row(.builtIn(id: SnippetPack.greetings)) == "채움글 새해 인사, 인사와 상용구, 붙여넣기")
         #expect(row(.builtIn(id: SnippetPack.anthem)) == "채움글 새해 인사, 국가 상징문, 붙여넣기")
         #expect(row(.bible, title: "창 1:1") == "채움글 창 1:1, 성경, 붙여넣기")
-        #expect(SnippetCandidateText.originName(.date) == "날짜·시간")
+        #expect(SnippetCandidateText.originName(.date) == "날짜와 시간")
         #expect(SnippetCandidateText.originName(.builtIn(id: "")) == "기본 채움글")
         #expect(SnippetCandidateText.originName(.pack(name: "")) == "외부 팩")
     }
@@ -549,12 +549,12 @@ struct SnippetCandidateGateTests {
     func dateRowReadsValue() throws {
         let date = try #require(Fixture.dates.suggestion(forTail: "오늘 날짜"))
         let label = SnippetCandidateText.rowLabel(SnippetCandidate(suggestion: date, origin: .date))
-        #expect(label == "채움글 오늘 날짜, 2026년 10월 7일, 날짜·시간, 붙여넣기")
+        #expect(label == "채움글 오늘 날짜, 2026년 10월 7일, 날짜와 시간, 붙여넣기")
     }
 
     @Test("패널 머리줄(R32 (다)) — 「「trigger」 후보 n개」")
     func panelHeader() {
-        #expect(SnippetCandidateText.panelHeader(trigger: "새해인사", count: 3) == "「새해인사」 후보 3개")
+        #expect(SnippetCandidateText.panelHeader(trigger: "새해인사", count: 3) == "'새해인사' 후보 3개")
     }
 }
 

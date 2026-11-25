@@ -41,7 +41,7 @@ struct DisplayNumberTests {
     @Test("★ 개수·위치가 나오는 문구가 모두 그 함수를 지난다 — 1,300개")
     func countsUseGrouping() {
         let summary = PackSummary(id: "a", name: "예시 팩", mode: .phrases, itemCount: 1_300, titleFormat: nil, isEnabled: true, status: .on)
-        #expect(PackNoticeCopy.packRowDetail(summary) == "문구형 · 1,300개")
+        #expect(PackNoticeCopy.packRowDetail(summary) == "문구형, 1,300개")
         #expect(PackNoticeCopy.deleteMessage(itemCount: 1_300).contains("1,300개"))
         #expect(PackNoticeCopy.overLimitBanner(loadableCount: 3_120).contains("3,120개"))
         #expect(PackNoticeCopy.hiddenTriggersHeader(count: 1_500) == "지금 안 뜨는 단축어 1,500개")
@@ -49,7 +49,7 @@ struct DisplayNumberTests {
         #expect(PackImportCopy.position(record: 1_234, line: 5_678) == "1,234번째 항목(5,678번째 줄)")
         #expect(PackImportCopy.skippedHeader(count: 1_200) == "건너뛴 행 1,200개")
         #expect(PackImportCopy.importOnly(1_001) == "그래도 1,001개만 가져오기")
-        #expect(PackFormCopy.doneSummary(name: "예시 팩", count: 1_300) == "「예시 팩」 · 1,300개")
+        #expect(PackFormCopy.doneSummary(name: "예시 팩", count: 1_300) == "'예시 팩', 1,300개")
         #expect(PackFormCopy.skippedLine(1_300) == "건너뛴 1,300개는 가져오지 않았어요.")
         #expect(PackImportCopy.skipFix(.bodyTooLong).contains("\(PackNoticeCopy.number(PackLimits.body.characters))자"))
     }
@@ -88,8 +88,8 @@ struct ShadowRangeCopyTests {
             #expect(!line.contains("이 틀은 안 떠요"), "\(line)")
             #expect(line.contains("끝나는 입력에서는"), "\(line)")
         }
-        #expect(lines[0] == "「…번호3번」으로 끝나는 입력에서는 단축어 「번호3번」 문구가 먼저 떠요")
-        #expect(lines[3] == "「…장」 등으로 끝나는 입력에서는 내장 팩 단축어가 먼저 떠요.")
+        #expect(lines[0] == "'...번호3번'으로 끝나는 입력에서는 단축어 '번호3번' 문구가 먼저 떠요")
+        #expect(lines[3] == "'...장' 등으로 끝나는 입력에서는 내장 팩 단축어가 먼저 떠요.")
     }
 }
 
