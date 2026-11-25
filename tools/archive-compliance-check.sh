@@ -123,9 +123,10 @@ APP_BUNDLE_ID="com.charging.tadak"
 EXT_BUNDLE_ID="com.charging.tadak.keyboard"
 APP_EXE_NAME="Tadak"            # project.yml 타깃 이름에서 나온다 — 바뀌면 그 이유를 확인하고 여기를 고친다
 EXT_EXE_NAME="TadakKeyboard"
-# required-reason — 앱·키보드 같다: UserDefaults 1C8F.1(App Group 공유) · CA92.1(자기 전용 — 키보드 최근 이모지, 앱 동의 값)
+# required-reason — 앱·키보드 공통: UserDefaults 1C8F.1(App Group 공유) · CA92.1(자기 전용 — 키보드 최근 이모지, 앱 동의 값)
+# 키보드만: SystemBootTime 35F9.1(1.4.0 — 한영 키 빠른 두 번 탭 판정 `InputModeListGate`의 `systemUptime`, 2026-11-25)
 EXPECTED_APP_API='{"NSPrivacyAccessedAPICategoryUserDefaults": ["1C8F.1", "CA92.1"]}'
-EXPECTED_EXT_API='{"NSPrivacyAccessedAPICategoryUserDefaults": ["1C8F.1", "CA92.1"]}'
+EXPECTED_EXT_API='{"NSPrivacyAccessedAPICategoryUserDefaults": ["1C8F.1", "CA92.1"], "NSPrivacyAccessedAPICategorySystemBootTime": ["35F9.1"]}'
 EXPECTED_APP_COLLECTED='["NSPrivacyCollectedDataTypeCoarseLocation", "NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypeDeviceID", "NSPrivacyCollectedDataTypeOtherDiagnosticData", "NSPrivacyCollectedDataTypeOtherUsageData", "NSPrivacyCollectedDataTypeProductInteraction"]'
 # 키보드 — Crashlytics 몫 3종(N4′, 2026-10-26). 예전 기대값은 '[]'였다
 EXPECTED_EXT_COLLECTED='["NSPrivacyCollectedDataTypeCrashData", "NSPrivacyCollectedDataTypeDeviceID", "NSPrivacyCollectedDataTypeOtherDiagnosticData"]'
